@@ -6,6 +6,8 @@ import { readFile, stat } from "node:fs/promises";
 import { existsSync, realpathSync } from "node:fs";
 import { join, delimiter } from "node:path";
 import { homedir } from "node:os";
+// Follow-up's words live in one place; scripts/build.mjs inlines them into mcp-source.ts (the bridge runs as one file).
+import { bridgeInstructions } from "../shared/agent-text.mjs";
 
 /** Set by the worker's prelude (shared/legacy.ts withRuntimePrelude); absent when a test imports this file. */
 const runtime = globalThis.followUpRuntime ?? {};
@@ -172,11 +174,9 @@ const overseerTools = [
   ["rerank", "Re-rank Home's Priority sort now from Linear, Slack, GitHub review requests and the weekly plan, when the developer asks for it. Returns the top 10 with their reasons. Skips the model when nothing changed.", "follow.overseer-act", {}, []],
 ];
 const overseerNames = new Set(overseerTools.map(t => t[0]));
-const overseerInstruction = "You are Follow-up's Overseer. Route the developer's asks with route_candidates and send_to_agent; ask with needs_you kind=decision when unsure; start_workspace only when the developer asked or approved, passing the keys, never your summary of an issue (the new agent reads it itself). Never merge, post to people or archive.";
 const actionNames = new Set(actionTools.map(t => t[0]));
 const readOnlyTools = new Set(["find_action", "linear_queue", "compass", "compass_find", "why_suggested", "brief_settings", "brief_plan", "brief_chat_search", "brief_sources", "dispatch_sources", "dispatch_records", "dispatch_actions", "dispatch_settings", "catch_up_deck", "context_requests", "queue_list", "workspace_status", "workspace_now", "list_prs", "inbox_list", "workstreams", "agent_digest", "route_candidates", "workspace_about", "link_items", "agent_settings", "display_settings", "follow_settings", "project_settings", "pr_workflow", "pr_stats", "pr_stats_settings", "reviewer_settings", "reviewer_suggestions", "onboarding_status", "onboarding_checks", "priorities", "rank_status", "usage", "overseer_status", "inbox_brief", "pr_controls", "browser_status", "trust_bypass_status", "release_notes", "updates_status"]);
 const destructiveTools = new Set(["merge"]);
-const actionInstruction = "Follow-up's actions let you do anything the developer can click, across every tracked workspace and every Settings tab: PRs, reviewers and merging, sending and holds, Needs you, Dispatch, Compass and the morning brief, PR statistics, updates and every setting. They aren't listed as tools: find one with find_action (query: a few words; names: exact names for their input schemas; no arguments lists them all), then run it with run_action {action, args}. Read freely (list_prs, inbox_list, workspace_about, the *_settings and *_status reads). Hand the main role on, or claim it, with make_main_agent. Act only when the developer asks (\"the PRs look good, assign reviewers on all\": run_action list_prs {needs_reviewers: true}, then add_reviewers with those keys, then confirm the plan); that includes sign_off, snooze, inbox_act, brief_action and answer_question for other agents. Planned actions return a dry run showing what changes; run it again with confirm=true and its planId. Never sign yourself off or answer your own brief.";
 
 // The action lookup (agent-tools-by-role): the long tail of actions stays reachable without listing ~100 schemas in
 // every session. find_action is answered here, never by an RPC; run_action goes through follow.agent-act as the action
@@ -211,16 +211,6 @@ function roleActions(role, actions) {
   return allowed === "all" ? actionTools.map(t => t[0]) : allowed;
 }
 
-// Wait (folded in from paseo-wait): its three tools are served natively (server/wait.ts), never by this bridge.
-// Native tools carry no MCP instructions, so the agent hook adds this at SessionStart when FOLLOW_UP_WAIT=1.
-// Paseo 0.16+ (features.agentBackgroundWork) tracks background shell jobs and wakes the agent when one finishes, so
-// Wait's tools aren't attached there; the agent hook adds this instead when FOLLOW_UP_BACKGROUND_WORK=1.
-const backgroundWorkInstruction = "When a finite shell command may take a while (tests, builds, installs, deploy checks), run it with native Bash run_in_background=true. Continue useful independent work first if available. When only waiting remains, end your turn and say what you're waiting for: Paseo keeps the job running, shows it with Stop, and wakes you when it finishes. Don't sleep or poll in a loop to keep the turn open. When you're woken, confirm the actual exit code before reporting completion.";
-const waitInstruction = "When a finite shell command may take a while and you need its result to finish the user's task, use Wait: wait_prepare_job({description, command}), run the returned exact bashCommand the way the reply's instruction says (on Claude Code through native Bash with run_in_background=true; elsewhere it starts itself in the background), then call wait_for_job({jobId}). Continue useful independent work first if available. When only waiting remains, keep waiting through wait_for_job instead of ending your turn with \"waiting for a notification\". Each call wakes you after at most 60 seconds (default 30): on still_pending, inspect wait_get_job and the job's output (the native Bash output, or outputPath), then wait again if appropriate. Confirm the actual exit code before reporting completion. New messages and Stop release observation without killing the job. Already-started ordinary background tasks cannot be adopted: do not rerun a command just to wrap it.";
-
-// The brief's tool: every root agent while the Needs-you inbox is on; never contributors, recovery or subagents.
-// Kept identical to NEEDS_YOU_INSTRUCTION in shared/brief.ts (a test checks it).
-const needsYouInstruction = "When you end a turn, call `needs_you` once, just before your final reply, with what the developer has to do next: a decision (give 2–3 options, what each means for them, and the one you recommend), an action only they can take (merge, approve, log in, run or send something), or kind=done (\"Nothing needed\" plus what you finished, in one line), which means there is nothing for the developer and won't flag you in their inbox. A decision or action that is already an open question (you asked it with ask_question, it is a blocked task's card, or it is still open from an earlier turn) is never restated: point at it with questions=[\"Q18\"], or say \"Still open: Q18 …\" in ask. Keep `ask` to one line and `context` to what they need to decide. Don't repeat your report there; still write your normal reply. Don't call it while a permission prompt is waiting or while you're still working.";
 /** The tools a session lists for its role (ROLE_TOOLS): what it is offered, not all it may run (roleActions). */
 function toolList(recovery = env("RECOVERY") === "1", contributor = false, brief = false, briefOnly = false, actions = false) {
   const role = roleOf(recovery, contributor, briefOnly);
@@ -430,27 +420,6 @@ async function loadClient() {
   for (const resolve of candidates) try { return await import(resolve()); } catch {}
   throw new Error("Cannot load the installed Paseo client. Reload Follow-up to refresh its runtime connection.");
 }
-const batchInstructionsMain = "Follow-up batches contain a header with the batchId and ordered tasks. A batch can arrive as one part of a message, after an answer, separated by a line holding only ---; the part starts with its own header. Read workspace_status and refresh live conditions; skip resolved tasks. Process PRs bottom to top, one fully before the next, using the repository's /fix-pr and safe reparent workflow. Validate feedback, verify changes, submit with Graphite --publish, reply/resolve addressed threads and preserve uncommitted work. Post-deploy tasks require verified serving revisions and existing production permissions. Stakeholder update requests are follow-up tasks: retain the original thread, recipient and developer authorization in communication. Use current evidence, distinguish fixed/deployed/verified, and read existing replies before posting. Record the sent replyUrl; a draft or uncertain send stays blocked and must be checked before retrying. Auto authorizes agent delivery only. Acknowledge the header's batchId with acknowledge_batch before finishing (completed with the result, in_progress when you or your subagent are already on it, or blocked with the reason; add humanOnly=true when only a person can move it, such as a stale review the reviewer must re-review or dismiss), before declare_done for completion batches. Declare Done only after the whole goal and post-merge work are verified. Leave merging and archiving to the developer.";
-/** A No review repository (Settings → PR workflow → Review): nobody else reviews, so the agent merges its own PRs. */
-const noReviewMerge = "This repository has no review: merge your own PR once CI is green, without asking the developer. Leave archiving to the developer.";
-/**
- * The batch rules for this workspace's PR workflow. Graphite with /fix-pr (and any agent from before workflows
- * existed) gets the original text unchanged; plain GitHub never mentions Graphite, gt or a review command it doesn't have.
- */
-function batchInstructions(workflow) {
-  const mode = workflow?.mode ?? "graphite";
-  const fix = workflow === undefined || workflow === null ? "/fix-pr" : workflow.reviewFix ?? null;
-  const merging = workflow?.noReview ? noReviewMerge : null;
-  if (mode === "graphite" && fix === "/fix-pr") return merging ? batchInstructionsMain.replace("Leave merging and archiving to the developer.", merging) : batchInstructionsMain;
-  const fixing = fix ? `using the repository's ${fix} workflow for review comments` : "reading each PR's unresolved review threads with gh";
-  const restack = mode === "graphite" ? "the repository's safe reparent workflow" : "base branches kept in a chain (restack with git rebase --update-refs, push with --force-with-lease, and after a parent merges retarget its child with gh pr edit --base if GitHub didn't)";
-  const submit = mode === "graphite" ? "submit with Graphite --publish" : "push the branch (gh pr create for a new PR, gh pr ready when it leaves draft)";
-  const reply = fix ? "reply/resolve addressed threads" : "reply to each addressed thread and resolve it";
-  return batchInstructionsMain
-    .replace("using the repository's /fix-pr and safe reparent workflow.", `${fixing}, with ${restack}.`)
-    .replace("submit with Graphite --publish, reply/resolve addressed threads", `${submit}, ${reply}`)
-    .replace("Leave merging and archiving to the developer.", merging ?? "Leave merging and archiving to the developer.");
-}
 
 async function call(method, input) {
   const agentId = process.env.PASEO_AGENT_ID;
@@ -477,7 +446,7 @@ async function call(method, input) {
 
 // The worker imports this file for the same tool tables, validation and receipts (1.4.0-beta.2: Follow-up's tools
 // served natively through Paseo's own MCP). Only a direct run is the CLI / stdio bridge.
-export { tools, actionTools, overseerTools, lookupTools, ROLE_TOOLS, toolList, callableTools, roleActions, findActions, resolveAction, runTool, schemas, validate, compact, callInput, needsYouInstruction, actionInstruction, overseerInstruction, waitInstruction, backgroundWorkInstruction, batchInstructions, describeAction };
+export { tools, actionTools, overseerTools, lookupTools, ROLE_TOOLS, toolList, callableTools, roleActions, findActions, resolveAction, runTool, schemas, validate, compact, callInput, describeAction };
 function isMain() {
   // 2.0's recovery shim (shared/legacy.ts) imports this file from the old data directory and asks for a bridge run.
   if (globalThis.followUpRunAsBridge === true) return true;
@@ -525,7 +494,7 @@ if (command === "list" || command === "--help" || command === "help") {
         const callable = [...callableTools(...args), ...(overseeing ? overseerTools : [])];
         if (request.method === "initialize") {
           initialized = true; lastScope = `${role}:${brief}:${acting}:${overseeing}`;
-          result = { protocolVersion: request.params?.protocolVersion ?? "2024-11-05", capabilities: { tools: { listChanged: true } }, serverInfo: { name: "paseo-follow-up", version: "0.3.5" }, instructions: (role ? (role === "contributor" ? "Register PRs this session submits, including from secondary git worktrees. Read workspace_status and call sync_workspace before finishing. Goal, task, scope and completion changes remain with the designated main agent." : role === "recovery" ? "Recover tracking metadata from evidence, acknowledge your assigned batch, and leave completion to the main agent." : "Keep workspace follow-up updated after PR submission and scope changes. Read workspace_status after compaction. Track all post-merge work. When a decision needs the developer, ask it with ask_question (lettered options and a recommendation) and follow the question mode in its reply. If you keep a spec artifact for this workspace, register its link once with set_spec. " + batchInstructions(workflow)) + " Perform bookkeeping silently: no sidebar-update announcements, plugin-status commentary or final sidebar recap. Put receipts and summaries in tools. Report actual work outcomes or decisions/blockers; discuss sidebar status only when explicitly asked." : brief ? "" : "Follow-up tools are available to tracked workspace root agents and active recovery agents; contributor sessions receive PR registration and status tools.") + (brief && role !== "contributor" && role !== "recovery" ? (role ? " " : "") + needsYouInstruction : "") + (acting && role !== "contributor" && role !== "recovery" ? " " + actionInstruction : "") + (overseeing ? " " + overseerInstruction : "") };
+          result = { protocolVersion: request.params?.protocolVersion ?? "2024-11-05", capabilities: { tools: { listChanged: true } }, serverInfo: { name: "paseo-follow-up", version: "0.3.5" }, instructions: bridgeInstructions({ role, brief, acting, overseeing, workflow }) };
         } else if (request.method === "ping") result = {};
         else if (request.method === "tools/list") result = { tools: schemas(available, workflowsOf()) };
         else if (request.method === "tools/call") {

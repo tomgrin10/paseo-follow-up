@@ -13,6 +13,7 @@ import { INVARIANTS } from "../shared/status-invariants";
 import type { Obligation, State } from "../shared/model";
 import { questionSchema } from "../shared/questions";
 import { clock, pr, snapshot, workspace } from "./fixtures";
+import { importShipped } from "./support/shipped";
 
 /**
  * 2026-11-22, live: 104 open tasks, half unchanged for over 5 days. 35 had every PR merged (22 deployed): post-deploy
@@ -118,10 +119,8 @@ test("due-by-fact: at most 3 a turn end, each at most twice and once a day; zero
   assert.equal(changed.receipt.b.count, 1);
 });
 
-test("due-by-fact: the hook's copy of pickNudges picks the same", async () => {
-  process.env.FOLLOW_UP_HOOK_IMPORT = "1";
-  const path = "../server/agent-hook.mjs";
-  const hook = await import(path) as { pickNudges: typeof pickNudges };
+test("due-by-fact: the shipped hook picks with the same pickNudges (shared/turn-checks.mjs, inlined)", async () => {
+  const hook = await importShipped<{ pickNudges: typeof pickNudges }>("agent-hook.mjs");
   const entries: DueEntry[] = ["a", "b", "c", "d"].map((id, i) => ({ id, key: `k${id}`, revision: i, dueAt: iso(NOW - i * DAY), line: id }));
   for (const receipt of [{}, pickNudges(entries, {}, NOW).receipt, pickNudges(entries, pickNudges(entries, {}, NOW).receipt, NOW + 2 * DAY).receipt])
     for (const at of [NOW, NOW + DAY / 2, NOW + 2 * DAY, NOW + 9 * DAY]) assert.deepEqual(hook.pickNudges(entries, receipt, at), pickNudges(entries, receipt, at));

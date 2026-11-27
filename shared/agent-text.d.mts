@@ -1,0 +1,27 @@
+// Types for shared/agent-text.mjs (plain JS: scripts/build.mjs inlines it into the agent hook and the stdio bridge).
+export type Workflow = { mode?: string; reviewFix?: string | null; noReview?: boolean } | null | undefined;
+export const TOOL_NAMES: string[];
+export function named(text: string, isNative: boolean): string;
+export const detachedNotice: string;
+export const quietInstruction: string;
+export const stopReason: string;
+export const nudgeReason: string;
+export const turnEndPrefix: string;
+export const dueHeader: string;
+export const syncBookkeeping: string;
+export const ENVELOPE_GUIDANCE: string;
+export function batchParagraph(workflow: Workflow): string;
+export const NO_REVIEW_MERGE: string;
+export function mergeLine(workflow: Workflow): string;
+export const checksLine: string;
+export const pollNudge: string;
+export const linkInstruction: string;
+export function workspaceText(o: { contributor?: boolean; workflow?: Workflow; native?: boolean; clientEntry: string; bridge: string }): string;
+export function demotedNotice(demoted: { at?: string; to?: string; by?: string; reason?: string } | null | undefined, now?: number): { at: string; text: string } | null;
+export const backgroundWorkInstruction: string;
+export const waitInstruction: string;
+export const needsYouInstruction: string;
+export const overseerInstruction: string;
+export const actionInstruction: string;
+export function batchInstructions(workflow?: Workflow): string;
+export function bridgeInstructions(o: { role: string | null; brief: boolean; acting: boolean; overseeing: boolean; workflow?: Workflow }): string;

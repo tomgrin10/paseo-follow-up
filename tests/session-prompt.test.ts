@@ -4,9 +4,10 @@ import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import * as bridge from "../server/mcp.mjs";
+import * as bridge from "../shared/agent-text.mjs";
 import { pathToFileURL } from "node:url";
 import { SYSTEM_PROMPT_ENV, atLeast, promptParts, withSystemPrompt, type PromptDeps } from "../server/session-prompt";
+import { shipped } from "./support/shipped";
 
 // Paseo 0.17: the static session text moves from the SessionStart hook to appendSystemPrompt (server/session-prompt.ts).
 // Who gets which text must not change (invariant 9 included): for every role, the text the hook adds on an older host
@@ -26,7 +27,7 @@ const ROLES: Record<string, { env: Record<string, string>; scope?: object; backg
 async function home(t: { after: (f: () => Promise<void>) => void }, role: (typeof ROLES)[string]) {
   const root = await mkdtemp(join(tmpdir(), "session-prompt-")); t.after(() => rm(root, { recursive: true, force: true }));
   const directory = join(root, "plugin-data/follow-up"); await mkdir(join(directory, "hook-state"), { recursive: true });
-  for (const file of ["agent-hook.mjs", "mcp.mjs"]) await writeFile(join(directory, file), await readFile(resolve("server", file), "utf8"));
+  for (const file of ["agent-hook.mjs", "mcp.mjs"]) await writeFile(join(directory, file), shipped(file));
   await writeFile(join(directory, "hooks-enabled.json"), JSON.stringify({ expiresAt: Date.now() + 60_000, clientEntry: "/fixture/client.js" }));
   await writeFile(join(directory, "scopes.json"), JSON.stringify({ agents: role.scope ? { a1: role.scope } : {} }));
   await writeFile(join(directory, "brief.json"), JSON.stringify({ enable_inbox: true, enable_brief_nudge: true, pending: [] }));

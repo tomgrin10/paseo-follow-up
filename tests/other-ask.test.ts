@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { askedElsewhere, isAskInput } from "../shared/ask-shape";
 import { turnEndCheck, type TurnEndInput } from "../server/turn-end";
+import { importShipped, shipped as shippedFile } from "./support/shipped";
 
 // Invariant other-ask-tool-counts-as-asked: one decision, one card. A turn whose ask already reached the developer
 // through another tool (another plugin's question board, Claude Code's AskUserQuestion) gets no turn-end needs_you
@@ -14,7 +15,9 @@ import { turnEndCheck, type TurnEndInput } from "../server/turn-end";
 
 process.env.FOLLOW_UP_HOOK_IMPORT = "1";
 // @ts-expect-error plain JS hook, generated into hook-source.ts
-const hook = await import("../server/agent-hook.mjs") as { isAskInput: (input: unknown) => boolean; shouldNudge: (input: object) => boolean };
+const hook = await import("../server/agent-hook.mjs") as { shouldNudge: (input: object) => boolean };
+// The hook as shipped (shared/turn-checks.mjs inlined): one rule, carried into the data directory.
+const shipped = await importShipped<{ isAskInput: (input: unknown) => boolean }>("agent-hook.mjs");
 
 // A question board's ask (fictional plugin), Claude Code's AskUserQuestion, and look-alikes that aren't asks.
 const BOARD_ASK = { title: "Coupons on sale items", question: "Should coupons stack with sale prices?", options: [{ letter: "A", label: "Stack", consequence: "Lower margin" }, { letter: "B", label: "Don't stack", consequence: "Simpler" }], recommend: "B" };
@@ -34,7 +37,7 @@ const GRID: [unknown, boolean, string][] = [
 test("an ask is told by its input's shape, the same in the hook and the worker", () => {
   for (const [input, expected, why] of GRID) {
     assert.equal(isAskInput(input), expected, `shared: ${why}`);
-    assert.equal(hook.isAskInput(input), expected, `hook: ${why}`);
+    assert.equal(shipped.isAskInput(input), expected, `shipped hook: ${why}`);
   }
 });
 
@@ -74,7 +77,7 @@ test("the Stop hook's decision: an ask through another tool this turn counts, on
 async function hookHome(t: { after: (f: () => Promise<void>) => void }, workspaces: object[]) {
   const root = await mkdtemp(join(tmpdir(), "other-ask-")); t.after(() => rm(root, { recursive: true, force: true }));
   const directory = join(root, "plugin-data/follow-up"); await mkdir(join(directory, "hook-state"), { recursive: true });
-  await writeFile(join(directory, "agent-hook.mjs"), await readFile(resolve("server/agent-hook.mjs"), "utf8"));
+  await writeFile(join(directory, "agent-hook.mjs"), shippedFile("agent-hook.mjs"));
   await writeFile(join(directory, "hooks-enabled.json"), JSON.stringify({ expiresAt: Date.now() + 60_000, clientEntry: "/fixture/client.js" }));
   await writeFile(join(directory, "state.json"), JSON.stringify({ workspaces }));
   await writeFile(join(directory, "brief.json"), JSON.stringify({ enable_inbox: true, enable_brief_nudge: true, pending: [] }));

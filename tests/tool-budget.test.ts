@@ -4,11 +4,12 @@ import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import * as bridge from "../server/mcp.mjs";
+import * as bridge from "../shared/agent-text.mjs";
 import { actionTools, callableTools, findActions, lookupTools, overseerTools, resolveAction, runTool, schemas, toolList, tools, type ToolTuple } from "../server/mcp.mjs";
 import { attachableTools, availableTools } from "../server/native-tools";
 import { withSystemPrompt, type PromptDeps } from "../server/session-prompt";
 import { WAIT_TOOLS } from "../server/wait";
+import { shipped } from "./support/shipped";
 
 // Invariant 139, agent-tools-by-role: each kind of agent lists the tools its role uses (ROLE_TOOLS in server/mcp.mjs),
 // and every other action stays reachable through find_action/run_action. Before (2.6.0-beta.2) every root agent listed
@@ -106,7 +107,7 @@ const UNIVERSE = new Set([...tools, ...actionTools, ...overseerTools, ...lookupT
 async function sessionStart(t: { after: (f: () => Promise<void>) => void }, scope: object | undefined, env: Record<string, string>) {
   const root = await mkdtemp(join(tmpdir(), "tool-budget-")); t.after(() => rm(root, { recursive: true, force: true }));
   const directory = join(root, "plugin-data/follow-up"); await mkdir(join(directory, "hook-state"), { recursive: true });
-  for (const file of ["agent-hook.mjs", "mcp.mjs"]) await writeFile(join(directory, file), await readFile(resolve("server", file), "utf8"));
+  for (const file of ["agent-hook.mjs", "mcp.mjs"]) await writeFile(join(directory, file), shipped(file));
   await writeFile(join(directory, "hooks-enabled.json"), JSON.stringify({ expiresAt: Date.now() + 60_000, clientEntry: "/fixture/client.js" }));
   await writeFile(join(directory, "scopes.json"), JSON.stringify({ agents: scope ? { a1: scope } : {} }));
   await writeFile(join(directory, "brief.json"), JSON.stringify({ enable_inbox: true, enable_brief_nudge: true, pending: [] }));

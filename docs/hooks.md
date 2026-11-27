@@ -33,7 +33,7 @@ agents and anything without `PASEO_AGENT_ID`.
 | SessionStart | Adds Follow-up's instructions for tracked agents (worded for the agent's PR workflow, contributor or main; in a workspace whose repositories are all No review, `workflow.noReview` in `scopes.json`, the agent merges its own PR once CI is green, see `mergeLine`; one team repository keeps the team wording), the native tools' guidance (`nativeExtras`, since native tools carry no MCP instructions), and Wait's guidance (`waitExtras`: `waitInstruction` when `FOLLOW_UP_WAIT=1`, or on Paseo 0.16 `backgroundWorkInstruction` when `FOLLOW_UP_BACKGROUND_WORK=1`). Root agents, tracked or not, also get one line on waiting for CI without polling (`checksLine`). Untracked Claude sessions with Wait get only Wait's guidance. On Paseo 0.17 the static parts go in the system prompt instead and the hook leaves them out (see [Static text in the system prompt](#static-text-in-the-system-prompt-paseo-017)). |
 | UserPromptSubmit | Starts a turn marker. Repeats the context when it changed (Codex always repeats). Tells a demoted agent once that it lost the main role. For the Overseer, injects the digest. |
 | PostToolUse | Marks the turn dirty after shell or edit tools. Says once per session that native tools are detached after a reload. When a shell command polls GitHub for CI (`pollsGithub`), adds once per turn, never blocking, that the agent should call `wait_for_checks` and end its turn ([wait-for-checks.md](wait-for-checks.md)); tracked and untracked root agents. |
-| Stop | Blocks the stop once if a dirty turn didn't `sync_workspace` (read from `hook-state/sync-<agent>.json`, written by the RPC handler, so any tool spelling counts), or if a root Claude session didn't call `needs_you` (`shouldNudge`), unless the turn already asked the developer through another tool (PostToolUse records `askedAt` when a call's input is an ask, `isAskInput`; [one decision, one card](#another-plugins-ask)). Also blocks to name the agent's due tasks (`pickNudges` over `scopes.json`'s `due`: at most 3, each at most twice and once a day; nothing when none is due; [due by fact](workspaces.md)). Never blocks twice in one turn, or while background tasks run. |
+| Stop | Blocks the stop once if a dirty turn didn't `sync_workspace` (read from `hook-state/sync-<agent>.json`, written by the RPC handler, so any tool spelling counts), or if a root agent (Claude Code or Codex) didn't call `needs_you` (`shouldNudge`, from the one decision below), unless the turn already asked the developer through another tool (PostToolUse records `askedAt` when a call's input is an ask, `isAskInput`; [one decision, one card](#another-plugins-ask)). Also blocks to name the agent's due tasks (`pickNudges` over `scopes.json`'s `due`: at most 3, each at most twice and once a day; nothing when none is due; [due by fact](workspaces.md)). Never blocks twice in one turn, or while background tasks run. |
 
 ## Static text in the system prompt (Paseo 0.17)
 
@@ -66,7 +66,7 @@ provider id of its own.
 - **Tools and `needs_you`**: the same as on Claude or Codex, native through Paseo's agent MCP (or the bridge).
 - **Instructions** (`instructions`): on Paseo 0.17 `withSystemPrompt` puts all of what the hook's SessionStart would
   add in the system prompt (`hooklessParts`): the tracked workspace's instructions (`workspaceInstructions`, exported
-  from the hook, which the worker imports with `globalThis.followUpHookLibrary` set so its `main()` doesn't run), the
+  `shared/agent-text.mjs` `workspaceText`, the same text the hook adds), the
   role texts and the checks line. `tests/session-prompt.test.ts` checks, for every role, that the prompt equals what the
   hook alone adds on Claude. Paseo passes it to OpenCode, Pi and plugin providers. ACP agents don't take a plugin's
   system prompt yet, so the same text is a tool, `follow_session_instructions` (`instructionsTool`), whose description
@@ -74,7 +74,7 @@ provider id of its own.
   comes from Paseo's config (`isAcp`): a built-in ACP id, or any provider whose `extends` chain reaches one.
 - **Turn-end checks** (`turnEnd: "event"`): the Stop hook's checks (sync after a turn that changed something, the
   `needs_you` nudge, due tasks) run from Paseo's turn-end event instead (`server/turn-end.ts`), with the hook's own
-  words (`stopReason`, `nudgeReason`, `dueHeader`, `turnEndPrefix`, read from the hook's source). An event can't block a
+  words and the same decision (`turnEndDecision`, [one turn-end decision](#one-place-for-the-words-one-turn-end-decision)). An event can't block a
   stop, so they go as one queued message after the turn, only when something is due, never for the turn that message
   started (told from that turn's own prompt, so a worker restart in between can't start a loop), and only to the agent
   whose turn just ended (it is loaded). The `needs_you` nudge, free in-turn on a hook but a whole turn here, follows
@@ -90,6 +90,21 @@ provider id of its own.
   only what a provider the developer has can't do: an ACP agent's instructions come through a tool, and with Summaries
   on a provider without a guard, its linked items, Compass and Ask don't read (`guardAction`: use, turn on or install
   one that can, never a pick the developer can't make).
+
+## One place for the words, one turn-end decision
+
+Everything Follow-up says to an agent is in `shared/agent-text.mjs`, and the turn-end checks are decided by
+`turnEndDecision` in `shared/turn-checks.mjs` (invariant 147). The hook and the bridge import both from the repository;
+`scripts/build.mjs` inlines them into `hook-source.ts` and `mcp-source.ts` (`scripts/inline.mjs`), so the files the worker
+writes to the data directory still import nothing. A test that runs the hook from a temp directory writes the shipped
+copy (`tests/support/shipped.ts`).
+
+The decision takes facts, never a provider: a tracked agent (main or contributor) that changed something and didn't
+sync is reminded to; a root agent that isn't a contributor (a tracked main, or a root agent outside any tracked
+workspace), with the inbox and its nudge on and no permission prompt, that didn't call `needs_you` or ask through
+another tool, is nudged; a tracked agent's due tasks are named. The Stop hook counts every turn as changed (the
+instructions ask for a sync every turn) and acts in the turn; the turn-end event sees the turn's timeline, so it counts
+only a turn that changed something, and nudges only a turn the developer started, since its message costs a turn.
 
 ## Env flags
 
@@ -117,5 +132,5 @@ the Stop hook nor the turn-end event nudges `needs_you` for it: the agent would 
 (`one-decision-one-card`, invariant 73). An ask is told by its input's shape, never by tool name: a question with
 choices, `{question, options[]}` or `{questions: [{question, options[]}, …]}`, from a tool that isn't Follow-up's, that
 finished without an error. A bare `question` with no choices is a lookup (a docs or code search), not an ask.
-`shared/ask-shape.ts` (`isAskInput`, `askedElsewhere`) is the rule; the hook keeps a copy (it imports nothing), and
+`isAskInput` in `shared/turn-checks.mjs` is the rule (the hook carries it inlined), `askedElsewhere` in `shared/ask-shape.ts` reads a timeline with it, and
 `tests/other-ask.test.ts` checks both agree. The sync check and due tasks are unchanged.

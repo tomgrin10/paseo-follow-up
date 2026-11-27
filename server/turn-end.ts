@@ -1,5 +1,6 @@
-import { hookSource } from "./hook-source";
-import { pickNudges, type DueEntry, type NudgeReceipt } from "../shared/task-due";
+import { type DueEntry, type NudgeReceipt } from "../shared/task-due";
+import { dueHeader, nudgeReason, stopReason, turnEndPrefix } from "../shared/agent-text.mjs";
+import { turnEndDecision, turnEndMessage } from "../shared/turn-checks.mjs";
 import { providerCaps } from "../shared/provider-support";
 import { messageSender } from "../shared/message-sender";
 import { startsTurn } from "./turn-timeline";
@@ -22,20 +23,11 @@ import { compactionOnly } from "./inbox-classifier";
  * each at most twice and once a day).
  */
 
-const literal = (name: string): string => {
-  const m = hookSource.match(new RegExp(`export const ${name} = (.+?);\\n`));
-  if (!m) throw new Error(`turn-end: the hook no longer exports ${name}`);
-  return JSON.parse(m[1]!) as string;
-};
-export const STOP_REASON = literal("stopReason");
-export const NUDGE_REASON = literal("nudgeReason");
-export const DUE_HEADER = literal("dueHeader");
-const TOOL_NAMES = (() => { const m = hookSource.match(/export const TOOL_NAMES = (\[.+?\]);\n/); return m ? JSON.parse(m[1]!) as string[] : []; })();
-const toolPattern = new RegExp(`(?<![\\w])(${TOOL_NAMES.join("|")})(?![\\w])`, "g");
-/** Follow-up's tools under the names a native session has them (the hook's `named`). */
-const named = (text: string) => text.replace(toolPattern, "follow_$1");
+export const STOP_REASON = stopReason;
+export const NUDGE_REASON = nudgeReason;
+export const DUE_HEADER = dueHeader;
 /** The first line of every turn-end message: how the agent, the inbox and the tests tell it apart. */
-export const TURN_END_PREFIX = literal("turnEndPrefix");
+export const TURN_END_PREFIX = turnEndPrefix;
 
 export type TurnEndEntry = { role: "main" | "contributor" | "recovery"; workspaceId: string; due?: DueEntry[] };
 export type TurnEndInput = {
@@ -83,17 +75,15 @@ export function turnEndCheck(i: TurnEndInput): { text: string | null; receipt: N
   // The reply to our own message is never checked (the loop guard that survives a restart).
   if (prompt === "turn-end") return { text: null, receipt: null };
   const since = i.startedAt ?? i.now;
-  const sync = changedSomething(i.items) && !(i.syncedAt !== null && i.syncedAt >= since);
-  // One decision, one card: a turn that already asked the developer through another tool gets no needs_you nudge.
-  const nudge = i.entry.role === "main" && i.nudge && prompt === "developer" && !(i.needsYouAt !== null && i.needsYouAt >= since) && !askedElsewhere(i.items);
-  const picked = i.entry.due?.length ? pickNudges(i.entry.due, i.receipt, i.now) : { lines: [], receipt: i.receipt };
-  if (!sync && !nudge && !picked.lines.length) return { text: null, receipt: null };
-  const parts = [
-    picked.lines.length ? named(DUE_HEADER) + "\n" + picked.lines.map(l => `- ${l}`).join("\n") : null,
-    sync ? `${STOP_REASON} This is metadata bookkeeping only; do not start queued repairs or recovery. Call ${named("sync_workspace")} with a short summary; pass milestone when the milestone you're on changed.` : null,
-    nudge ? named(NUDGE_REASON) : null,
-  ].filter(Boolean);
-  return { text: `${TURN_END_PREFIX} your turn ended with this still open. Handle it, then stop without repeating your reply.\n\n${parts.join("\n\n")}`, receipt: picked.lines.length ? picked.receipt : null };
+  // The one turn-end decision (shared/turn-checks.mjs), the Stop hook's too. The event costs the agent a whole turn, so
+  // the needs_you nudge follows only a turn the developer started; every tracked main agent is a root agent.
+  const d = turnEndDecision({
+    trigger: "event", role: i.entry.role, root: i.entry.role === "main", nudgeOn: i.nudge, developerTurn: prompt === "developer",
+    changed: changedSomething(i.items), synced: i.syncedAt !== null && i.syncedAt >= since,
+    needsYouCalled: i.needsYouAt !== null && i.needsYouAt >= since, askedElsewhere: askedElsewhere(i.items),
+    due: i.entry.due ?? [], receipt: i.receipt, now: i.now,
+  });
+  return d.any ? { text: turnEndMessage(d), receipt: d.receipt } : { text: null, receipt: null };
 }
 
 export type TurnEndDeps = {

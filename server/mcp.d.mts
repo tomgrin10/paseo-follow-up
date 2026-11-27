@@ -4,17 +4,11 @@ export type ToolSchema = { name: string; description: string; inputSchema: { typ
 export const tools: ToolTuple[];
 export const actionTools: ToolTuple[];
 export const overseerTools: ToolTuple[];
-export const waitInstruction: string;
-export const backgroundWorkInstruction: string;
 export function toolList(recovery?: boolean, contributor?: boolean, brief?: boolean, briefOnly?: boolean, actions?: boolean): ToolTuple[];
 export function schemas(list: ToolTuple[], workflows?: "graphite" | "github" | "mixed" | null): ToolSchema[];
 export function validate(value: unknown, schema: unknown, path?: string): void;
 export function compact(tool: string, input: any, result: any): unknown;
 export function callInput(tool: ToolTuple, input: Record<string, unknown>): Record<string, unknown>;
-export const needsYouInstruction: string;
-export const actionInstruction: string;
-export const overseerInstruction: string;
-export function batchInstructions(workflow?: { mode: "graphite" | "github"; reviewFix: string | null } | null): string;
 export function describeAction(name: string, description: string, workflows: "graphite" | "github" | "mixed" | null): string;
 /** The action lookup (agent-tools-by-role): find_action and run_action. */
 export const lookupTools: ToolTuple[];

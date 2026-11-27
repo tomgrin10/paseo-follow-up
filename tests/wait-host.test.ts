@@ -11,8 +11,9 @@ import { join, resolve } from "node:path";
 import type { PluginSessionOpenRequest } from "@getpaseo/plugin/server";
 import { Wait, WAIT_TOOLS, waitStatus } from "../server/wait";
 import { hostFeature } from "../server/host-features";
-import { backgroundWorkInstruction, waitInstruction } from "../server/mcp.mjs";
+import { backgroundWorkInstruction, waitInstruction } from "../shared/agent-text.mjs";
 import { WAIT_HINT, WAIT_HOST_HINT, WAIT_HOST_NOTE, WAIT_HOST_TITLE, WAIT_TITLE, waitNote, waitSwitchCopy } from "../shared/wait";
+import { shipped } from "./support/shipped";
 /** Paseo 0.16 requires `metadata` on hook agents and session requests; spread, so 0.15's types accept it too. */
 const withMetadata = { metadata: {} };
 
@@ -82,7 +83,7 @@ test("Settings says why Wait isn't attached on a 0.16 host", () => {
 test("the hook's 0.16 guidance: background, end the turn, no Wait tools", async t => {
   const root = await dir(t, "follow-wait-host-hook-");
   const directory = join(root, "plugin-data/follow-up"); await mkdir(join(directory, "hook-state"), { recursive: true });
-  for (const file of ["agent-hook.mjs", "mcp.mjs"]) await writeFile(join(directory, file), await readFile(resolve("server", file), "utf8"));
+  for (const file of ["agent-hook.mjs", "mcp.mjs"]) await writeFile(join(directory, file), shipped(file));
   await writeFile(join(directory, "hooks-enabled.json"), JSON.stringify({ expiresAt: Date.now() + 60_000, clientEntry: "/fixture/client.js" }));
   const fire = (env: Record<string, string>) => new Promise<string>((ok, bad) => {
     const child = spawn(process.execPath, [join(directory, "agent-hook.mjs")], { env: { ...process.env, FOLLOW_UP_HOOK_IMPORT: "", PASEO_AGENT_ID: "sub", FOLLOW_UP_BRIEF: "", FOLLOW_UP_RECOVERY: "", FOLLOW_UP_TOOLS: "", FOLLOW_UP_ROOT: "", FOLLOW_UP_OVERSEER: "", FOLLOW_UP_WAIT: "", FOLLOW_UP_BACKGROUND_WORK: "", ...env } });

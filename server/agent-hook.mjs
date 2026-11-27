@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { createHash, randomUUID } from "node:crypto";
+// One place for Follow-up's words and the one turn-end decision (shared/agent-text.mjs, shared/turn-checks.mjs).
+// scripts/build.mjs inlines both into hook-source.ts, so the copy in the data directory still imports nothing else.
+import { named, detachedNotice, quietInstruction, stopReason, nudgeReason, syncBookkeeping, checksLine, pollNudge, workspaceText, demotedNotice, needsYouInstruction, actionInstruction, overseerInstruction, waitInstruction, backgroundWorkInstruction } from "../shared/agent-text.mjs";
+import { isAskInput, pickNudges, turnEndDecision, dueBlock } from "../shared/turn-checks.mjs";
 
 /** Set by the worker's prelude (shared/legacy.ts withRuntimePrelude); absent when a test imports this file. */
 const runtime = globalThis.followUpRuntime ?? {};
@@ -17,12 +21,6 @@ let native = env("TOOLS") === "native";
  * server/session-prompt.ts), by name. The hook leaves exactly those out, so the agent reads each once.
  */
 const inPrompt = new Set(String(env("SYSTEM_PROMPT") ?? "").split(",").filter(Boolean));
-// Tool names that read unambiguously in prose: the underscore names a session can list (server/mcp.mjs ROLE_TOOLS and
-// the Overseer's; a test checks it). Action names stay bare: they run through run_action, never as follow_<name>.
-export const TOOL_NAMES = ["workspace_status", "workspace_now", "sync_workspace", "enroll_workspace", "register_pr", "exclude_stack", "update_obligation", "acknowledge_batch", "ask_question", "record_answer", "withdraw_question", "set_spec", "link_item", "unlink_item", "needs_you", "declare_done", "agent_digest", "route_candidates", "send_to_agent", "start_workspace", "make_main_agent", "context_reply", "wait_for_checks", "find_action", "run_action"];
-const toolPattern = new RegExp(`(?<![\\w])(${TOOL_NAMES.join("|")})(?![\\w])`, "g");
-/** Names Follow-up's tools the way this agent has them. */
-export function named(text, isNative = native) { return isNative ? text.replace(toolPattern, "follow_$1") : text; }
 /** Whether a tool call is Follow-up's own, under either name set (mcp__follow-up__x, follow-up.x, mcp__paseo__follow_x, paseo.follow_x). */
 export function isFollowTool(tool) { return [ "follow-up", runtime.legacyMcpServer].some(server => server && new RegExp(`^(?:mcp__)?${server}(?:__|[.:/])[a-z_]+$`).test(tool)) || /^(?:mcp__paseo__|paseo[.:/])follow_[a-z_]+$/.test(tool); }
 /** Whether a shell call runs the bridge, however it names it ($FOLLOW_UP_CLI, as the skill says, or the path). */
@@ -33,58 +31,7 @@ export function isBridgeCall(args, bridgePath) { return args.includes(bridgePath
  * that attached each session's tools; a mismatch means this session's follow_ tools are gone. Pure, so it's testable.
  */
 export function toolsDetached(isNative, current, mine) { return isNative && !!current?.instance && mine?.instance !== current.instance; }
-export const detachedNotice = "Follow-up was updated while this session was open, so its follow_* tools are detached and fail with \"Tool not found\" until this session reopens (Paseo reopens it before your next prompt). Until then use the bridge, which runs the same tools with their unprefixed names: node \"$FOLLOW_UP_CLI\" call <tool> '<json>' --compact (for example sync_workspace or needs_you). Do not mention this to the developer.";
-/**
- * Another tool's ask to the developer (other-ask-tool-counts-as-asked): a question with choices, `{question, options[]}`
- * or `{questions: [{question, options[]}, …]}`, told by shape, never by tool name. Kept identical to isAskInput in
- * shared/ask-shape.ts (tests/other-ask.test.ts checks both on the same inputs).
- */
-export function isAskInput(input) {
-  const asks = v => !!v && typeof v === "object" && !Array.isArray(v) && typeof v.question === "string" && v.question.trim().length > 0 && Array.isArray(v.options) && v.options.length > 0;
-  if (asks(input)) return true;
-  return !!input && typeof input === "object" && Array.isArray(input.questions) && input.questions.length > 0 && input.questions.every(asks);
-}
-const quietRevision = 1;
-const quietInstruction = "Do routine bookkeeping silently. Do not announce tracker calls, say you updated/synced the sidebar, recap panel state, or add plugin-status commentary/final paragraphs. Put receipts and evidence in the tools. User-facing messages should cover the actual work outcome, or a decision/blocker requiring the developer; answer sidebar status only when explicitly asked. If this continuation is bookkeeping only, use the tools and finish without another recap or repeating your previous answer.";
-export const stopReason = "Silently complete this workspace's sidebar bookkeeping before finishing.";
-// Kept identical to NEEDS_YOU_NUDGE in shared/brief.ts (a test checks it).
-export const nudgeReason = "Before you stop, call needs_you once with what the developer has to do next: a decision with options (or questions=[\"Q18\"] for one that is already an open question), an action only they can take, or kind=done (\"Nothing needed\" plus what you finished), which means nothing for the developer and won't flag you. Then stop; don't repeat your reply.";
 
-/**
- * R2: whether to nudge a Claude Code root agent that ended its turn without needs_you. Pure, so every skip is testable.
- * At most once per turn: Claude's stop_hook_active and our own per-turn `stopped` marker both end it.
- */
-/** due-by-fact: the line above the due tasks a turn end names. */
-/** The first line of the turn-end message a provider without this hook gets instead (server/turn-end.ts). */
-export const turnEndPrefix = "Follow-up turn-end check:";
-export const dueHeader = "Follow-up: these tasks are due. For each, do it and close it with update_obligation (status=done with evidence), or keep it with recheck=\"YYYY-MM-DD\" and why in evidence.";
-/**
- * The due tasks to name at this turn end: due entries (from scopes.json) whose time passed, not yet named twice for
- * this fact and revision and not within a day, oldest first, at most 3; and the receipt counting them. A copy of
- * shared/task-due.ts pickNudges (tests/due-by-fact.test.ts runs both on the same inputs).
- */
-export function pickNudges(entries, receipt, now) {
-  const next = { ...receipt };
-  const lines = [];
-  for (const e of [...entries].sort((x, y) => String(x.dueAt).localeCompare(String(y.dueAt)))) {
-    if (lines.length >= 3 || Date.parse(e.dueAt) > now) continue;
-    const r = receipt[e.id];
-    const same = r && r.key === e.key && r.revision === e.revision;
-    if (same && (r.count >= 2 || now - Date.parse(r.at) < 86_400_000)) continue;
-    next[e.id] = { key: e.key, revision: e.revision, count: same ? r.count + 1 : 1, at: new Date(now).toISOString() };
-    lines.push(e.line);
-  }
-  return { lines, receipt: next };
-}
-export function shouldNudge({ provider, brief, agentId, contributor, recovery, subagent, stopHookActive, turn, called }) {
-  if (provider !== "claude" || recovery || subagent || contributor || stopHookActive) return false;
-  if (!brief || brief.enable_inbox !== true || brief.enable_brief_nudge !== true) return false;
-  if (Array.isArray(brief.pending) && brief.pending.includes(agentId)) return false;
-  if (!turn || turn.stopped || !turn.startedAt) return false;
-  // The turn already asked the developer through another tool: asking again here would be a second card.
-  if (turn.askedAt && turn.askedAt >= turn.startedAt) return false;
-  return !(called && called.at >= turn.startedAt);
-}
 /**
  * The Overseer's per-turn digest (1.4.0-beta.0). The daemon rewrites overseer-digest.json only when it changes (one line and a hash
  * per workspace); this diffs it against what the Overseer saw last turn. Pure, so size and paging are testable.
@@ -145,36 +92,6 @@ export async function freshDigest(read, seen, { now = Date.now, sleep = ms => ne
   while (!fresh(file) && now() < until) { await sleep(stepMs); waited += stepMs; file = (await read()) ?? file; }
   return { file, fresh: fresh(file), waited };
 }
-/**
- * How batches are worked, for this workspace's PR workflow (from scopes.json). Graphite with /fix-pr, and agents of an
- * older worker that wrote no workflow, keep the original text; plain GitHub never mentions Graphite, gt or /fix-pr.
- */
-/**
- * One Follow-up message can carry several parts (shared/queue.ts ENVELOPE_SEPARATOR, PART_HEADERS): an answer and the
- * batch that rode along with it. tests/message-envelope.test.ts holds this text to the envelope format.
- */
-export const ENVELOPE_GUIDANCE = "One Follow-up message can carry several parts, separated by a line holding only ---; each part starts with its own header (\"Follow-up answer …\" or \"Follow-up batch …\") and follows its own rules: an answer is already recorded, a batch is acknowledged with acknowledge_batch by its batch ID.";
-export function batchParagraph(workflow) {
-  const mode = workflow?.mode ?? "graphite";
-  const fix = workflow === undefined || workflow === null ? "/fix-pr" : workflow.reviewFix ?? null;
-  const steps = "Follow-up batches contain a batch ID and task list. Read workspace_status and refresh live conditions before acting; skip resolved tasks. Process dependent PRs bottom to top, one PR fully before the next.";
-  const review = fix ? `Use the repository's ${fix} workflow, validate feedback, verify changes,` : "For review comments, read the PR's unresolved threads with gh, validate the feedback, fix it and verify the change,";
-  const submit = mode === "graphite" ? "submit through Graphite with --publish" : "push the branch (gh pr create for a new PR, gh pr ready when it leaves draft)";
-  const reply = fix ? "reply/resolve addressed threads" : "reply to each addressed thread and resolve it";
-  const restack = mode === "graphite" ? "Follow the repository's safe reparent procedure for merged parents" : "Keep stacked PRs as a chain of base branches: restack with git rebase --update-refs and push with --force-with-lease, and when a parent merges retarget its child with gh pr edit --base if GitHub didn't already";
-  return `${steps} ${review} ${submit}, and ${reply}. ${restack} and preserve uncommitted work.`;
-}
-/** A No review repository (pr-workflow.json review: "none", in scopes.json as workflow.noReview): the agent merges its own PRs. */
-export const NO_REVIEW_MERGE = "This repository has no review: merge your own PR once CI is green, without asking the developer. Archiving remains the developer's action.";
-/** Who merges, closing the batch paragraph: the developer (team review, unchanged text), or the agent in a No review repository. */
-export const mergeLine = workflow => workflow?.noReview ? NO_REVIEW_MERGE : "Merging and archiving remain the developer's actions.";
-/**
- * Wait for checks (docs/wait-for-checks.md). One SessionStart line for root agents, and a PostToolUse nudge when a
- * shell command polls GitHub for CI: said at most once per turn, never blocking (the-polling-nudge-never-blocks).
- * The hook already runs on every PostToolUse (no matcher), so this costs no new process.
- */
-export const checksLine = "To wait for CI, don't poll GitHub (gh pr checks --watch, gh run watch, sleep loops over gh): call wait_for_checks with the PR after pushing and end your turn; Follow-up messages you when the checks finish.";
-export const pollNudge = "That command polls GitHub for CI, which spends the developer's shared GitHub budget. Stop it, call wait_for_checks with the PR (no prs = every open PR of this workspace) and end your turn: Follow-up messages you once when the checks finish, from reads it already makes. A single gh pr checks to look once is fine.";
 const SHELL_TOOL = /(bash|shell|exec_command|write_stdin|monitor|terminal)/i;
 const GH_QUERY = /\bgh\s+(?:pr\s+(?:checks|view|status)\b|run\s+(?:list|view)\b|api\b[^\n;|&]*(?:graphql|\/pulls\b|check-runs|check-suites|\/statuses\b|\/status\b|\/actions\/runs))/;
 const GH_WATCH = /\bgh\s+(?:pr\s+checks\b[^\n;|&]*--watch\b|run\s+watch\b)/;
@@ -194,7 +111,6 @@ export function pollsGithub(tool, input) {
   if (GH_WATCH.test(text)) return true;
   return GH_QUERY.test(text) && LOOP.test(text);
 }
-const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
 async function json(path) { return JSON.parse(await readFile(path, "utf8")); }
 async function save(path, value) {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
@@ -202,69 +118,56 @@ async function save(path, value) {
   await writeFile(temporary, JSON.stringify(value), { mode: 0o600 });
   await rename(temporary, path);
 }
-// Linked items (shared/linked.ts): what the work is about, registered on purpose rather than guessed from mentions.
-const linkInstruction = "When you start from a Linear issue, Slack thread or doc, or open a new one for this work, call link_item with its URL. Don't link things you only mention. A PR isn't a link: register it.";
-function instructions(lease, contributor = false, workflow) {
-  return workspaceInstructions({ contributor, workflow, clientEntry: lease.clientEntry });
-}
+/** The quiet paragraph's revision: an agent whose turn marker predates it is told it once (PostToolUse). */
+const quietRevision = 1;
+/** Follow-up's words with this session's tool names. */
+const say = text => named(text, native);
 /**
- * The tracked workspace's instructions. The hook adds them at SessionStart; for a provider Follow-up has no hook in
- * (anything but Claude Code and Codex) the worker puts the same text in the session's system prompt
- * (server/session-prompt.ts), importing this file with globalThis.followUpHookLibrary set so main() doesn't run.
+ * The tracked workspace's instructions (shared/agent-text.mjs workspaceText), with the bridge in this data directory.
+ * The worker builds the same text for a provider without the hook (server/session-prompt.ts).
  */
 export function workspaceInstructions({ contributor = false, workflow, native: isNative = native, clientEntry, dir = directory }) {
-  return named(paragraphs({ clientEntry }, contributor, workflow, dir).filter(p => !(isNative && /^Prefer (?:the )?native/i.test(p))).join("\n\n"), isNative);
-}
-function paragraphs(lease, contributor, workflow, directory) {
-  if (contributor) return [
-    "Maintain PR tracking for this session in its tracked workspace. Read workspace_status now and after compaction. Register every PR you submit, including from secondary git worktrees, with register_pr; register parents before children. References and external dependencies are not owned PRs. Call sync_workspace before finishing. The designated main agent retains goal, task, scope and completion authority.",
-    linkInstruction,
-    quietInstruction,
-    `Prefer native Follow-up tools. CLI fallback: FOLLOW_UP_CLIENT_ENTRY=${quote(lease.clientEntry)} node ${quote(join(directory, "mcp.mjs"))} call <tool> '<json>' --compact. Do not ask the developer to maintain the sidebar.`,
-  ];
-  return [
-    "Maintain this tracked workspace's Follow-up sidebar as part of your normal work; do not wait for a developer reminder.",
-    quietInstruction,
-    "Read workspace_status now and after compaction. Refine the goal with enroll_workspace when scope changes. Register every PR you produce after submitting it, parents before children, and update stack/parent relationships after restacking. Historical mentions and external dependencies are not owned PRs; preserve exclusions and existing records.",
-    "When a decision needs the developer, call ask_question with a short title, the question, lettered options with what each means, and your recommendation; mark it big only when building ahead would leave this computer, set something others rely on, or most remaining work depends on it. Follow the question mode in its reply. Ask each decision once: asking it again returns the open question, and at a turn's end you point at it (needs_you questions=[\"Q<n>\"]) instead of restating it. Answers arrive as messages starting \"Follow-up answer Q<n>\" and are already recorded; several decisions from one card arrive together in one message, one line per decision, with skipped ones marked \"skipped\" and still open. An answer of Something else — \"…\" means none of your options: the quoted words are the developer's answer. Every card already offers Something else, so don't add an Other option. If the developer answers in chat, call record_answer (choice \"other\" with words when it matches none of your options). Withdraw questions that stop mattering. " + ENVELOPE_GUIDANCE,
-    linkInstruction,
-    "If you keep a Claude artifact (or doc) summarizing this workspace's goal, decisions and status, register its link once with set_spec after the first publish. Republish to the same URL; call set_spec again only if the link changes.",
-    "Keep actual follow-up tasks current with update_obligation: production behavior checks, migrations and decisions, with concise titles, PR dependencies and evidence. Do not add merge/approval/deploy checklist tasks. Deployment-dependent work waits for verified serving revisions and existing production permissions. A task waiting on a PR or another agent is status=waiting; blocked is only for the developer. One decision, one card: ask it once with ask_question (task set to the task), then mark the task blocked with question=\"Q<n>\"; ask= is only for a decision you haven't asked, and need=action when the developer must do something and tell you (the card gets Done). Follow-up shows a blocked task and your turn-end needs_you about it as one item. Once it is answered, act on the answer and move the task.",
-    "Stakeholder replies are follow-up too. When asked to update a requester, capture the original Slack threadUrl, recipient and explicit developer authorization in the task's communication field; referenced messages alone do not authorize posting. Use a concise progress task now and, when needed, a verify-and-reply task with purpose=verified after the relevant deployed PRs. Read existing thread replies and refresh evidence before posting; distinguish fixed, deployed and verified. Record the actual sent replyUrl and result before marking done. If posting is unavailable or its outcome is uncertain, keep the task blocked and check the thread before any retry; never claim a draft was sent. Auto authorizes delivery to you, not external messages. Communication-only requests do not authorize repairs, benchmarks, migrations or other production writes.",
-    "A task comes due by itself when its afterPrs reach dependencyStage, or on its recheck date (update_obligation recheck=\"YYYY-MM-DD\"; a task with no PRs defaults to 3 days after your last update). At your turn\u2019s end Follow-up names due tasks: do each and close it with evidence, or keep it with a new recheck and why. A trigger={event:\"now\"|\"merge\"|\"deploy\",delayDays:0} also sends a task to you as a message; set one only from the developer\u2019s requested timing; never infer timing from a title or enable_follow_up alone. trigger={event:\"at\",at:\"<ISO time with offset>\"} or {event:\"at\",inMinutes:30} sends it to you once at that time, Auto-send on or off: set it from a time the developer named, or yourself on a waiting task to check back on something Follow-up can\u2019t see (a registry, a release window, a reply); never a sleep loop or a timer of your own (CI: wait_for_checks). Merge/deploy triggers require owned afterPrs; delayDays=14 waits fourteen days after the last dependency event. Now requires no PR dependencies or delay. Deployment timing starts at the first verified fully serving observation and remains conservative when history is unknown. Preserve existing trigger fields on updates; trigger=null removes it. Auto controls delivery, not timing or production permissions.",
-    batchParagraph(workflow) + " For post-deploy tasks, verify the currently serving revision contains every dependency and record behavioral results separately. Acknowledge the header's batch ID with acknowledge_batch before finishing: completed with the result, or blocked with the reason (humanOnly=true when only a person can move it, such as a stale review the reviewer must re-review or dismiss). Verify the entire goal and post-merge work before declare_done; acknowledge a completion batch first. " + mergeLine(workflow),
-    "Before ending this turn, reconcile the sidebar with what you actually did and call sync_workspace with a short summary, including when no changes are needed. Pass milestone when the milestone you're on changed. Acknowledge any assigned batch. When the entire goal is fulfilled, use declare_done; otherwise preserve remaining work. Do not launch recovery, start queued repairs, merge, toggle merge-when-ready, or archive as part of this bookkeeping. Auto still governs separate follow-up sends. Subagents report to the main agent instead of claiming workspace ownership.",
-    `Prefer the native follow-up MCP tools. For a full historical record, use workspace_status with detail=full. CLI compatibility fallback: FOLLOW_UP_CLIENT_ENTRY=${quote(lease.clientEntry)} node ${quote(join(directory, "mcp.mjs"))} call <tool> '<json>' --compact. Omit --compact only when an existing script needs the full response. Never ask the developer to maintain the sidebar or run this bridge.`,
-  ];
-}
-/** The old main's notice, within a day of losing the role: who took over, why, and what to do. Null otherwise. */
-export function demotedNotice(demoted, now = Date.now()) {
-  if (!demoted?.at || now - Date.parse(demoted.at) > 24 * 60 * 60_000) return null;
-  const time = new Date(demoted.at).toISOString().slice(11, 16);
-  const who = demoted.by === "developer" ? "the developer moved it" : demoted.by === "auto" ? "Follow-up moved it" : "it was claimed";
-  return { at: demoted.at, text: `You're no longer this workspace's main agent: ${demoted.to} took over at ${time} UTC (${who}${demoted.reason ? `: ${demoted.reason}` : ""}). Report to it instead of asking the developer or calling Done. If that's wrong, ask the developer to make you main again; you can't take it back on your own for 2 hours.` };
+  return workspaceText({ contributor, workflow, native: isNative, clientEntry, bridge: join(dir, "mcp.mjs") });
 }
 
 /** With native tools there's no MCP initialize reply, so the role text it carried comes from the hook instead. */
-async function nativeExtras(brief) {
+function nativeExtras(brief) {
   if (!native) return [];
-  const bridge = await import(pathToFileURL(join(directory, "mcp.mjs")).href).catch(() => null);
-  if (!bridge) return [];
   return [
-    brief?.enable_inbox && env("BRIEF") && !inPrompt.has("needsYou") ? bridge.needsYouInstruction : null,
-    env("ROOT") === "1" && !inPrompt.has("action") ? bridge.actionInstruction : null,
-    env("OVERSEER") === "1" && !inPrompt.has("overseer") ? bridge.overseerInstruction : null,
-  ].filter(Boolean).map(text => named(text));
+    brief?.enable_inbox && env("BRIEF") && !inPrompt.has("needsYou") ? needsYouInstruction : null,
+    env("ROOT") === "1" && !inPrompt.has("action") ? actionInstruction : null,
+    env("OVERSEER") === "1" && !inPrompt.has("overseer") ? overseerInstruction : null,
+  ].filter(Boolean).map(say);
 }
 /**
  * Wait's guidance (server/wait.ts attaches its tools natively, so there is no MCP initialize text to carry it). On
  * Paseo 0.16 Wait attaches no tools and sets FOLLOW_UP_BACKGROUND_WORK instead: background it, end the turn.
  */
-async function waitExtras() {
-  const key = env("WAIT") === "1" ? "waitInstruction" : env("BACKGROUND_WORK") === "1" ? "backgroundWorkInstruction" : null;
-  if (!key || inPrompt.has(key === "waitInstruction" ? "wait" : "backgroundWork")) return [];
-  const bridge = await import(pathToFileURL(join(directory, "mcp.mjs")).href).catch(() => null);
-  return bridge?.[key] ? [bridge[key]] : [];
+function waitExtras() {
+  if (env("WAIT") === "1") return inPrompt.has("wait") ? [] : [waitInstruction];
+  if (env("BACKGROUND_WORK") === "1") return inPrompt.has("backgroundWork") ? [] : [backgroundWorkInstruction];
+  return [];
+}
+/**
+ * The Stop hook's facts for the one turn-end decision (shared/turn-checks.mjs turnEndDecision). The hook asks a tracked
+ * agent to sync every turn it didn't (its instructions say "including when no changes are needed"), so a turn counts as
+ * changed here. A root agent is one launched with FOLLOW_UP_BRIEF (a tracked main, or a root agent outside any tracked
+ * workspace); a turn whose start the hook never saw (no UserPromptSubmit) is not nudged.
+ */
+export function stopDecision({ workspace, contributor, root, brief, agentId, turn, synced, called, due, receipt, now }) {
+  const startedAt = turn?.startedAt ?? 0;
+  return turnEndDecision({
+    trigger: "hook", role: workspace ? (contributor ? "contributor" : "main") : null, root: root && !!startedAt && !turn?.stopped,
+    nudgeOn: brief?.enable_inbox === true && brief?.enable_brief_nudge === true && !(Array.isArray(brief.pending) && brief.pending.includes(agentId)),
+    changed: true, synced: !!(turn && workspace && synced?.workspaceId === workspace.id && synced.at >= Math.max(startedAt, turn.dirtyAt ?? 0)),
+    needsYouCalled: !!(called && called.at >= startedAt), askedElsewhere: !!(turn?.askedAt && turn.askedAt >= startedAt),
+    due, receipt, now,
+  });
+}
+/** R2: whether the Stop hook nudges this root agent to call needs_you; the provider never decides it. Pure, so every skip is testable. */
+export function shouldNudge({ brief, agentId, contributor, recovery, subagent, stopHookActive, turn, called }) {
+  if (recovery || subagent || stopHookActive) return false;
+  return stopDecision({ workspace: contributor ? { id: "w" } : null, contributor, root: true, brief, agentId, turn, synced: null, called, due: [], receipt: {}, now: Date.now() }).nudge;
 }
 /**
  * Claude Code keeps hook context for the whole session and re-runs SessionStart after compaction, so the same text
@@ -324,8 +227,8 @@ async function main() {
     if (event.hook_event_name === "SessionStart") { const extras = await waitExtras(); if (extras.length) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: extras.join("\n\n") } }) + "\n"); }
     return;
   }
-  const context = () => instructions(lease, contributor, workflow);
-  const sessionText = async () => [workspace ? context() : null, ...await nativeExtras(brief), ...await waitExtras(), (workspace || env("ROOT") === "1") && !inPrompt.has("checks") ? named(checksLine) : null].filter(Boolean).join("\n\n");
+  const context = () => workspaceInstructions({ contributor, workflow, clientEntry: lease.clientEntry });
+  const sessionText = async () => [workspace ? context() : null, ...await nativeExtras(brief), ...await waitExtras(), (workspace || env("ROOT") === "1") && !inPrompt.has("checks") ? say(checksLine) : null].filter(Boolean).join("\n\n");
   const name = event.hook_event_name;
   if (!["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"].includes(name)) return;
   const session = createHash("sha256").update(String(event.session_id ?? agentId)).digest("hex").slice(0, 24);
@@ -360,7 +263,7 @@ async function main() {
     const asked = !trackedTool && isAskInput(event.tool_input) ? { askedAt: Date.now() } : {};
     if (!workspace) {
       if (notice || polling || asked.askedAt) await save(path, { ...turn, ...asked, ...(notice ? { detachedNotice: instance.instance } : {}), ...(polling ? { pollNudged: turnId } : {}) });
-      if (notice || polling) emit([notice ? detachedNotice : null, polling ? named(pollNudge) : null].filter(Boolean).join("\n\n"));
+      if (notice || polling) emit([notice ? detachedNotice : null, polling ? say(pollNudge) : null].filter(Boolean).join("\n\n"));
       return;
     }
     const dirty = !trackedTool && /(bash|shell|exec_command|write_stdin|edit|write|apply_patch|notebook)/i.test(tool);
@@ -371,30 +274,23 @@ async function main() {
     const now = Date.now();
     const callStart = turn?.lastToolAt || turn?.startedAt || now;
     await save(path, { ...turn, ...asked, startedAt: turn?.startedAt ?? (dirty ? callStart : 0), stopped: turn?.stopped ?? false, ...(dirty ? { dirtyAt: callStart } : {}), quietRevision, lastToolAt: now, ...(notice ? { detachedNotice: instance.instance } : {}), ...(polling ? { pollNudged: turnId } : {}) });
-    const text = [upgrade ? quietInstruction : null, notice ? detachedNotice : null, polling ? named(pollNudge) : null].filter(Boolean).join("\n\n");
+    const text = [upgrade ? quietInstruction : null, notice ? detachedNotice : null, polling ? say(pollNudge) : null].filter(Boolean).join("\n\n");
     if (text) emit(text);
     return;
   }
   if (event.stop_hook_active || turn?.stopped || event.background_tasks?.length) return;
-  let sync = false;
-  if (workspace) {
-    const confirmed = await json(join(directory, "hook-state", `sync-${agentId}.json`)).catch(() => null);
-    sync = !(turn && confirmed?.workspaceId === workspace.id && confirmed.at >= Math.max(turn.startedAt, turn.dirtyAt ?? 0));
-  }
+  const synced = await json(join(directory, "hook-state", `sync-${agentId}.json`)).catch(() => null);
   const called = await json(join(directory, "hook-state", `needs-you-${agentId}.json`)).catch(() => null);
-  const nudge = shouldNudge({ provider, brief, agentId, contributor, recovery: false, subagent: false, stopHookActive: !!event.stop_hook_active, turn, called });
-  // due-by-fact: at most 3 due tasks, each at most twice and once a day (the receipt is the workspace's, so the main
-  // agent and the task's worker share the cap). Nothing due: nothing said.
+  // due-by-fact: the receipt is the workspace's, so the main agent and the task's worker share the cap.
   const receiptPath = workspace && /^[\w-]+$/.test(workspace.id) ? join(directory, "hook-state", `task-nudges-${workspace.id}.json`) : null;
-  const picked = receiptPath && due.length ? pickNudges(due, await json(receiptPath).catch(() => ({})), Date.now()) : { lines: [], receipt: null };
-  if (!sync && !nudge && !picked.lines.length) return;
-  if (picked.lines.length) await save(receiptPath, picked.receipt).catch(() => undefined);
-  await save(path, { ...turn, startedAt: turn?.startedAt ?? Date.now(), stopped: true, ...(nudge ? { nudgedAt: Date.now() } : {}) });
+  const decision = stopDecision({ workspace, contributor, root: !!provider, brief, agentId, turn, synced, called, due: receiptPath ? due : [], receipt: receiptPath && due.length ? await json(receiptPath).catch(() => ({})) : {}, now: Date.now() });
+  if (!decision.any) return;
+  if (decision.receipt) await save(receiptPath, decision.receipt).catch(() => undefined);
+  await save(path, { ...turn, startedAt: turn?.startedAt ?? Date.now(), stopped: true, ...(decision.nudge ? { nudgedAt: Date.now() } : {}) });
   // The reply this Stop interrupts is the agent's real answer; what it says after the bookkeeping continuation answers
   // Follow-up. The inbox reports this one as the Finished reason (server/inbox-classifier.ts finishedReply).
   if (typeof event.last_assistant_message === "string" && event.last_assistant_message.trim()) await save(join(directory, "hook-state", `bookkeeping-${agentId}.json`), { at: Date.now(), reply: event.last_assistant_message.slice(0, 4000) }).catch(() => undefined);
-  const dueText = picked.lines.length ? named(dueHeader) + "\n" + picked.lines.map(l => `- ${l}`).join("\n") : null;
-  const reasons = [detached ? detachedNotice : null, dueText, sync ? stopReason + " This is metadata bookkeeping only; do not start queued repairs or recovery.\n\n" + context() : null, nudge ? named(nudgeReason) : null].filter(Boolean);
+  const reasons = [detached ? detachedNotice : null, decision.due.length ? dueBlock(decision.due, native) : null, decision.sync ? `${stopReason} ${syncBookkeeping}\n\n` + context() : null, decision.nudge ? say(nudgeReason) : null].filter(Boolean);
   process.stdout.write(JSON.stringify({ decision: "block", reason: reasons.join("\n\n") }) + "\n");
 }
 // Tests import shouldNudge without running the hook; the worker imports workspaceInstructions the same way.

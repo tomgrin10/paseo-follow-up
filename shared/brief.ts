@@ -110,10 +110,6 @@ export type NeedsYouRecord = { at: number; turnId: string | null; call: NeedsYou
   /** The questions this call created (the rest it pointed at or matched). Only these are replaced by a later call in the same turn. */
   createdIds?: string[] };
 
-/** The exact instruction appended to Follow-up's MCP instructions for root agents (design §7.2). */
-export const NEEDS_YOU_INSTRUCTION = "When you end a turn, call `needs_you` once, just before your final reply, with what the developer has to do next: a decision (give 2–3 options, what each means for them, and the one you recommend), an action only they can take (merge, approve, log in, run or send something), or kind=done (\"Nothing needed\" plus what you finished, in one line), which means there is nothing for the developer and won't flag you in their inbox. A decision or action that is already an open question (you asked it with ask_question, it is a blocked task's card, or it is still open from an earlier turn) is never restated: point at it with questions=[\"Q18\"], or say \"Still open: Q18 …\" in ask. Keep `ask` to one line and `context` to what they need to decide. Don't repeat your report there; still write your normal reply. Don't call it while a permission prompt is waiting or while you're still working.";
-/** The Stop-hook nudge's reason (R2). Short, because it lands in the agent's context. */
-export const NEEDS_YOU_NUDGE = "Before you stop, call needs_you once with what the developer has to do next: a decision with options (or questions=[\"Q18\"] for one that is already an open question), an action only they can take, or kind=done (\"Nothing needed\" plus what you finished), which means nothing for the developer and won't flag you. Then stop; don't repeat your reply.";
 
 /**
  * Validates a needs_you call the way ask_question is validated (§7.1). Throws with a message the agent can act on.

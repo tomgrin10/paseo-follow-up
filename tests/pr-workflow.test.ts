@@ -18,10 +18,10 @@ import { mergeBlockers } from "../shared/pr-actions";
 import { detect, PR_WORKFLOW_LABELS } from "../shared/pr-workflow";
 import type { Pr, Snapshot } from "../shared/model";
 import { pr, snapshot, workspace } from "./fixtures";
+import * as agentText from "../shared/agent-text.mjs";
 
 process.env.FOLLOW_UP_HOOK_IMPORT = "1";
-// @ts-expect-error plain JS hook, generated into hook-source.ts
-const hook = await import("../server/agent-hook.mjs") as { batchParagraph: (workflow?: unknown) => string };
+const hook = agentText;
 const mcp = await import("../server/mcp.mjs");
 const main = createRequire(import.meta.url)("./graphite-main-text.json") as { hookBatch: string; mcpBatch: string; tools: Record<string, string> };
 
@@ -430,7 +430,7 @@ test("GitHub mode: observation never asks Graphite, and stamps the workflow and 
 
 test("agent and hook text in GitHub mode contain no Graphite, gt or /fix-pr", () => {
   const texts = [
-    hook.batchParagraph(githubFlow), mcp.batchInstructions(githubFlow as never),
+    hook.batchParagraph(githubFlow), agentText.batchInstructions(githubFlow as never),
     ...Object.entries(main.tools).map(([name, d]) => mcp.describeAction(name, d, "github")),
   ];
   for (const text of texts) assert.doesNotMatch(text, GRAPHITE_WORDS, text);
@@ -451,7 +451,7 @@ test("Graphite-mode agent text is unchanged from main (snapshot)", () => {
   const rest = main.hookBatch.slice(hook.batchParagraph(undefined).length);
   for (const wf of [undefined, null, { mode: "graphite", reviewFix: "/fix-pr" }]) {
     assert.equal(hook.batchParagraph(wf) + rest, main.hookBatch);
-    assert.equal(mcp.batchInstructions(wf as never), main.mcpBatch);
+    assert.equal(agentText.batchInstructions(wf as never), main.mcpBatch);
   }
   assert.ok(main.hookBatch.startsWith(hook.batchParagraph(undefined)));
   for (const [name, d] of Object.entries(main.tools)) for (const wf of [null, "graphite"]) assert.equal(mcp.describeAction(name, d, wf as never), d);

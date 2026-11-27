@@ -12,8 +12,7 @@ import { WAIT_TOOLS } from "../server/wait";
 import * as mcp from "../server/mcp.mjs";
 // The hook reads stdin unless told it is being imported.
 process.env.FOLLOW_UP_HOOK_IMPORT = "1";
-// @ts-expect-error plain JS hook, generated into hook-source.ts
-const hook = await import("../server/agent-hook.mjs") as { TOOL_NAMES: string[] };
+const hook = await import("../shared/agent-text.mjs");
 // Every tool a session can list, plus every action: the bridge and the CLI still call an action by its own name.
 const ALL_TOOLS = [...new Set([...hook.TOOL_NAMES, ...[...mcp.tools, ...mcp.actionTools, ...mcp.overseerTools, ...mcp.lookupTools].map(t => t[0]).filter(n => n.includes("_")), ...WAIT_TOOLS])];
 

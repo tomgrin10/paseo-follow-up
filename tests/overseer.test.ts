@@ -17,6 +17,7 @@ import { PaseoGateway, type Agent, type Daemon, type withDaemon } from "../serve
 import { Overseer, type OverseerPaseo } from "../server/overseer";
 import type { State } from "../shared/model";
 import { pr, snapshot, workspace } from "./fixtures";
+import { shipped } from "./support/shipped";
 
 const NOW = Date.parse("2026-11-09T09:50:00.000Z");
 const at = (minutesAgo: number) => new Date(NOW - minutesAgo * 60_000).toISOString();
@@ -307,7 +308,7 @@ test("the Overseer's session skips the Stop-hook nudge and gets the digest inste
   const dir = await mkdtemp(join(tmpdir(), "overseer-hook-")); t.after(() => rm(dir, { recursive: true, force: true }));
   const { spawn } = await import("node:child_process");
   const { mkdir, copyFile } = await import("node:fs/promises");
-  await copyFile(new URL("../server/agent-hook.mjs", import.meta.url), join(dir, "agent-hook.mjs"));
+  await writeFile(join(dir, "agent-hook.mjs"), shipped("agent-hook.mjs"));
   await writeFile(join(dir, "hooks-enabled.json"), JSON.stringify({ expiresAt: Date.now() + 60_000, clientEntry: "/x" }));
   await writeFile(join(dir, "brief.json"), JSON.stringify({ enable_inbox: true, enable_brief_nudge: true, pending: [] }));
   await writeFile(join(dir, "overseer-digest.json"), JSON.stringify(digestFile("ov", fleet.map(r => r.workspaceId === "scim" ? { ...r, group: "needs" as const, ask: "Decision: A or B" } : r), Date.now())));

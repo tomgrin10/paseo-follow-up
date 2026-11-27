@@ -14,10 +14,10 @@ import { agentMerges, agentMergesKey, handsMergeBack, setHandedBackPrs, reviewer
 import { emptyReviewerConfig, setReviewerConfig } from "../shared/reviewers";
 import { INVARIANTS as STATUS_INVARIANTS } from "../shared/status-invariants";
 import { clock, pr, snapshot, workspace } from "./fixtures";
+import * as agentText from "../shared/agent-text.mjs";
 
 process.env.FOLLOW_UP_HOOK_IMPORT = "1";
-// @ts-expect-error plain JS hook, generated into hook-source.ts
-const hook = await import("../server/agent-hook.mjs") as { mergeLine: (workflow?: unknown) => string; NO_REVIEW_MERGE: string };
+const hook = agentText;
 const mcp = await import("../server/mcp.mjs");
 
 /**
@@ -130,8 +130,8 @@ test("agent text: a No review repository tells the agent to merge its own PR onc
   assert.equal(hook.mergeLine(undefined), "Merging and archiving remain the developer's actions.");
   assert.match(hook.mergeLine({ mode: "github", reviewFix: null, noReview: true }), /merge your own PR once CI is green/);
   for (const wf of [{ mode: "github", reviewFix: null }, { mode: "graphite", reviewFix: "/fix-pr" }]) {
-    assert.match(mcp.batchInstructions(wf as never), /Leave merging and archiving to the developer\.$/);
-    const own = mcp.batchInstructions({ ...wf, noReview: true } as never);
+    assert.match(agentText.batchInstructions(wf as never), /Leave merging and archiving to the developer\.$/);
+    const own = agentText.batchInstructions({ ...wf, noReview: true } as never);
     assert.match(own, /merge your own PR once CI is green/);
     assert.doesNotMatch(own, /Leave merging and archiving to the developer/);
   }

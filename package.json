@@ -20,7 +20,8 @@
     "README.md",
     "THIRD_PARTY_NOTICES.md",
     "docs/screenshots/follow-up-slide-*.png",
-    "scripts/build.mjs"
+    "scripts/build.mjs",
+    "scripts/inline.mjs"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
