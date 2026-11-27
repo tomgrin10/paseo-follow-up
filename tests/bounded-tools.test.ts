@@ -232,6 +232,7 @@ test("delivered task context preserves answers without starving recent history",
   const context = bigHistory({ questions: 11, batches: 0, open: 0 }).questions.map((q, i) => ({ ...q,
     id: `Q${1000 + i}`, taskId: `live-${i}`, question: "Which retry policy should the invoice queue use? ".repeat(12),
     background: "The invoice worker must recover safely after a timeout. ".repeat(12),
+    options: q.options.map(option => ({ ...option, consequence: "Retry the invoice after checking whether the provider accepted it. ".repeat(8) })),
   }));
   const pending = { ...context[0], id: "Q2000", answer: { ...context[0].answer!, delivery: { ...context[0].answer!.delivery, state: "failed" as const } } };
   w.questions.push(...context, pending);
@@ -255,6 +256,7 @@ test("delivered task context preserves answers without starving recent history",
     const kept = view.questions.find(x => x.id === q.id)!;
     assert.deepEqual(kept.answer, questionSchema.parse(q).answer, "delivery and answer stay available");
     assert.equal(kept.taskId, q.taskId);
+    assert.ok(!("options" in kept) && !("background" in kept), "delivered context omits old decision evidence");
   }
   assert.deepEqual(agentView(w).questions.find(q => q.id === pending.id), pending, "pending delivery retains its complete question");
   for (const kind of ["prs", "tasks", "questions", "batches", "prActions"] as const) {

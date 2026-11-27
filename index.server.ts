@@ -1,4 +1,3 @@
-import { compact } from "./server/mcp.mjs";
 import { pathToFileURL } from "node:url";
 import { plainError } from "./shared/errors";
 import { TranscriptTitleLookup, TranscriptTitleStore, trackedTitleTranscripts } from "./server/transcript-titles";
@@ -71,6 +70,7 @@ import { Deployments } from "./server/deployments";
 import { AgentHooks } from "./server/agent-hooks";
 import { withSessionMcp } from "./server/session-mcp";
 import { nativeTools, nativeToolsAvailable, type Invoke, type Live } from "./server/native-tools";
+import { compact } from "./server/mcp.mjs";
 import { Wait, waitStatus, type WaitPaseoConfig } from "./server/wait";
 import { removeGlobalRegistrations } from "./server/mcp-registrations";
 import { TrustBypass } from "./server/trust-bypass";
