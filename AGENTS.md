@@ -1876,6 +1876,18 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    times in one millisecond, `follow.usage` twice within 3 s and `follow.linear-queue` three times. Guarded by
    `tests/one-read-per-key.test.ts` (the real stores on a 0.16 and a 0.15 host, each read at most once).
 
+148. **Typing never redraws unchanged rows** (`typing-never-redraws-unchanged-rows`). A key in Home's search redraws
+   only the rows whose drawn content moved. `Row` (`client/home-list.tsx`) compares its search hit by value
+   (`sameHit`, `shared/search.ts`), never by identity, since every key builds new hit objects; the result pick handed
+   to rows is one stable callback; and a row's `ChipRail` and time are memoised on its `sig`, so a highlight that moves
+   redraws the row's text, not its chips. The field takes each key at once and the results follow at low priority
+   (`useDeferredValue` in `useOmnibox`, `client/home-chrome.tsx`), so a newer key drops a list render still running;
+   Enter reads the typed query's own results (`enterItem`), never the list a key behind. 2026-11-27, the broad perf
+   check on the live-sized seed: typing "ledger" took 2.0-2.4 s on a phone at 6x CPU (~350 ms a key) and drew 27,700
+   components for six keys, every one of ~60 results with its chips and time on every key. Guarded by
+   `tests/search-rows.test.ts` (the real `HomeList`: same query again draws nothing, a key that moves no highlight
+   draws no row, a key that moves one draws that row and no rail).
+
 ## Bugs
 
 Every bug is fixed for its whole class:

@@ -383,6 +383,19 @@ export function rowHit(hit: SearchHit, row: { title: string; agent?: string | nu
   return { titleRanges, agentRanges, lineRanges: null, via: hit.via };
 }
 
+const sameRanges = (a: Range[] | null | undefined, b: Range[] | null | undefined) =>
+  a === b || (!!a && !!b && a.length === b.length && a.every((r, i) => r[0] === b[i]![0] && r[1] === b[i]![1]));
+/**
+ * typing-never-redraws-unchanged-rows (invariant 148): two hits draw the same row when their highlights and their
+ * "<Field> · excerpt" line are equal. Each key builds new hit objects, so Row compares them by this, not by identity.
+ */
+export function sameHit(a: RowHit | null | undefined, b: RowHit | null | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return !a && !b;
+  return sameRanges(a.titleRanges, b.titleRanges) && sameRanges(a.agentRanges, b.agentRanges) && sameRanges(a.lineRanges, b.lineRanges)
+    && (a.via === b.via || (!!a.via && !!b.via && a.via.field === b.via.field && a.via.text === b.via.text && sameRanges(a.via.ranges, b.via.ranges)));
+}
+
 /**
  * The sidebar view's filter (2.1): the same matcher and the same rank as Home's search, applied in place. Groups keep
  * their order; inside each, rows rank as Home's search ranks them (`byRank`: title matches first) and an equal rank

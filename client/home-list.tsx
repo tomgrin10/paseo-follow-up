@@ -4,7 +4,7 @@ import { View, type FlatList as NativeFlatList } from "react-native";
 import { Pressable, Text } from "./text";
 import { Icon, FlatList } from "@getpaseo/plugin/client/ui";
 import { type Badge, type HomeGroupId, type HomeModel, type Workstream, prChipSpoken, railChips } from "../shared/home";
-import { ASK_KEY, excerpt, FIELD_LABEL, type OmniboxItem, type Range, type RowHit, type SearchHit } from "../shared/search";
+import { ASK_KEY, excerpt, FIELD_LABEL, type OmniboxItem, type Range, type RowHit, type SearchHit, sameHit } from "../shared/search";
 import { AskRow, PriorityLine } from "./home-chrome";
 import { age, wakeLabel, wakeShort } from "../shared/inbox";
 import { headlineColor, mergedColor, readable, runningColor, tint, toneColor, withAlpha, type Colors } from "./theme";
@@ -129,10 +129,14 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [model, closed, openProjects, pages, briefLine, results, hits, filter, !!overseer, touch, !!afterNeeds, arranged]);
   // A result picks through onResult; Row only knows its key.
+  // Read through a ref, so a key that brings new results (and Home's new onResult) never hands every row a new onSelect
+  // (typing-never-redraws-unchanged-rows).
+  const picking = useRef({ results, onResult }); picking.current = { results, onResult };
   const pickResult = useCallback((key: string) => {
+    const { results, onResult } = picking.current;
     const item = results?.find(i => !i.ask && i.key === key);
     if (item) onResult?.(item);
-  }, [results, onResult]);
+  }, []);
 
   const render = useCallback(({ item }: { item: Entry }) => {
     switch (item.type) {
@@ -305,10 +309,16 @@ export function WakeTime({ until, c, size = 12 }: { until: string; c: Colors; si
   const text = wakeShort(until, Math.max(now, Date.now()));
   return text ? <Text style={{ color: c.foregroundMuted, fontSize: size, fontVariant: ["tabular-nums"], minWidth: 26, textAlign: "right" }}>{text}</Text> : null;
 }
+/**
+ * typing-never-redraws-unchanged-rows (invariant 148): how many times a row and its chip rail drew, read by
+ * tests/search-rows.test.ts. A row draws again only when what it shows moved; its rail and time only when the row did.
+ */
+let rowDraws = 0, chipRails = 0;
+export const rowRenders = () => ({ rows: rowDraws, rails: chipRails });
 /** The right-hand time: when a Later row comes back, otherwise how long ago. */
-function RowTime({ s, c, size }: { s: Workstream; c: Colors; size: number }) {
+const RowTime = memo(function RowTime({ s, c, size }: { s: Workstream; c: Colors; size: number }) {
   return <View testID="follow-up-row-time" style={{ flexShrink: 0 }}>{s.group === "later" && s.wakeAt ? <WakeTime until={s.wakeAt} c={c} size={size} /> : <Age iso={s.at} c={c} size={size} />}</View>;
-}
+}, (a, b) => a.s.sig === b.s.sig && a.c === b.c && a.size === b.size);
 
 /**
  * row-chips-never-cover-the-time: a desktop row's badges and PR chip, in priority order (most telling first). They yield
@@ -316,13 +326,15 @@ function RowTime({ s, c, size }: { s: Workstream; c: Colors; size: number }) {
  * clips (so the lowest-priority chips drop, last first), and a lone chip truncates. Guarded by
  * `scripts/screenshots.mjs --only rowchips` (CDP boxes at list widths 320, 360 and 400) and tests/row-chips.test.ts.
  */
-function ChipRail({ s, c, dim = false }: { s: Workstream; c: Colors; /** An Older row: chips at 60 %, like its glyph. */ dim?: boolean }) {
+const ChipRail = memo(function ChipRail({ s, c, dim = false }: { s: Workstream; c: Colors; /** An Older row: chips at 60 %, like its glyph. */ dim?: boolean }) {
+  chipRails++;
   const chips = railChips(s);
   if (chips.length === 0) return null;
   return <View testID="follow-up-row-chips" style={{ ...(dim ? { opacity: 0.6 } : {}), flexShrink: 1000, minWidth: 0, height: 20, overflow: "hidden", flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", columnGap: 10, rowGap: 4 }}>
     {chips.map(ch => ch.kind === "badge" ? <BadgeView key={ch.badge.text} b={ch.badge} c={c} /> : <PrChipView key="pr" s={s} c={c} />)}
   </View>;
-}
+  // Show › Pull request off hands the rail a copy without the PR and the same sig, so the PR's presence counts too.
+}, (a, b) => a.s.sig === b.s.sig && !!a.s.pr === !!b.s.pr && a.c === b.c && a.dim === b.dim);
 
 /** The age on the right. It re-renders on the shared minute clock without touching its row. */
 export function Age({ iso, c, size = 12 }: { iso: string | null; c: Colors; size?: number }) {
@@ -362,6 +374,7 @@ export function rowDetail(s: Workstream, view: HomeView, facts: HomeListProps["f
 
 type RowProps = { s: Workstream; sig: string; detail?: RowDetail; detailSig?: string; theme: Theme; dense: boolean; touch: boolean; selected: boolean; onSelect: (key: string) => void; onOpen?: (key: string) => void; onMenu: OpenRowMenu; menuOpen?: boolean; hit?: RowHit | null; onSendNow?: (s: Workstream) => Promise<void>; selectedBg?: string };
 const Row = memo(function Row({ s: raw, theme, dense, touch, selected, onSelect, onOpen, onMenu, menuOpen = false, hit = null, onSendNow, selectedBg, detail }: RowProps) {
+  rowDraws++;
   // Title › Branch name swaps the row's title; everything else reads the workstream as built.
   const s = detail && detail.title !== raw.title ? { ...raw, title: detail.title } : raw;
   const showTime = detail?.time ?? true;
@@ -454,7 +467,7 @@ const Row = memo(function Row({ s: raw, theme, dense, touch, selected, onSelect,
     </View>{!!why && <View style={{ paddingRight: 40 }}><PriorityLine reason={why.reason} source={why.source} c={c} /></View>}</View>}
     {!touch && !dense && showTime && <RowTime s={s} c={c} size={12} />}
   </Pressable>;
-}, (a, b) => a.sig === b.sig && a.selected === b.selected && a.theme === b.theme && a.dense === b.dense && a.touch === b.touch && a.onSelect === b.onSelect && a.onOpen === b.onOpen && a.onMenu === b.onMenu && a.menuOpen === b.menuOpen && a.hit === b.hit && a.onSendNow === b.onSendNow && a.selectedBg === b.selectedBg && a.detailSig === b.detailSig);
+}, (a, b) => a.sig === b.sig && a.selected === b.selected && a.theme === b.theme && a.dense === b.dense && a.touch === b.touch && a.onSelect === b.onSelect && a.onOpen === b.onOpen && a.onMenu === b.onMenu && a.menuOpen === b.menuOpen && sameHit(a.hit, b.hit) && a.onSendNow === b.onSendNow && a.selectedBg === b.selectedBg && a.detailSig === b.detailSig);
 
 /**
  * Paseo's detail line under a row: branch, project, the PR with its checks, labels (as Display › Show leaves them),
