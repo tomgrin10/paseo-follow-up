@@ -4229,6 +4229,8 @@ async function sendingShots({ shoot, seeded, call, home }) {
   const held = [/^Auto-sends are paused on this machine/, busyLine];
   await shoot("sending-hold-home-light", DESKTOP, "light", shown([...held, "You haven't messaged this agent lately, so it waits for you"]));
   await shoot("sending-hold-home-phone-light", PHONE, "light", shown(held, true));
+  // Onboarding email's Auto goes back off first, so its repair doesn't take the one turn step 3 stages.
+  await call("follow.control", { workspaceId: ws("email").workspaceId, enable_auto_sends: false });
   await fs.writeFile(process.env.FOLLOW_SHOTS_CGROUP, JSON.stringify({ high: 1000, current: 100 }));
   await until("the governor lets auto-sends go", async () => (await call("follow.usage", {})).resources?.level !== "constrained", { tries: 120, every: 500 });
   // 3. Invariant 133: Repairs at once at 1. Tax rates' repair goes out on its own and its agent keeps working on it, so
@@ -4241,7 +4243,13 @@ async function sendingShots({ shoot, seeded, call, home }) {
   await fs.writeFile(scriptsFile, JSON.stringify(scripts));
   const record = async w => (await call("follow.list", {})).workspaces.find(x => x.id === w.workspaceId);
   await call("follow.control", { workspaceId: holder.workspaceId, enable_auto_sends: true });
+  // The clock crawls in the harness, so step it past the queue's quiet window once the repair is queued.
+  const stepClock = async ms => { const c = JSON.parse(await fs.readFile(clockFile, "utf8")); await setDaemonClock(Math.round(c.fake + (Date.now() - c.real) * c.rate) + ms); };
+  await until("Tax rates' repair is queued on its own", async () => { await call("follow.refresh", {}); return (await record(holder))?.batches.some(b => b.automatic); }, { tries: 240, every: 500 });
+  await stepClock(5 * 60_000);
   await until("Tax rates' repair goes out on its own", async () => { await call("follow.refresh", {}); return (await record(holder))?.batches.some(b => b.state === "sent" && b.automatic); }, { tries: 240, every: 500 });
+  // Its turn ended without an ask, so it would sit in Needs you; signed off, its row shows in Sending.
+  await call("follow.inbox-act", { action: "sign_off", agentIds: [queued.agentId] });
   await call("follow.control", { workspaceId: queued.workspaceId, enable_auto_sends: true });
   await until("Coupon codes waits for a free turn", async () => { await call("follow.refresh", {}); return (await record(queued))?.sendWait === "limit"; }, { tries: 240, every: 500 });
   const limitLine = /waits until another workspace's repair finishes/;
