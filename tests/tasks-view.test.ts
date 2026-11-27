@@ -95,8 +95,7 @@ test("tasks-are-the-agent-s: the live line reads only what's due, never the whol
 test("tasks-are-the-agent-s: the card folds by default, has no search, and the send queue is its own card", async () => {
   const src = (f: string) => readFile(join(import.meta.dirname, "..", f), "utf8");
   const tasks = await src("client/tasks.tsx");
-  assert.match(tasks, /title="Agent's tasks" fold=\{\{ open: shown/);
-  assert.match(tasks, /const shown = open\("tasks"\)/, "collapsed unless the developer opened it");
+  assert.match(tasks, /title="Agent's tasks" fold=\{\{ id: "tasks", defaultOpen: false/, "collapsed unless the developer opened it");
   assert.doesNotMatch(tasks, /useSectionSearch|StripRow|RepairTaskRow|label="Auto-send"/, "no search, no send queue, no repairs, no per-task Auto-send switch");
   const messages = await src("client/messages.tsx");
   assert.match(messages, /export function MessagesCard/);

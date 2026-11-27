@@ -85,6 +85,21 @@ export function readOpen(id: string, fallback: boolean, store: KeyValue = device
   return v === "1" ? true : v === "0" ? false : fallback;
 }
 export const writeOpen = (id: string, open: boolean, store: KeyValue = deviceStorage) => store.set(collapseKey(id), open ? "1" : "0");
+/**
+ * The workspace panel's sections, each with its own fold id (client/fold.tsx, invariant 132, panel-sections-fold): the
+ * same id in every workspace, so a fold is the developer's choice for that section on this device. A new section
+ * joins this list (tests/panel-folds.test.ts).
+ */
+export const PANEL_FOLDS = {
+  needs: "panel.needs",
+  questions: "panel.questions",
+  messages: "panel.messages",
+  prs: "panel.prs",
+  tasks: "panel.tasks",
+  activity: "panel.activity",
+  workspace: "panel.workspace",
+} as const;
+export type PanelFold = keyof typeof PANEL_FOLDS;
 
 /**
  * Home's group folds persist per device, except Needs you: it always opens on mount, because asks are the one thing

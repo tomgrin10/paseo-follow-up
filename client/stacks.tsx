@@ -146,6 +146,13 @@ function StackRows({ name, prs, theme, open, toggle, onOpen, compact, workspaceR
 /** Stacks on one page of the Pull requests card; each stack pages its own rows. */
 export const STACKS_PER_PAGE = 10;
 
+/** Folded: how many PRs in how many stacks, when the open count alone doesn't say it. */
+function prsFolded(stacks: number, prs: number, open: number): string | null {
+  if (!prs) return null;
+  const all = `${prs} PR${prs === 1 ? "" : "s"}`;
+  return stacks > 1 ? `${all} in ${stacks} stacks` : open === prs ? null : all;
+}
+
 export function StacksCard({ workspace: w, theme, compact, open, toggle, onOpen, wide = false }: { workspace: Workspace; theme: Theme; compact: boolean; open: (key: string) => boolean; toggle: (key: string) => void; onOpen: (key: string) => void; wide?: boolean }) {
   const c = theme.colors; const t = text(c);
   const stacks = orderedStacks(w.prs);
@@ -165,7 +172,8 @@ export function StacksCard({ workspace: w, theme, compact, open, toggle, onOpen,
   // the stacks with a hit, so no page is empty.
   const stackRows = (list: typeof stacks, isSettled: boolean) => <PagedRows items={hits ? list.filter(s => s.prs.some(p => hits.has(p))) : list} size={STACKS_PER_PAGE} resetKey={search.query ?? ""} theme={theme} compact={compact} noun="stacks"
     row={s => <StackRows key={s.name} name={s.name} prs={s.prs} theme={theme} open={open} toggle={toggle} onOpen={onOpen} compact={compact} workspaceRepo={w.repo} settled={isSettled} wide={wide} hits={hits} />} />;
-  return <Card theme={theme} compact={compact} icon="GitPullRequest" title="Pull requests" count={openCount ? `${openCount} open` : undefined} right={search.button} search={search.header}>
+  return <Card theme={theme} compact={compact} icon="GitPullRequest" title="Pull requests" count={openCount ? `${openCount} open` : undefined} right={search.button} search={search.header}
+    fold={{ id: "prs", summary: prsFolded(stacks.length, w.prs.length, openCount) }}>
     {hits && !hits.size && <NoMatchRow section="prs" query={search.query!} theme={theme} compact={compact} />}
     {!hits && inFlight.map(a => <View key={a.id} style={{ flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1, borderTopColor: c.border }}>
       <View style={{ paddingTop: 3 }}><Spinner color={c.accent} size={12} /></View>

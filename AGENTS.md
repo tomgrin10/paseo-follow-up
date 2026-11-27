@@ -1656,6 +1656,17 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    `tests/brief-timeline.test.ts`. The unchecked append predates 2.6.0-beta.1; that beta added the provider turn-end
    check path, but no evidence ties that path to the observed append failures.
 
+132. **Every panel section folds** (`panel-sections-fold`). Every section of the workspace panel (Needs you, Your
+   questions, Messages to the agent, Pull requests, Agent's tasks, Activity, Spec, agent and recovery) folds through
+   one fold (`client/fold.tsx`: `useFold` and `FoldButton`), the same one settings' `Disclosure` uses: the header is
+   a button with its expanded state (a click or Enter toggles it), folded the body unmounts and the header keeps its
+   count and a short plain line, and open or closed is remembered per device and per section (`PANEL_FOLDS`,
+   `shared/settings-nav.ts`), never per workspace, so it survives reloads. Open by default, except Agent's tasks and
+   Spec, agent and recovery. Unlike Home's Needs you group (invariant 22), the panel's Needs you stays folded once the
+   developer folds it. A new section takes a `PANEL_FOLDS` id or an exemption with a reason. 2026-11-27, the
+   developer: "Make sure all panels on the right sidebar are collapsable, like the agent's tasks one, also the needs
+   you panel." Guarded by `tests/panel-folds.test.ts` (every element the panel lays out, every `Card`) and
+   `scripts/screenshots.mjs --only panel-folds` (Enter both ways and a reload).
 133. **Auto-send runs a few turns at a time** (`auto-send-runs-a-few-turns-at-a-time`). At most `maxAutoSends` turns
    that Auto-send started run at once across every workspace (default `DEFAULT_MAX_AUTO_SENDS` = 2, 1-10 in Settings →
    Following → Advanced, `set_follow_settings maxAutoSends`), loaded agents or not, so waking many agents never floods Paseo. A

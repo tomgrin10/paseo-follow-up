@@ -47,7 +47,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as the CHANGELOG's newest stable, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["menu-bounds", "tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "pr-now", "gallery", "frames", "onboarding", "setup-popup", "advanced"];
+const REVIEW_SHOTS = ["menu-bounds", "tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "pr-now", "panel-folds", "gallery", "frames", "onboarding", "setup-popup", "advanced"];
 /** Pasted images and their Add image button share one harness setup (an Overseer and the fixture provider taking images). */
 const PASTE_LIKE = only => only.includes("paste-images") || only.includes("attach-images");
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
@@ -747,7 +747,7 @@ async function seed({ call, home }) {
   if (only.includes("review-mode") || only.includes("pr-link")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }] });
   // reviewers-click: Ravi and Mina review example/app, so each PR's row reads "Add reviewers to #N: Ravi and Mina".
   if (only.includes("reviewers-click")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }, { login: "mina", name: "Mina" }] });
-  const specs = [...WORKSPACES.filter(w => !only.includes("pr-now") || ["audit", "billing"].includes(w.key)).filter(w => !(argv.includes("--rename-fixup-review") || only.includes("local-titles")) || ["audit", "billing"].includes(w.key)), ...(only.includes("needs-you-states") || only.includes("tasks-view") || only.includes("own-answer") || only.includes("more-context") || only.includes("dismiss") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") || PASTE_LIKE(only) ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") || only.includes("dismiss") ? MERGE_CLICK_STATES : []), ...(only.includes("reviewers-click") ? REVIEWERS_CLICK_STATES : []), ...(only.includes("pr-scale") ? PR_SCALE_STATES : []), ...(only.includes("batch-churn") ? BATCH_CHURN_STATES : []), ...(only.includes("scheduled-tasks") ? SCHEDULED_STATES : []), ...(only.includes("paged-lists") ? PAGED_STATES : []), ...(only.includes("now-line") ? NOW_LINE_STATES : []), ...(only.includes("pr-now") ? PR_NOW_STATES : [])];
+  const specs = [...WORKSPACES.filter(w => !only.includes("pr-now") || ["audit", "billing"].includes(w.key)).filter(w => !(argv.includes("--rename-fixup-review") || only.includes("local-titles")) || ["audit", "billing"].includes(w.key)), ...(only.includes("needs-you-states") || only.includes("panel-folds") || only.includes("tasks-view") || only.includes("own-answer") || only.includes("more-context") || only.includes("dismiss") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") || PASTE_LIKE(only) ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") || only.includes("dismiss") ? MERGE_CLICK_STATES : []), ...(only.includes("reviewers-click") ? REVIEWERS_CLICK_STATES : []), ...(only.includes("pr-scale") ? PR_SCALE_STATES : []), ...(only.includes("batch-churn") ? BATCH_CHURN_STATES : []), ...(only.includes("scheduled-tasks") ? SCHEDULED_STATES : []), ...(only.includes("paged-lists") ? PAGED_STATES : []), ...(only.includes("now-line") ? NOW_LINE_STATES : []), ...(only.includes("pr-now") ? PR_NOW_STATES : [])];
   // Geometry checks need one question, one repair and one permission row, not the full README inventory.
   if (only.includes("menu-bounds")) specs.splice(0, specs.length, ...specs.filter(w => ["billing", "email", "search"].includes(w.key)));
   if (only.includes("layout-search")) {
@@ -2172,7 +2172,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
         await openChat(page, s.title, s.prompt);
         await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
         await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
-        await page.getByRole("button", { name: /^Agent's tasks: .*Show them$/ }).last().click();
+        { const f = page.getByRole("button", { name: /^Agent's tasks, / }).last(); await f.waitFor({ timeout: 60000 }); if (await f.getAttribute("aria-expanded") !== "true") await f.click(); }
         const due = page.getByText(/^Due since /).last();
         await due.waitFor({ timeout: 60000 });
         await page.setViewportSize(PHONE);
@@ -2239,7 +2239,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   };
 
   const TALL = { width: DESKTOP.width, height: 1300 };
-    const fold = page => page.getByRole("button", { name: /^Agent's tasks: / }).filter({ visible: true }).last();
+    const fold = page => page.getByRole("button", { name: /^Agent's tasks, / }).filter({ visible: true }).last();
     const panel = async page => {
       await page.setViewportSize(TALL);
       await openChat(page, spec.title, spec.prompt);
@@ -2247,7 +2247,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       await fold(page).waitFor({ timeout: 60_000 });
     };
     // Each shot sets the fold it shows instead of toggling it, so no shot depends on the one before (folded is the default).
-    const setFold = async (page, open) => { const f = fold(page); if ((await f.getAttribute("aria-expanded")) !== String(open)) await f.click(); await page.waitForFunction(([want]) => [...document.querySelectorAll('[aria-expanded]')].some(el => /^Agent's tasks: /.test(el.getAttribute("aria-label") ?? "") && el.getAttribute("aria-expanded") === want), [String(open)]); };
+    const setFold = async (page, open) => { const f = fold(page); if ((await f.getAttribute("aria-expanded")) !== String(open)) await f.click(); await page.waitForFunction(([want]) => [...document.querySelectorAll('[aria-expanded]')].some(el => /^Agent's tasks, /.test(el.getAttribute("aria-label") ?? "") && el.getAttribute("aria-expanded") === want), [String(open)]); };
     const expand = async page => { await setFold(page, true); await page.getByText(/^Stale/).filter({ visible: true }).first().waitFor({ timeout: 30_000 }); };
     for (const theme of ["light", "dark"]) {
       await shoot(`tv-panel-${theme}`, TALL, theme, async page => { await panel(page); await setFold(page, false); });
@@ -2283,6 +2283,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   if (only.includes("scheduled-tasks")) await scheduledShots({ shoot, seeded, call, cli });
   if (only.includes("now-line")) await nowLineShots({ shoot });
   if (only.includes("pr-now")) await prNowShots({ shoot, call, seeded });
+  if (only.includes("panel-folds")) await panelFoldShots({ shoot });
   if (only.includes("own-answer")) await ownAnswerShots({ shoot });
   if (only.includes("more-context")) await moreContextShots({ shoot, call });
   if (only.includes("your-questions")) await yourQuestionsShots({ shoot, call, seeded, home, cli });
@@ -2733,7 +2734,7 @@ async function pagedListShots({ shoot }) {
       await page.keyboard.type("staging"); await page.waitForTimeout(800); await into(page, pager(page)); await check(page);
     });
     await shoot(`pl-tasks-${theme}`, TALL, theme, async page => {
-      await panel(page); await page.getByRole("button", { name: /^Agent's tasks: / }).filter({ visible: true }).first().click(); await pager(page).waitFor();
+      await panel(page); { const f = page.getByRole("button", { name: /^Agent's tasks, / }).filter({ visible: true }).first(); await f.waitFor({ timeout: 60000 }); if (await f.getAttribute("aria-expanded") !== "true") await f.click(); } await pager(page).waitFor();
       await next(page, 1); await into(page, pager(page)); await check(page, null, await pager(page).innerText());
     });
     const phone = async page => {
@@ -4513,6 +4514,102 @@ async function nowLineShots({ shoot }) {
   }
 }
 /**
+ * Every panel section folds (`--only panel-folds`, panel-sections-fold): one workspace's panel with every section
+ * open (also from the top), every one folded, and a mix, desktop light and dark, and the phone (larger view) dark.
+ * Every fold arrow has one size, color and place. Enter folds and opens
+ * a header, and a fold survives a reload. Folds are set by the header buttons' own aria-expanded.
+ */
+async function panelFoldShots({ shoot }) {
+  const spec = NEEDS_YOU_STATES.find(s => s.key === "ny-tasks");
+  const TALL = { width: DESKTOP.width, height: 1400 };
+  const TITLES = ["Needs you", "Your questions", "Messages to the agent", "Pull requests", "Agent's tasks", "Activity", "Spec, agent and recovery"];
+  const header = (page, title) => page.getByRole("button", { name: new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\']/g, "\\$&")}(,|$)`) }).filter({ visible: true }).first();
+  const setFolds = async (page, want) => {
+    for (const title of TITLES) {
+      const h = header(page, title);
+      if (!await h.count()) continue;
+      const open = want[title] ?? want.all;
+      if ((await h.getAttribute("aria-expanded")) !== String(open)) await h.click();
+      await page.waitForFunction(([name, v]) => [...document.querySelectorAll("[aria-expanded]")].some(el => (el.getAttribute("aria-label") ?? "").startsWith(name) && el.getAttribute("aria-expanded") === v), [title, String(open)]);
+    }
+  };
+  // capture opens every page at DESKTOP: the tall desktop shots resize here (the phone ones resize after).
+  const panel = async page => {
+    await page.setViewportSize(TALL);
+    await openChat(page, spec.title, spec.prompt);
+    await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+    await header(page, "Needs you").waitFor({ timeout: 60_000 });
+  };
+  const noSideways = name => async page => { if (await page.evaluate(() => document.documentElement.scrollWidth) > PHONE.width) throw new Error(`${name} scrolls sideways`); };
+  // Every fold arrow alike and in one place (panel-sections-fold): the same size and color, at the button's end, the
+  // same distance from its right edge, so it sits just before any controls the section has (Activity's tabs).
+  const sameArrows = name => async page => {
+    const arrows = await page.evaluate(() => [...document.querySelectorAll('[data-fold-chevron="end"]')].filter(el => el.getClientRects().length).map(el => {
+      const r = el.getBoundingClientRect(), b = el.closest("[aria-expanded]").getBoundingClientRect();
+      return { label: el.closest("[aria-expanded]").getAttribute("aria-label"), w: r.width, h: r.height, gap: Math.round(b.right - r.right), color: getComputedStyle(el.querySelector("svg") ?? el).color + (el.querySelector("svg")?.getAttribute("stroke") ?? "") };
+    }));
+    const cut = await page.evaluate(() => [...document.querySelectorAll("[aria-expanded] div")].filter(el => el.getClientRects().length && el.closest('[aria-expanded]').querySelector('[data-fold-chevron="end"]') && !el.children.length && el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).fontWeight === "600").map(el => el.textContent));
+    // A title cut to "Acti…" by its header's controls (a summary may ellipsize by design).
+    if (cut.length) throw new Error(`${name}: a fold header's title is cut: ${cut.join(", ")}`);
+    if (arrows.length < 5) throw new Error(`${name}: only ${arrows.length} fold arrows`);
+    for (const a of arrows) if (Math.abs(a.w - 14) > 0.5 || Math.abs(a.h - 14) > 0.5 || a.gap !== arrows[0].gap || a.color !== arrows[0].color)
+      throw new Error(`${name}: ${a.label}'s arrow differs (${JSON.stringify(a)} vs ${JSON.stringify(arrows[0])})`);
+  };
+  // The panel from its top: its scroll area back to 0.
+  const toTop = async page => {
+    await page.evaluate(() => { for (let el = document.querySelector('[data-fold-chevron="end"]'); el; el = el.parentElement) if (el.scrollHeight > el.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(el).overflowY)) el.scrollTop = 0; });
+    await page.waitForTimeout(300);
+  };
+  const MIX = { all: false, "Needs you": true, "Agent's tasks": true, "Pull requests": true };
+  for (const theme of ["light", "dark"]) {
+    await shoot(`pf-open-${theme}`, TALL, theme, async page => { await panel(page); await setFolds(page, { all: true }); await sameArrows("pf-open")(page); });
+    // From the top, open: Needs you, Your questions and Pull requests.
+    await shoot(`pf-open-top-${theme}`, TALL, theme, async page => {
+      await panel(page); await setFolds(page, { all: true }); await toTop(page);
+      for (const title of ["Needs you", "Your questions", "Pull requests"]) {
+        const box = await header(page, title).boundingBox();
+        if (!box || box.y < 0 || box.y + box.height > TALL.height) throw new Error(`pf-open-top: ${title} isn't in view (${JSON.stringify(box)})`);
+      }
+    });
+    await shoot(`pf-folded-${theme}`, TALL, theme, async page => { await panel(page); await setFolds(page, { all: false }); });
+    await shoot(`pf-mix-${theme}`, TALL, theme, async page => { await panel(page); await setFolds(page, MIX); await sameArrows("pf-mix")(page); });
+  }
+  await shoot("pf-phone-dark", PHONE, "dark", async page => {
+    await panel(page);
+    await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
+    await page.setViewportSize(PHONE);
+    await header(page, "Needs you").waitFor({ timeout: 60_000 });
+    await setFolds(page, { all: true }); await sameArrows("pf-phone")(page);
+    await setFolds(page, { all: false, "Needs you": true });
+    await noSideways("pf-phone")(page);
+  });
+  await shoot("pf-phone-folded-dark", PHONE, "dark", async page => {
+    await panel(page);
+    await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
+    await page.setViewportSize(PHONE);
+    await header(page, "Needs you").waitFor({ timeout: 60_000 });
+    await setFolds(page, { all: false });
+    await noSideways("pf-phone-folded")(page);
+  });
+  // The keyboard: Enter folds Needs you and opens it again; a fold survives a reload.
+  await shoot("pf-keys-light", TALL, "light", async page => {
+    await panel(page); await setFolds(page, { all: true });
+    const needs = header(page, "Needs you");
+    const expanded = want => page.waitForFunction(v => [...document.querySelectorAll("[aria-expanded]")].some(el => (el.getAttribute("aria-label") ?? "").startsWith("Needs you") && el.getAttribute("aria-expanded") === v), want, { timeout: 5000 });
+    const where = () => page.evaluate(() => { const a = document.activeElement; return `${a?.tagName} ${a?.getAttribute("aria-label")} expanded=${a?.getAttribute("aria-expanded")}`; });
+    await needs.focus(); await page.keyboard.press("Enter");
+    await expanded("false").catch(async e => { throw new Error(`Enter didn't fold Needs you (focus: ${await where()}): ${e.message}`); });
+    await needs.focus(); await page.keyboard.press("Enter");
+    await expanded("true").catch(async e => { throw new Error(`Enter didn't open Needs you again (focus: ${await where()}): ${e.message}`); });
+    await setFolds(page, { all: true, "Pull requests": false });
+    await page.reload();
+    await page.getByRole("button", { name: "Follow-up", exact: true }).last().waitFor({ timeout: 60_000 });
+    if (!await header(page, "Needs you").count()) await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+    await header(page, "Pull requests").waitFor({ timeout: 60_000 });
+    if ((await header(page, "Pull requests").getAttribute("aria-expanded")) !== "false") throw new Error("the Pull requests fold didn't survive a reload");
+  });
+}
+/**
  * Scheduled tasks (`--only scheduled-tasks`, a-scheduled-task-arrives-once-at-its-time): the Tasks card with a time
  * still to send, one sent and one not sent (and why), the live line naming the check-back time; Send on a schedule's
  * At a time (opened on the task's time, and a time it refuses); Home's Waiting row. Desktop and phone, light and dark.
@@ -4538,7 +4635,7 @@ async function scheduledShots({ shoot, seeded, call, cli }) {
     try { const r = await call("follow.get", { workspaceId: w.workspaceId }); return r.workspace.obligations.some(o => o.trigger?.notSent); } catch { return false; }
   }, { tries: 600, every: 500 });
   const TALL = { width: DESKTOP.width, height: 1100 };
-  const fold = page => page.getByRole("button", { name: /^Agent's tasks: / }).filter({ visible: true }).last();
+  const fold = page => page.getByRole("button", { name: /^Agent's tasks, / }).filter({ visible: true }).last();
   const expand = async page => {
     await fold(page).waitFor({ timeout: 60_000 });
     if ((await fold(page).getAttribute("aria-expanded")) !== "true") await fold(page).click();

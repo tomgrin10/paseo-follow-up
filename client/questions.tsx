@@ -497,7 +497,7 @@ export function ActivityCard({ workspace: w, theme, compact, now, open, toggle, 
   const tabButton = (id: ActivityTab, label: string, count?: number) => {
     const selected = tab === id;
     return <Pressable key={id} accessibilityRole="tab" aria-selected={selected} accessibilityState={{ selected }} accessibilityLabel={count !== undefined ? `${label}, ${count}` : label} onPress={() => setTab(id)} hitSlop={4}
-      style={state => ({ flexDirection: "row", alignItems: "center", gap: 5, minHeight: compact ? 36 : 24, paddingHorizontal: 7, borderRadius: 999, backgroundColor: selected ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
+      style={state => ({ flexDirection: "row", alignItems: "center", gap: 5, minHeight: compact ? 36 : 24, paddingHorizontal: 6, borderRadius: 999, backgroundColor: selected ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
       <Text style={{ color: selected ? c.foreground : c.foregroundMuted, fontSize: 12, fontWeight: "600" }}>{label}</Text>
       {count !== undefined && <Text style={{ color: c.foregroundMuted, fontSize: 12, fontVariant: ["tabular-nums"] }}>{count}</Text>}
     </Pressable>;
@@ -510,6 +510,7 @@ export function ActivityCard({ workspace: w, theme, compact, now, open, toggle, 
     : (info.pages > 1 || !searching) && <Pager theme={theme} compact={compact} info={info} busy={reply.isFetching && reply.isPlaceholderData} noun={tab === "timeline" ? "events" : "questions"}
       onPage={p => setPage({ key, at: p })} onLess={searching ? undefined : () => { setPage({ key, at: 0 }); toggle("activity"); }} />;
   return <Card theme={theme} compact={compact} icon="Activity" title="Activity" search={search.header}
+    fold={{ id: "activity", summary: info.page === 0 ? d.timeline[0]?.row.text ?? null : null }}
     right={<View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>{hasQuestions ? tabs(false) : null}{search.button}</View>}>
     {/* Searching: the tabs move under the field and count their matches, so a hit in the other tab is never hidden. */}
     {search.header && <View style={{ flexDirection: "row", paddingHorizontal: compact ? 14 : 12, paddingTop: 6, paddingBottom: 10 }}>{tabs(searching)}</View>}

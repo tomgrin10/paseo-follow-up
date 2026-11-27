@@ -243,10 +243,11 @@ function QuestionState({ workspace: w, questionId, theme }: { workspace: Workspa
  * a question becomes that question's section, carrying the brief's context; a brief that points at none keeps its own
  * card (`briefCard`, drawn bare inside the frame). Questions answer in place through follow.answer-question.
  */
-export function NeedsYouBlock({ workspace: w, theme, compact, actions, now, brief = null, briefCard = null, style }: {
+export function NeedsYouBlock({ workspace: w, theme, compact, actions, now, brief = null, briefCard = null, style, fold = false }: {
   workspace: Workspace; theme: Theme; compact: boolean; actions: NeedActions; now: number;
   /** The agent's open brief this surface shows, or null. */ brief?: Pick<Brief, "questionIds" | "context" | "kind" | "moves"> | null;
   /** That brief's own card, drawn when it points at no open question. */ briefCard?: ReactNode; style?: StyleProp<ViewStyle>;
+  /** The workspace panel's section: it folds (client/fold.tsx), and folded its header names the first ask. */ fold?: boolean;
 }) {
   useReviewerSettings(); // re-renders on a No review change, so the block's rows and count drop the asks at once
   // Held before grouping: a clicked reviewers row keeps its place, and the brief it folds stays folded.
@@ -264,13 +265,22 @@ export function NeedsYouBlock({ workspace: w, theme, compact, actions, now, brie
   if (!block.count) return null; // held rows keep the block drawn after its last ask is done
   // In Later the block stays (its moves still work) but reads Later, without the attention border.
   const later = workspaceSnoozed(w, all, now) && w.snooze ? laterLabel(w.snooze.until, now) : null;
-  return <Card theme={theme} compact={compact} icon={later ? "AlarmClock" : asked ? "Check" : "CircleAlert"} title={later ? `Later ${later}` : asked ? "Reviewers requested" : "Needs you"} tone={later || !count ? "plain" : "attention"} count={count || undefined} style={style}>
+  return <Card theme={theme} compact={compact} icon={later ? "AlarmClock" : asked ? "Check" : "CircleAlert"} title={later ? `Later ${later}` : asked ? "Reviewers requested" : "Needs you"} tone={later || !count ? "plain" : "attention"} count={count || undefined} style={style}
+    fold={fold ? { id: "needs", summary: firstAsk(block, w), label: `${count || block.count} open` } : undefined}>
     <PagedRows items={block.cards} theme={theme} compact={compact} noun="questions" row={card => card.kind === "brief"
       ? <View key="brief" style={{ borderTopWidth: 1, borderTopColor: theme.colors.border }}>{briefCard}</View>
       : <QuestionAsk key={card.questionId} workspace={w} questionId={card.questionId} context={card.brief ? brief?.context ?? null : null} theme={theme} compact={compact} now={now} openAgent={actions.openAgent}
         open={openId === undefined ? card.expanded : openId === card.questionId} onToggle={() => setOpenId(id => (id === undefined ? (card.expanded ? card.questionId : null) : id) === card.questionId ? null : card.questionId)} />} />
     <NeedsYouList workspace={w} theme={theme} compact={compact} actions={actions} now={now} rows={block.rows} />
   </Card>;
+}
+
+/** Folded, the header names what is first in the block: its first question or row, in the rows' own words. */
+function firstAsk(block: ReturnType<typeof needsYouBlock>, w: Workspace): string | null {
+  const first = block.cards[0];
+  if (first?.kind === "question") return w.questions.find(q => q.id === first.questionId)?.title ?? null;
+  if (first) return null; // the brief's card: the count says it
+  return block.rows[0]?.title ?? null;
 }
 
 /**

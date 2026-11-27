@@ -82,9 +82,9 @@ test("no flash: before the document loads reads take the localStorage cache; the
 });
 
 test("no flash: surfaces read view state on every render, not from per-mount state", async () => {
-  const shell = await readFile(join(root, "client/settings-shell.tsx"), "utf8");
+  const fold = await readFile(join(root, "client/fold.tsx"), "utf8");
   const settings = await readFile(join(root, "client/settings.tsx"), "utf8");
-  assert.match(shell, /useViewVersion\(\);\s*const open = readOpen\(id, defaultOpen\);/);
+  assert.match(fold, /useViewVersion\(\);\s*const open = id === null \? true : readOpen\(id, defaultOpen\);/);
   assert.match(settings, /useViewSync\(\); useViewVersion\(\);\s*const category = only \?\? readCategory\(\);/);
   assert.doesNotMatch(settings, /useState<SettingsCategory>/);
   for (const [file, mark] of [["client/home.tsx", "<ViewSync />"], ["client/panel.tsx", "<ViewSync />"], ["client/live.tsx", "<ViewSync />"]]) {

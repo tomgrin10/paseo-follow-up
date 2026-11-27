@@ -2,32 +2,26 @@ import { type ReactNode } from "react";
 import { View } from "react-native";
 import { Pressable, Text } from "./text";
 import { Icon } from "@getpaseo/plugin/client/ui";
-import { readOpen, writeOpen, SETTINGS_CATEGORIES, type SettingsCategory } from "../shared/settings-nav";
+import { SETTINGS_CATEGORIES, type SettingsCategory } from "../shared/settings-nav";
+import { FoldButton, useFold } from "./fold";
 import { text, type Theme } from "./kit";
-import { useViewVersion } from "./view-store";
 
 /**
- * One collapsible block: chevron, title, a one-line summary and a count. Open or closed is remembered per device
- * (`follow-up.settings.fold.<id>`, in the device document on 0.16); until the developer chooses, `defaultOpen` decides. The body mounts only when
- * open, so whatever it loads (gh suggestions, long lists) waits until then.
+ * One collapsible block in settings: chevron, title, a one-line summary and a count, through the one fold
+ * (`client/fold.tsx`: remembered per device). The body mounts only when open, so whatever it loads (gh suggestions, long lists) waits until then.
  */
 export function Disclosure({ id, title, summary, count, defaultOpen, theme, compact, children, framed = true }: {
   id: string; title: string; summary?: string | null; count?: string | number | null; defaultOpen: boolean; theme: Theme; compact: boolean; children: ReactNode; framed?: boolean;
 }) {
   const c = theme.colors; const t = text(c, compact);
-  // Read from device storage on every render: the localStorage cache paints first, the device document once it loads.
-  useViewVersion();
-  const open = readOpen(id, defaultOpen);
-  const toggle = () => writeOpen(id, !open);
-  const header = <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} aria-expanded={open}
-    accessibilityLabel={`${title}${summary ? `, ${summary}` : ""}`} accessibilityHint={open ? "Collapses" : "Expands"} onPress={toggle}
-    style={state => ({ flexDirection: "row", alignItems: "center", gap: 8, minHeight: compact ? 48 : 36, paddingLeft: framed ? (compact ? 16 : 14) : 36, paddingRight: compact ? 16 : 14, paddingVertical: 6,
-      backgroundColor: state.pressed ? c.surface2 : (state as { hovered?: boolean }).hovered ? (framed ? c.surface2 : c.surface1) : "transparent" })}>
-    <Icon name={open ? "ChevronDown" : "ChevronRight"} size={14} color={c.foregroundMuted} />
+  const { open, toggle } = useFold(id, defaultOpen);
+  const header = <FoldButton open={open} onToggle={toggle} label={`${title}${summary ? `, ${summary}` : ""}`} theme={theme} chevron="lead"
+    style={(hovered, pressed) => ({ flexDirection: "row", alignItems: "center", gap: 8, minHeight: compact ? 48 : 36, paddingLeft: framed ? (compact ? 16 : 14) : 36, paddingRight: compact ? 16 : 14, paddingVertical: 6,
+      backgroundColor: pressed ? c.surface2 : hovered ? (framed ? c.surface2 : c.surface1) : "transparent" })}>
     <Text numberOfLines={1} style={[t.label, { flexShrink: 0 }]}>{title}</Text>
     <Text numberOfLines={1} style={[t.meta, { flex: 1, minWidth: 0 }]}>{summary ?? ""}</Text>
     {count != null && count !== "" && <Text style={[t.meta, { fontVariant: ["tabular-nums"] }]}>{count}</Text>}
-  </Pressable>;
+  </FoldButton>;
   // Nested: the chevron sits under the parent's title (one fixed step in), and the body indents to this title.
   if (!framed) return <View>{header}{open && <View>{children}</View>}</View>;
   return <View style={{ borderRadius: 10, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1, overflow: "hidden" }}>
