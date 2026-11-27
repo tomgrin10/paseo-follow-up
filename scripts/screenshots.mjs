@@ -47,7 +47,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as the CHANGELOG's newest stable, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["menu-bounds", "tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "gallery", "frames", "onboarding", "setup-popup"];
+const REVIEW_SHOTS = ["menu-bounds", "tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "pr-now", "gallery", "frames", "onboarding", "setup-popup"];
 /** Pasted images and their Add image button share one harness setup (an Overseer and the fixture provider taking images). */
 const PASTE_LIKE = only => only.includes("paste-images") || only.includes("attach-images");
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
@@ -173,6 +173,7 @@ function pulls() {
     // gets a conflict (#271). `replies`: a thread's last comment time, by index (default 08:30).
     270: { title: "Sign outgoing webhook payloads", state: "OPEN", author: "dana", changes: ["sam"], threads: 2, checks: [ok("test"), ok("lint")] },
     271: { title: "Document webhook signature checks", state: "OPEN", author: "dana", reviewers: ["sam"], checks: [ok("test"), ok("lint")] },
+    ...(only.includes("pr-now") ? Object.fromEntries([8801, 8802, 8803, 8804].map(number => [number, { repo: number > 8802 ? "acme/widgets" : "example/app", title: number % 2 ? "Review the retry cap" : "Check the retry cap", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [number % 2 ? ok("test") : running("test"), ok("lint")] }])) : {}),
   };
 }
 /**
@@ -625,6 +626,14 @@ const NOW_LINE_STATES = [
       bash("pnpm release --tag beta", "tagged v3.2.0-beta.1"), { hold: true }] },
 ];
 
+/** PR fallback review: own and other repositories, in review and checking (invariant 128). */
+const PR_NOW_STATES = [8801, 8802, 8803, 8804].map((number, i) => ({
+  key: `pr-now-${number}`, project: "app", title: ["Review retry cap", "Check retry cap", "Review widget retry", "Check widget retry"][i],
+  minute: 150 + i, prompt: `Follow the retry change ${number}.`, flag: false, waitFor: "running",
+  steps: [rpc("follow.enroll", { goal: "Ship the retry cap" }),
+    rpc("follow.register-pr", { repo: number > 8802 ? "acme/widgets" : "example/app", number, stack: "Retry cap" }), think("Following the open PR while its checks and review proceed."), bash("git status --short", "clean"), { hold: true }],
+}));
+
 /** pick-notes only (task 32deeb27): decision cards with no tracked question, one decision and two. */
 const PICK_NOTES = [
   { key: "pn-one", title: "Export encoding", minute: 176, prompt: "APP-190: export invoices as a spreadsheet finance can open.",
@@ -717,10 +726,11 @@ async function seed({ call, home }) {
   const repos = {};
   // New (`--only new`) starts worktrees, so its projects are Git repositories on main, in folders of their own.
   for (const name of ["app", "web"]) {
-    repos[name] = join(tmpdir(), only.includes("new") ? "follow-up-shots-fixture-new" : "follow-up-shots-fixture", name); await fs.mkdir(repos[name], { recursive: true });
-    if (only.includes("new") && !existsSync(join(repos[name], ".git"))) {
+    repos[name] = join(tmpdir(), only.includes("pr-now") ? "follow-up-shots-fixture-pr-now" : only.includes("new") ? "follow-up-shots-fixture-new" : "follow-up-shots-fixture", name); await fs.mkdir(repos[name], { recursive: true });
+    if ((only.includes("new") || only.includes("pr-now")) && !existsSync(join(repos[name], ".git"))) {
       const git = (...a) => exec("git", ["-C", repos[name], ...a], { timeout: 30000 });
-      await git("init", "-q", "-b", "main"); await fs.writeFile(join(repos[name], "README.md"), `# example/${name}\n`);
+      await git("init", "-q", "-b", "main");
+      if (only.includes("pr-now")) await git("remote", "add", "origin", `https://github.com/example/${name}.git`); await fs.writeFile(join(repos[name], "README.md"), `# example/${name}\n`);
       await git("add", "."); await git("-c", "user.name=Dana", "-c", "user.email=dana@example.com", "commit", "-q", "-m", "init");
     }
   }
@@ -728,7 +738,7 @@ async function seed({ call, home }) {
   if (only.includes("review-mode") || only.includes("pr-link")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }] });
   // reviewers-click: Ravi and Mina review example/app, so each PR's row reads "Add reviewers to #N: Ravi and Mina".
   if (only.includes("reviewers-click")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }, { login: "mina", name: "Mina" }] });
-  const specs = [...WORKSPACES.filter(w => !(argv.includes("--rename-fixup-review") || only.includes("local-titles")) || ["audit", "billing"].includes(w.key)), ...(only.includes("needs-you-states") || only.includes("tasks-view") || only.includes("own-answer") || only.includes("more-context") || only.includes("dismiss") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") || PASTE_LIKE(only) ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") || only.includes("dismiss") ? MERGE_CLICK_STATES : []), ...(only.includes("reviewers-click") ? REVIEWERS_CLICK_STATES : []), ...(only.includes("pr-scale") ? PR_SCALE_STATES : []), ...(only.includes("batch-churn") ? BATCH_CHURN_STATES : []), ...(only.includes("scheduled-tasks") ? SCHEDULED_STATES : []), ...(only.includes("paged-lists") ? PAGED_STATES : []), ...(only.includes("now-line") ? NOW_LINE_STATES : [])];
+  const specs = [...WORKSPACES.filter(w => !only.includes("pr-now") || ["audit", "billing"].includes(w.key)).filter(w => !(argv.includes("--rename-fixup-review") || only.includes("local-titles")) || ["audit", "billing"].includes(w.key)), ...(only.includes("needs-you-states") || only.includes("tasks-view") || only.includes("own-answer") || only.includes("more-context") || only.includes("dismiss") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") || PASTE_LIKE(only) ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") || only.includes("dismiss") ? MERGE_CLICK_STATES : []), ...(only.includes("reviewers-click") ? REVIEWERS_CLICK_STATES : []), ...(only.includes("pr-scale") ? PR_SCALE_STATES : []), ...(only.includes("batch-churn") ? BATCH_CHURN_STATES : []), ...(only.includes("scheduled-tasks") ? SCHEDULED_STATES : []), ...(only.includes("paged-lists") ? PAGED_STATES : []), ...(only.includes("now-line") ? NOW_LINE_STATES : []), ...(only.includes("pr-now") ? PR_NOW_STATES : [])];
   // Geometry checks need one question, one repair and one permission row, not the full README inventory.
   if (only.includes("menu-bounds")) specs.splice(0, specs.length, ...specs.filter(w => ["billing", "email", "search"].includes(w.key)));
   if (only.includes("layout-search")) {
@@ -2262,6 +2272,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   }
   if (only.includes("scheduled-tasks")) await scheduledShots({ shoot, seeded, call, cli });
   if (only.includes("now-line")) await nowLineShots({ shoot });
+  if (only.includes("pr-now")) await prNowShots({ shoot, call, seeded });
   if (only.includes("own-answer")) await ownAnswerShots({ shoot });
   if (only.includes("more-context")) await moreContextShots({ shoot, call });
   if (only.includes("your-questions")) await yourQuestionsShots({ shoot, call, seeded, home, cli });
@@ -4362,6 +4373,40 @@ async function batchChurnShots({ shoot, seeded, call, home, cli }) {
   if (healed.find(x => x.id === "shots-old-answer").state !== "blocked") throw new Error("the answered batch wasn't restored as blocked");
   await state("healed", { panel: "Messages to the agent", activity: /sent again/, home: spec.title });
 }
+/** The PR fallback on both surfaces: project identity and observed status, with no horizontal overflow. */
+async function prNowShots({ shoot, call, seeded }) {
+  for (const spec of PR_NOW_STATES) {
+    const w = seeded.workspaces.find(w => w.key === spec.key);
+    await until(`${spec.key} repository`, async () => (await call("follow.get", { workspaceId: w.workspaceId })).workspace?.repo === "example/app");
+  }
+  const visible = (page, line) => page.getByText(line, { exact: true }).filter({ visible: true }).first();
+  for (const theme of ["light", "dark"]) {
+    for (const [i, spec] of PR_NOW_STATES.entries()) {
+      const line = `${i < 2 ? "" : "acme/widgets"}#${8801 + i} · ${i % 2 ? "Checks running" : "In review"}`;
+      for (const [device, viewport] of [["desktop", { width: DESKTOP.width, height: 1000 }], ["phone", PHONE]]) {
+        await shoot(`pr-now-panel-${8801 + i}-${device}-${theme}`, viewport, theme, async page => {
+          await openChat(page, spec.title, spec.prompt);
+          await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+          if (device === "phone") await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
+          await page.setViewportSize(viewport);
+          await visible(page, line).waitFor({ timeout: 60_000 });
+          if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error("PR line overflows");
+        });
+      }
+    }
+    for (const [device, viewport] of [["desktop", DESKTOP], ["phone", PHONE]]) {
+      await shoot(`pr-now-home-${device}-${theme}`, viewport, theme, async page => {
+        await openHome(page);
+        await page.setViewportSize(viewport);
+        const row = await homeRow(page, PR_NOW_STATES[2].title);
+        await row.scrollIntoViewIfNeeded();
+        if (!(await row.innerText()).includes("acme/widgets#8803 · In review")) throw new Error("Home omitted the PR fallback");
+        if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error("Home overflows");
+      });
+    }
+  }
+}
+
 /**
  * What each agent is working on (`--only now-line`, the-line-takes-its-first-source): the panel's agent lines and Home's
  * rows for the four states (stated with its steps, stated without, Follow-up's repair, nothing stated), desktop and
@@ -5948,7 +5993,7 @@ try {
     await fs.rename(join(bin, "gh"), join(bin, "gh-fixture"));
     await fs.writeFile(join(bin, "gh"), `#!/bin/sh\nif [ "$1" = api ] && [ "$2" = user ]; then echo '{"login":"alice-example"}'; exit 0; fi\nexec ${JSON.stringify(join(bin, "gh-fixture"))} "$@"\n`); await fs.chmod(join(bin, "gh"), 0o700);
   }
-  github = await fakeGithub({ dir: root, gh: join(bin, "gh"), ...(variant?.gh ? { handle: ({ path }) => path === "user" ? { status: 200, body: { login: "alice-example" } } : null } : {}) });
+  github = await fakeGithub({ dir: root, gh: join(bin, "gh"), ...(only.includes("pr-now") ? { owners: ["example", "acme"] } : {}), ...(variant?.gh ? { handle: ({ path }) => path === "user" ? { status: 200, body: { login: "alice-example" } } : null } : {}) });
   if (variant?.gh) await fs.writeFile(join(root, "gh-auth"), `#!/bin/sh\n[ "$1" = auth ] && [ "$2" = token ] && echo fixture-token-example && exit 0\nexit 1\n`);
   // No mcpproxy for a stranger: harnessEnv's stub, which exits like a missing tool.
   const noMcpproxy = !!variant;

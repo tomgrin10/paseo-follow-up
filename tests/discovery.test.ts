@@ -132,3 +132,11 @@ test("applyDiscovery adopts a live successor only for the main agent it replaces
   applyDiscovery(state, [{ id: "w", title: "W", mainAgentId: "live", messageAt: null, replacesMainAgentId: "old-main" }], clock);
   assert.equal(w.mainAgentId, "live"); assert.equal(w.runtimeReason, null);
 });
+
+test("discovery retains the workspace project repository independently of owned PRs", () => {
+  const state: State = { version: 1, workspaces: [workspace()] };
+  applyDiscovery(state, [{ id: "workspace", title: "Rollout", mainAgentId: "main-agent", messageAt: null, repo: "acme/widgets" }], clock);
+  assert.equal(state.workspaces[0].repo, "acme/widgets");
+  applyDiscovery(state, [{ id: "workspace", title: "Rollout", mainAgentId: "main-agent", messageAt: null, repo: null }], clock);
+  assert.equal(state.workspaces[0].repo, null);
+});

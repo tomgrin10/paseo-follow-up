@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { NOW_SOURCES, milestoneInputSchema, nowOf, nowText, workOf, type AgentFacts } from "../shared/now";
+import { listEntry, isArchivedEntry } from "../shared/list";
 import { clock, pr, snapshot, workspace } from "./fixtures";
-import type { Batch, Obligation } from "../shared/model";
+import type { Batch, Obligation, Snapshot } from "../shared/model";
 
 const at = (minutesAgo: number) => new Date(clock - minutesAgo * 60_000).toISOString();
 const main = (patch: Partial<AgentFacts> = {}): AgentFacts => ({ agentId: "main-agent", role: "main", status: "running", turnStartedAt: at(6), ...patch });
@@ -57,7 +58,7 @@ test("a task counts only while its agent is working; a PR only when it owns exac
   const two = workspace({ prs: [pr(), pr({ key: "example/app#2", number: 2 })] });
   assert.equal(workOf(two, main()), null);
   assert.equal(workOf(workspace({ prs: [pr({ snapshot: snapshot({ state: "MERGED" }) })] }), main()), null);
-  assert.equal(workOf(workspace(), main())?.text, "Shipping #1");
+  assert.equal(workOf(workspace(), main())?.text, "example/app#1 · In review");
   // A PR a contributor registered is its own, not the main agent's.
   assert.equal(workOf(workspace({ prs: [pr({ registeredAgentId: "helper" })] }), main()), null);
 });
@@ -94,4 +95,39 @@ test("the milestone field: short, at most eight before and after, null clears", 
   assert.equal(milestoneInputSchema.safeParse({ now: "a", next: Array(9).fill("b") }).success, false);
   assert.equal(milestoneInputSchema.safeParse({ now: "" }).success, false);
   assert.equal(milestoneInputSchema.safeParse({ now: "a", index: 2 }).success, false, "no index for the agent to get wrong");
+});
+
+// The workspace repository comes from discovery, never from the PR being described.
+test("the PR fallback names its repository only outside the workspace repository", () => {
+  const p = pr({ number: 77, key: "example/app#77" });
+  for (const [repo, ref] of [["example/app", "#77"], ["EXAMPLE/App", "#77"], ["acme/widgets", "example/app#77"], [null, "example/app#77"]] as const) {
+    const w = { ...workspace({ prs: [p] }), repo };
+    assert.equal(workOf(w, main())?.text, `${ref} · In review`);
+    const listed = listEntry(w);
+    if (isArchivedEntry(listed)) assert.fail("Expected the active workspace list entry");
+    assert.deepEqual(workOf(listed, main()), workOf(w, main()), "Home list and panel detail agree");
+  }
+});
+
+test("the PR fallback uses the PR row's words for every known stage", () => {
+  const stages: [Partial<Snapshot>, string][] = [
+    [{ conflict: true }, "Conflicts"],
+    [{ threads: [{ id: "thread", updatedAt: at(1) }] }, "1 review thread"],
+    [{ failedChecks: ["lint"] }, "Checks failed"],
+    [{ otherFailedChecks: ["preview"] }, "Optional check failed"],
+    [{ draft: true }, "Draft"],
+    [{ checksPending: true }, "Checks running"],
+    [{ reviewDecision: "CHANGES_REQUESTED" }, "Changes requested"],
+    [{ reviewDecision: "REVIEW_REQUIRED" }, "In review"],
+    [{ reviewDecision: "APPROVED" }, "Approved"],
+  ];
+  for (const [patch, label] of stages) {
+    const w = { ...workspace({ prs: [pr({ snapshot: snapshot(patch) })] }), repo: "example/app" };
+    assert.equal(workOf(w, main())?.text, `#1 · ${label}`, label);
+  }
+  const unknown = { ...workspace({ prs: [pr({ snapshot: snapshot({ complete: false }) })] }), repo: "example/app" };
+  assert.equal(workOf(unknown, main())?.text, "Shipping #1");
+  assert.equal(workOf({ ...unknown, repo: "acme/widgets" }, main())?.text, "Shipping example/app#1");
+  const stale = { ...workspace({ prs: [pr({ error: "Read timed out", snapshot: snapshot({ checksPending: true }) })] }), repo: "example/app" };
+  assert.equal(workOf(stale, main())?.text, "#1 · Checks running", "a failed read keeps the last complete status");
 });

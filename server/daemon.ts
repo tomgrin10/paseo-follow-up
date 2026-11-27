@@ -395,6 +395,7 @@ export class PaseoGateway implements Gateway {
       // sessions can still contribute their PRs without acquiring completion authority.
       const project = projects.find(p => p.projectId === workspace.projectId);
       const repo = project?.projectKind === "git" ? /^remote:github\.com\/([\w.-]+\/[\w.-]+?)(?:\.git)?$/.exec(project.projectKey)?.[1] ?? null : null;
+      row.repo = repo;
       if (repo) this.workspaceRepos.set(workspace.id, repo); else this.workspaceRepos.delete(workspace.id);
       this.workspaceCwds.set(workspace.id, [...new Set(roots.map(a => a.cwd).filter(Boolean))]);
       // Active scope: a dormant workspace stays listed but is never scanned. Within an active one only
