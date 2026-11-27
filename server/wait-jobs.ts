@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile, rename, lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { runnerSource } from "./wait-runner-source";
+import { nodeRuntime } from "./job-guard";
 
 /**
  * Wait's job store (folded in from the standalone paseo-wait plugin). A job is a directory under
@@ -59,7 +60,13 @@ const child = spawn('sh', [runner, directory, cwd, command], {
 if (fd !== undefined) closeSync(fd);
 child.on('error', error => { console.error(error.message); process.exitCode = 1; });
 if (mode === 'detached') child.unref();
-else child.on('exit', (code, signal) => { process.exitCode = code ?? 128 + constants.signals[signal]; });
+else {
+  for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => {
+    try { process.kill(-child.pid, signal); }
+    catch (error) { if (error.code !== 'ESRCH') throw error; }
+  });
+  child.on('exit', (code, signal) => { process.exitCode = code ?? 128 + constants.signals[signal]; });
+}
 `;
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT";
 
@@ -74,7 +81,7 @@ export class WaitJobs {
   private active = new Set<AbortController>();
   private closed = false;
   /** `legacyDirectory`: 1.x's wait directory. A job prepared before the 2.0 data move keeps writing its receipt there. */
-  constructor(readonly directory: string, readonly legacyDirectory: string | null = null) {}
+  constructor(readonly directory: string, readonly legacyDirectory: string | null = null, private readonly runtime = nodeRuntime()) {}
 
   private path(owner: Owner, jobId: string, root = this.directory) {
     if (!/^[a-z0-9_-]{1,128}$/i.test(owner.id)) throw new Error("Invalid agent identity");
@@ -105,7 +112,8 @@ export class WaitJobs {
     const limit = input.timeoutSeconds ?? DEFAULT_JOB_TIMEOUT_SECONDS;
     await writeFile(join(path, "timeout"), String(limit), { mode: 0o600, flag: "wx" });
     const output = join(path, "output.log");
-    const run = [process.execPath, "-e", launcher, "--", shell, runner, path, owner.cwd, input.command, output].map(quote).join(" ");
+    const env = Object.entries(this.runtime.env).map(([key, value]) => `${key}=${value}`);
+    const run = [...(env.length ? ["env", ...env] : []), this.runtime.command, "-e", launcher, "--", shell, runner, path, owner.cwd, input.command, output].map(quote).join(" ");
     if (shell === "detached") {
       return {
         jobId: id,

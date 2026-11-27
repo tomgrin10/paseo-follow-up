@@ -1,1 +1,1 @@
-- Background jobs reliably report their result after the agent’s shell closes, including on Codex.
+- Background jobs reliably report their result after the agent’s shell closes, including on Codex and the desktop app.
