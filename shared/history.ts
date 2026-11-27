@@ -5,7 +5,7 @@ import { activityFields, questionFields } from "./section-search";
 import { filterItems, type ItemHit } from "./search";
 import { PAGE, TOOL_BUDGET, boundDone, newestFirst, window, type DoneInfo, type HistoryKind } from "./paged";
 import { z } from "zod";
-import { batchSchema, deploymentSchema, prObjectSchema, snapshotSchema, taskSchema } from "./model";
+import { batchSchema, deploymentSchema, obligationSchema, prObjectSchema, snapshotSchema, taskSchema } from "./model";
 import { questionSchema } from "./questions";
 import { finishedPr, finishedTask, finishedQuestion, finishedBatch, finishedPrAction } from "./finished";
 import type { ListPr, ListWorkspace } from "./list";
@@ -106,6 +106,8 @@ export const prGlanceSchema = prObjectSchema.pick({ key: true, repo: true, numbe
     .extend({ deployment: deploymentSchema.pick({ state: true, environment: true }).nullable().optional() }).nullable(),
   glance,
 });
+export const taskGlanceSchema = obligationSchema.pick({ id: true, title: true, afterPrs: true, finishedAt: true, category: true })
+  .extend({ status: z.enum(["done", "waived"]), glance });
 export const questionGlanceSchema = questionSchema.pick({ id: true, title: true, prKey: true, taskId: true, askedBy: true, askedAt: true, mode: true, answer: true, closed: true }).extend({ glance });
 export const batchGlanceSchema = batchSchema.pick({ id: true, state: true, createdAt: true, sentAt: true, settledAt: true, result: true, recipientAgentId: true })
   .extend({ tasks: z.array(taskSchema.pick({ key: true, kind: true, target: true, title: true })), glance });
@@ -113,7 +115,7 @@ export const batchGlanceSchema = batchSchema.pick({ id: true, state: true, creat
 const brief = (schema: z.ZodTypeAny) => (x: Record<string, unknown>) => { const r = schema.safeParse({ ...x, glance: true }); return r.success ? r.data : x; };
 const BRIEF_DONE: Record<HistoryKind, (x: Record<string, any>) => unknown> = {
   prs: brief(prGlanceSchema),
-  tasks: o => o,
+  tasks: brief(taskGlanceSchema),
   questions: brief(questionGlanceSchema),
   batches: brief(batchGlanceSchema),
   prActions: a => a,

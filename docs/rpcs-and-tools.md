@@ -182,7 +182,8 @@ supersession remains live.
 
 Delivered answers kept as context for unfinished tasks retain their answer, delivery and task link in compact
 question records; pending questions and pending deliveries stay whole. The budget measures the final summary after
-compaction, or the full reply for `detail=full`, including the handler’s extra fields.
+compaction, or the full reply for `detail=full`, including the handler’s extra fields. Finished-task glances omit
+evidence and notes; `history=tasks` pages those records whole.
 
 Every list-returning agent tool answers within `TOOL_BUDGET` (`shared/paged.ts`), however big a workspace's history:
 what is live comes whole, what is finished comes as the newest `PAGE.recentDone` plus a count (`boundDone`), and

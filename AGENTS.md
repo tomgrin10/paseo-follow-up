@@ -967,6 +967,8 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    2026-11-27: budget the representation actually sent, after summary compaction, never the larger intermediate RPC.
    Delivered answers retained as live-task context use compact question records (answer, delivery and task link);
    pending questions and pending deliveries stay whole. Old options/background must not erase recent history.
+   Finished tasks also use a schema-backed glance without evidence or notes; `history=tasks` returns their full
+   records. Both summary and full must retain five of every kind on the evidence-heavy seed with handler extras.
    2026-11-26: a busy workspace's `workspace_status` summary was ~207k characters, 98% of it merged
    PRs, and the agent couldn't read its own status. Guarded by `tests/bounded-tools.test.ts` and the same
    `pagedReplyVerdict` (`follow.agent-status` summary and full on the live-sized seed).

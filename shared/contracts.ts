@@ -19,7 +19,7 @@ import { HISTORY_FILTERS, QUESTION_ACTIONS } from "./your-questions";
 import { ONBOARDING_ACTIONS, ONBOARDING_STEPS, checksSchema, onboardingViewSchema } from "./onboarding";
 import { z } from "zod";
 import { HISTORY_KINDS, pageInput } from "./paged";
-import { batchGlanceSchema, prGlanceSchema, questionGlanceSchema } from "./history";
+import { batchGlanceSchema, prGlanceSchema, questionGlanceSchema, taskGlanceSchema } from "./history";
 import { actionChangeSchema, dispatchActionSchema, dispatchInputSchema, dispatchRecordSchema, settingsChangeSchema } from "./dispatch";
 import { inboxRowSchema } from "./inbox";
 import { briefSchema } from "./brief";
@@ -63,6 +63,7 @@ export const activityRpc = defineRpc({ name: "follow.activity", input: z.object(
 /** `prWorkflow` (1.4.0-beta.14): how this workspace ships PRs (graphite | github) and its review-fix command (null: built-in steps). */
 export const agentStatusRpc = defineRpc({ name: "follow.agent-status", input: z.strictObject({ agentId: idSchema, detail: z.enum(["summary", "full"]).optional(), history: z.enum(HISTORY_KINDS).optional(), ...pageInput }), output: workspaceSchema.extend({
     /** Live items whole; the newest few finished ones at a glance (`glance: true`), whole on a history page of their kind (shared/history.ts). */
+    obligations: z.array(z.union([workspaceSchema.shape.obligations.element, taskGlanceSchema])),
     prs: z.array(z.union([prSchema, prGlanceSchema])), questions: z.array(z.union([questionSchema, questionGlanceSchema])), batches: z.array(z.union([batchSchema, batchGlanceSchema])),
     /** The live PRs' keys, and how many the inventory ever considered. */
     inventory: workspaceSchema.shape.inventory.unwrap().unwrap().extend({ candidatesTotal: z.number().optional() }).nullable().optional(),

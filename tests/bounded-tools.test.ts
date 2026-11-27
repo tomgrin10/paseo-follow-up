@@ -237,18 +237,30 @@ test("delivered task context preserves answers without starving recent history",
   const pending = { ...context[0], id: "Q2000", answer: { ...context[0].answer!, delivery: { ...context[0].answer!.delivery, state: "failed" as const } } };
   w.questions.push(...context, pending);
   w.obligations = [
-    ...w.obligations.filter(finishedTask),
+    ...w.obligations.filter(finishedTask).map(o => ({ ...o,
+      evidence: "Verified the invoice retry after deployment and checked the queue. ".repeat(60).slice(0, 4000),
+      note: "Invoice retry decision and its verification context. ".repeat(35),
+    })),
     ...Array.from({ length: 24 }, (_, i) => ({ id: `live-${i}`, title: `Verify invoice retry ${i}`,
       status: "waiting" as const, afterPrs: [], evidence: "Checked invoice retries and the queue after a timeout. ".repeat(11),
       enable_follow_up: true, revision: 0 })),
   ];
-  const extra = { nextMessageInfo: { to: "main-agent", tasks: [], text: "Check the invoice queue. ".repeat(100), reason: "Waiting", eta: null } };
+  const extra = {
+    dismissed: Array.from({ length: 10 }, (_, i) => ({ key: `task:old-${i}`, title: `Earlier invoice check ${i}`, print: `invoice-check-${i}`, at: iso(i), by: "developer" })),
+    dismissedAsk: { ask: "Review the invoice retry rollout. ".repeat(15), kind: "action", at: iso(0) },
+    prWorkflow: { mode: "github", reviewFix: null },
+    nextMessageInfo: { to: "main-agent", tasks: [], text: "Check the invoice queue. ".repeat(150), reason: "Waiting", eta: null },
+  };
+  workspaceSchema.parse(w); // The evidence-heavy fixture obeys the stored record limits.
   const view = agentView(w, {}, extra);
   for (const kind of ["prs", "tasks", "questions", "batches", "prActions"] as const) {
     assert.equal(view.history[kind].shown, PAGE.recentDone, `${kind}: context leaves room for the glance`);
   }
   assert.ok(size(view) <= TOOL_BUDGET, `${size(view)} characters`);
-  assert.ok(agentStatusRpc.output.safeParse(view).success);
+  const parsedView = agentStatusRpc.output.safeParse(view);
+  assert.ok(parsedView.success, parsedView.success ? "" : JSON.stringify(parsedView.error.issues));
+  assert.ok(view.obligations.filter(finishedTask).every(o => !("evidence" in o) && !("note" in o)), "finished task glances omit evidence and background");
+  assert.deepEqual(view.obligations.filter(o => !finishedTask(o)), w.obligations.filter(o => !finishedTask(o)), "live tasks stay whole");
   const summary = compact("workspace_status", {}, agentView(w, {}, extra, view => compact("workspace_status", {}, view))) as any;
   assert.ok(size(summary) <= TOOL_BUDGET);
   for (const kind of ["prs", "tasks", "questions", "batches", "prActions"] as const) assert.equal(summary.history[kind].shown, PAGE.recentDone, kind);
@@ -264,6 +276,9 @@ test("delivered task context preserves answers without starving recent history",
     assert.ok(size(page) <= TOOL_BUDGET, `${kind}: page fits`);
     assert.ok(page.history[kind].shown >= 1, `${kind}: history remains accessible`);
     assert.ok(agentStatusRpc.output.safeParse(page).success);
+    if (kind === "tasks") {
+      for (const o of page.obligations.filter(finishedTask)) assert.deepEqual(o, w.obligations.find(original => original.id === o.id), "task history retains full evidence and notes");
+    }
     if (kind === "questions") assert.ok(page.questions.some(q => finishedQuestion(q) && "options" in q), "paged history keeps complete evidence");
   }
 });
