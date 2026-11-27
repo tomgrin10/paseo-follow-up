@@ -254,7 +254,7 @@ PLAYWRIGHT_CORE=<playwright-core dir> CHROMIUM=<chromium binary> ~/paseo-harness
   `frames` set on the same CLI. `frames` shoots 1600×900 light/dark pairs of the real app in context
   (`follow-up-frame-<name>-{light,dark}.png`, the README's `<picture>` pairs), Catch up on a phone
   (`follow-up-catch-up-phone-{light,dark}.png`), and `slide-*` crops of one element each at 8×. The cover source captures Home through
-  the Sending and Running groups. `scripts/cover.mjs` then composes the 16:10 slides (1920×1200 at 2×,
+  the Sending and Working groups. `scripts/cover.mjs` then composes the 16:10 slides (1920×1200 at 2×,
   `follow-up-slide-<n>-<name>.png`): the cover carries the headline
   and the purpose line (`--headline "a|b"`, `--subline`, or `COVER_HEADLINE`/`COVER_SUBLINE`), each other slide a
   short feature headline, one plain line and its crop filling a sheet of one width (a tall one runs off the

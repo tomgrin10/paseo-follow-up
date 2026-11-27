@@ -27,7 +27,7 @@
   `in-flight-reads-waiting`; `tests/in-flight-status.test.ts` enumerates every in-flight signal.
 - **Background work is running (Paseo 0.16).** An agent that started a shell or task and ended its turn reports
   `backgroundWork.count > 0`. The inbox's directory reads it as running (`liveStatus` in `shared/agent-load.ts`), so a
-  plain finish doesn't flag (F7's settle sees "running"), its row sits in Running with `backgroundWork`, and
+  plain finish doesn't flag (F7's settle sees "running"), its row sits in Working with `backgroundWork`, and
   `liveFlag` hides an older "finished" until the work ends (shown again after, not erased). Invariant
   `background-work-is-running` in `rowViolations`. On 0.15 the field is absent and nothing changes.
 - **Briefs from closed agents** (`flagFate`, invariant `briefs-from-closed-agents`). Home decides at render, from facts
@@ -242,9 +242,13 @@ Queued with when it retries, Retrying, Failed with **Retry**, Not sent) and clea
     (`byRank`, invariant `one-ranking-for-every-workspace-search`): a title match first (a whole word or word start
     above a match inside a word), then linked items, branch and PR, then the rest of the row. Search breaks a tie by
     score; the filter keeps the list's own order for a tie, inside each group.
-  - `shared/sort.ts`: Priority, Recent, Oldest waiting, Name, By project. Sorting applies within each group. The
+  - `shared/sort.ts`: Priority, Recent, Oldest waiting, Name. Sorting applies within each group or project. The
     chosen order is the Display setting `home_sort` (`shared/display.ts`), one for Home and the sidebar view on every
     device; `homeSortSync` reads it, and the first client to load moves its old per-device choice there once.
+  - `shared/home-arrange.ts`: the Display field `home_view` and `arrangeHome`, which lays Home's model out for Home
+    and the sidebar view: the Project, Labels and background filters, Paseo's pins lifted into Pinned (newest pin
+    first; a pinned Needs-you row keeps its mark and still counts in Needs you), then Grouping by status (the groups
+    above), by project (in order of each project's first row) or none.
   - `shared/attention.ts`: one colour language for the stack bar, rail nodes and overview bars.
 - **Client:** `client/home.tsx`, `client/home-list.tsx`, `client/home-chrome.tsx`, `client/home-view.ts`,
   `client/home-data.ts` ([client.md](client.md)).

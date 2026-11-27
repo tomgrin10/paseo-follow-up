@@ -29,7 +29,8 @@ import { reportInputSchema } from "./report-issue";
 import type { RenameStatus } from "../shared/rename";
 import { DISPLAY_KEYS, displayPreferences, HOME_DETAIL_DEFAULT, CATCH_UP_RAIL_DEFAULT, DEFAULT_OPEN_WORKSPACE_ON, OPEN_WORKSPACE_ON } from "../shared/display";
 import { DEFAULT_SEARCH_SHORTCUT, NEW_SHORTCUTS, SEARCH_SHORTCUTS } from "../shared/search-key";
-import { DEFAULT_SORT, SORT_MODES } from "../shared/sort";
+import { DEFAULT_SORT, MENU_SORTS } from "../shared/sort";
+import { DEFAULT_HOME_VIEW, GROUPINGS, parseHomeView, SHOW_ITEMS } from "../shared/home-arrange";
 import { SCALE } from "../shared/scale";
 import { boundDone, newestFirst, pageInput } from "../shared/paged";
 import { dispatchInputSchema } from "../shared/dispatch";
@@ -59,14 +60,14 @@ export function rowPrs(state: State, r: InboxRow, now: number): PrLink[] {
   return [...out.values()];
 }
 
-export const AGENT_TOOLS = ["make_main_agent", "list_prs", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "track", "inbox_list", "sign_off", "snooze", "snooze_workspace", "set_finish_flags", "set_priorities", "workspace_about", "agent_settings", "brief_settings", "set_brief_settings", "brief_plan", "set_brief_plan", "brief_chat_search", "brief_sources", "set_brief_sources", "compass", "compass_find", "set_compass", "read_compass", "compass_note", "why_suggested", "follow_settings", "set_follow_settings", "project_settings", "set_project_tracking", "pr_workflow", "set_pr_workflow", "pr_stats", "pr_stats_settings", "set_pr_stats", "reviewer_settings", "reviewer_suggestions", "save_reviewers", "set_agent_setting", "set_wait_for_jobs", "onboarding_status", "onboarding_checks", "set_onboarding", "priorities", "rank_status", "rerank_priorities", "usage", "overseer_status", "overseer_start", "overseer_restart", "overseer_ask", "inbox_brief", "brief_action", "queue_list", "queue_action", "inbox_act", "answer_question", "dismiss_question", "dismiss_item", "run_recovery", "refresh", "set_workspace_spec", "set_task_trigger", "pr_controls", "browser_status", "trust_bypass_status", "release_notes", "link_items", "set_linked_items", "updates_status", "check_updates", "set_updates", "install_update", "display_settings", "set_display", "retry_move", "report_issue", "report_send", "ai_rename", "catch_up_deck", "context_requests", "ask_context", "question_action", "dispatch", "linear_queue", "sweep_queue", "dispatch_sources", "dispatch_records", "dispatch_undo", "dispatch_actions", "set_dispatch_actions", "dispatch_settings", "set_dispatch_settings"] as const;
+export const AGENT_TOOLS = ["make_main_agent", "list_prs", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "track", "inbox_list", "sign_off", "snooze", "snooze_workspace", "set_finish_flags", "set_priorities", "workspace_about", "agent_settings", "brief_settings", "set_brief_settings", "brief_plan", "set_brief_plan", "brief_chat_search", "brief_sources", "set_brief_sources", "compass", "compass_find", "set_compass", "read_compass", "compass_note", "why_suggested", "follow_settings", "set_follow_settings", "project_settings", "set_project_tracking", "pr_workflow", "set_pr_workflow", "pr_stats", "pr_stats_settings", "set_pr_stats", "reviewer_settings", "reviewer_suggestions", "save_reviewers", "set_agent_setting", "set_wait_for_jobs", "onboarding_status", "onboarding_checks", "set_onboarding", "priorities", "rank_status", "rerank_priorities", "usage", "overseer_status", "overseer_start", "overseer_restart", "overseer_ask", "inbox_brief", "brief_action", "queue_list", "queue_action", "inbox_act", "answer_question", "dismiss_question", "dismiss_item", "run_recovery", "refresh", "set_workspace_spec", "set_task_trigger", "pr_controls", "browser_status", "trust_bypass_status", "release_notes", "link_items", "set_linked_items", "updates_status", "check_updates", "set_updates", "install_update", "display_settings", "set_display", "retry_move", "report_issue", "report_send", "ai_rename", "pin_workspace", "catch_up_deck", "context_requests", "ask_context", "question_action", "dispatch", "linear_queue", "sweep_queue", "dispatch_sources", "dispatch_records", "dispatch_undo", "dispatch_actions", "set_dispatch_actions", "dispatch_settings", "set_dispatch_settings"] as const;
 export type AgentTool = typeof AGENT_TOOLS[number];
 /** Tools that only read. */
 export const READ_ONLY_TOOLS: readonly AgentTool[] = ["list_prs", "inbox_list", "workspace_about", "agent_settings", "display_settings", ...RPC_TOOLS.filter(t => t.kind === "read").map(t => t.name as AgentTool)];
 /** Tools that can't be undone from Follow-up. */
 export const DESTRUCTIVE_TOOLS: readonly AgentTool[] = ["merge"];
 /** Tools that plan first and run only with `confirm: true` and the plan's id. */
-export const PLANNED_TOOLS: readonly AgentTool[] = ["make_main_agent", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "sign_off", "snooze", "snooze_workspace", "set_finish_flags", "set_priorities", "set_display", "ai_rename", "dispatch", ...RPC_TOOLS.filter(t => t.kind === "planned").map(t => t.name as AgentTool)];
+export const PLANNED_TOOLS: readonly AgentTool[] = ["make_main_agent", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "sign_off", "snooze", "snooze_workspace", "set_finish_flags", "set_priorities", "set_display", "ai_rename", "pin_workspace", "dispatch", ...RPC_TOOLS.filter(t => t.kind === "planned").map(t => t.name as AgentTool)];
 /** Tools with a dry run and confirm of their own (not AgentActions' plans): report_issue (server/report-issue/). */
 export const SELF_PLANNED_TOOLS: readonly AgentTool[] = ["report_issue"];
 const RPC_TOOL = new Map<string, RpcTool>(RPC_TOOLS.map(t => [t.name, t]));
@@ -165,6 +166,11 @@ export type AgentActionDeps = {
   rpc?: { call(method: string, input: unknown, actor?: Actor): Promise<unknown>; validate(method: string, input: unknown): Promise<unknown> };
   /** The acting agent's title, for the "on the developer's behalf" record (shared/actor.ts). The caller is live, so reading it wakes nothing. */
   agentTitle?: (agentId: string) => Promise<string | null>;
+  /**
+   * Paseo's workspace pin (the one Paseo's sidebar and Follow-up's lists show, shared/home-arrange.ts): read it, and set
+   * it with Paseo's own setWorkspacePinned. Null `read` when the host has no pins.
+   */
+  pins?: { read(workspaceId: string): Promise<{ title: string; pinnedAt: string | null } | null>; set(workspaceId: string, pinned: boolean): Promise<{ pinnedAt: string | null }> };
   /** One agent's list entry for a main-agent claim (metadata; never loads it). Null when it's gone. */
   agentInfo?: (agentId: string) => Promise<MainAgentInfo>;
   /** Settings → Display (host-scoped preferences, trust bypass among them). */
@@ -196,13 +202,14 @@ export const TOOL_INPUT = {
   sign_off: z.strictObject({ agentIds: agentIds.optional(), ...confirm }),
   snooze: z.strictObject({ agentIds: agentIds.optional(), until: z.string().trim().min(1).max(200).optional(), ...confirm }),
   dispatch: dispatchInputSchema.partial().extend({ images: imagePaths, dry_run: z.boolean().optional(), ...confirm }),
+  pin_workspace: z.strictObject({ workspaceId: id, pinned: z.boolean(), ...confirm }),
   ai_rename: z.strictObject({ workspaceId: id.optional(), title: z.string().trim().min(1).max(300).optional(), undo: z.boolean().optional(), ...confirm }),
   snooze_workspace: z.strictObject({ workspace: id.optional(), until: z.string().trim().min(1).max(200).optional(), bring_back: z.boolean().optional(), ...confirm }),
   set_finish_flags: z.strictObject({ agentIds: agentIds.optional(), value: z.boolean().optional(), ...confirm }),
   set_priorities: z.strictObject({ priorities: z.array(priorityInputSchema).max(SCALE.workspaces).optional(), replace: z.boolean().optional(), ...confirm }),
   display_settings: z.strictObject({}),
   make_main_agent: z.strictObject({ agentId: id.optional(), reason: z.string().trim().min(1).max(200).optional(), requested: z.enum(["developer", "self"]).optional(), ...confirm }),
-  set_display: z.strictObject({ values: z.record(z.string(), z.union([z.boolean(), z.string(), z.number()])).optional(), ...confirm }),
+  set_display: z.strictObject({ values: z.record(z.string(), z.union([z.boolean(), z.string(), z.number(), z.record(z.string(), z.unknown())])).optional(), ...confirm }),
   report_issue: reportInputSchema,
   ...Object.fromEntries(RPC_TOOLS.map(t => [t.name, t.input])),
 } as unknown as Record<AgentTool, z.ZodType>;
@@ -267,6 +274,7 @@ export class AgentActions {
       case "set_auto_send": return this.control(caller, tool, args.task ? { workspaceId: args.workspace, taskAuto: { key: args.task, auto: args.value } } : { workspaceId: args.workspace, enable_auto_sends: args.value });
       case "clear_hold": return this.control(caller, tool, { workspaceId: args.workspace, clearHold: true });
       case "ai_rename": return this.planRename(caller, args as { workspaceId?: string; title?: string; undo?: boolean });
+      case "pin_workspace": return this.planPin(caller, args as { workspaceId: string; pinned: boolean });
       case "dispatch": return this.planDispatch(caller, args as DispatchToolInput);
       case "snooze_workspace": return this.planWorkspaceSnooze(caller, args as { workspace?: string; until?: string; bring_back?: boolean });
       case "retry_batch": return this.control(caller, tool, args.task ? { workspaceId: args.workspace, retryTask: args.task } : { workspaceId: args.workspace, retryBatchId: args.batchId });
@@ -362,15 +370,17 @@ export class AgentActions {
   private async displayTool(caller: string, tool: "display_settings" | "set_display", args: Record<string, any>) {
     if (!this.d.display) throw new Error(`${tool} isn't available in this Follow-up.`);
     const current = await this.d.display.read();
-    if (tool === "display_settings") return { values: { home_sort: DEFAULT_SORT, home_detail_fraction: HOME_DETAIL_DEFAULT, catch_up_rail_fraction: CATCH_UP_RAIL_DEFAULT, search_shortcut: DEFAULT_SEARCH_SHORTCUT, open_workspace_on: DEFAULT_OPEN_WORKSPACE_ON, ...current.values }, sorts: SORT_MODES, open_workspace_on: OPEN_WORKSPACE_ON, search_shortcuts: SEARCH_SHORTCUTS, new_shortcuts: NEW_SHORTCUTS, change: "set_display changes these, only when the developer asked. home_sort orders Home and the sidebar view. home_detail_fraction is the share of Home's width its right pane takes (0.2 to 0.8, default 0.42). catch_up_rail_fraction is the share of the Catch up screen its queue rail takes on a desktop (0.16 to 0.5, default 0.28). search_shortcut is the key that opens Home's search from anywhere: mod-shift-k (the default), mod-shift-h or none. new_shortcut is the key that opens New from anywhere: mod-shift-n, mod-shift-o or none; unset, it is ⌘⇧N in Paseo's desktop app and ⌘⇧O in a browser tab (Chrome keeps Ctrl/Cmd+Shift+N). open_workspace_on is what opening a workspace from Follow-up's sidebar list and Home's Open shows: view (its workspace view as a tab, the default) or chat (its main agent's chat)." };
-    const values = args.values as Record<string, boolean | string | number> | undefined;
+    if (tool === "display_settings") return { values: { home_sort: DEFAULT_SORT, home_view: DEFAULT_HOME_VIEW, home_detail_fraction: HOME_DETAIL_DEFAULT, catch_up_rail_fraction: CATCH_UP_RAIL_DEFAULT, search_shortcut: DEFAULT_SEARCH_SHORTCUT, open_workspace_on: DEFAULT_OPEN_WORKSPACE_ON, ...current.values }, sorts: MENU_SORTS, groupings: GROUPINGS, show_items: SHOW_ITEMS, open_workspace_on: OPEN_WORKSPACE_ON, search_shortcuts: SEARCH_SHORTCUTS, new_shortcuts: NEW_SHORTCUTS, change: "set_display changes these, only when the developer asked. home_sort orders Home and the sidebar view (priority, recent, oldest, name). home_view arranges both: grouping (status, project, none), title (title or branch), show (branch, project, pr, labels, time: true or false), projects and labels (filters; empty shows all) and show_background. home_detail_fraction is the share of Home's width its right pane takes (0.2 to 0.8, default 0.42). catch_up_rail_fraction is the share of the Catch up screen its queue rail takes on a desktop (0.16 to 0.5, default 0.28). search_shortcut is the key that opens Home's search from anywhere: mod-shift-k (the default), mod-shift-h or none. new_shortcut is the key that opens New from anywhere: mod-shift-n, mod-shift-o or none; unset, it is ⌘⇧N in Paseo's desktop app and ⌘⇧O in a browser tab (Chrome keeps Ctrl/Cmd+Shift+N). open_workspace_on is what opening a workspace from Follow-up's sidebar list and Home's Open shows: view (its workspace view as a tab, the default) or chat (its main agent's chat)." };
+    const values = args.values as Record<string, unknown> | undefined;
     if (!values || !Object.keys(values).length) throw new Error("set_display: give values, e.g. { enable_trust_bypass: false } or { home_sort: \"recent\" }. display_settings lists them.");
+    // home_view merges, so { home_view: { grouping: "project" } } keeps the developer's filters and Show choices.
+    if (values.home_view && typeof values.home_view === "object") { const was = parseHomeView(current.values.home_view), patch = values.home_view as Partial<typeof was>; values.home_view = { ...was, ...patch, show: { ...was.show, ...patch.show } }; }
     const unknown = Object.keys(values).filter(k => !DISPLAY_KEYS.includes(k));
     if (unknown.length) throw new Error(`set_display: unknown setting ${unknown.join(", ")}. display_settings lists them.`);
     const parsed = displayPreferences.schema.safeParse({ ...current.values, ...values });
     if (!parsed.success) throw new Error(`set_display: ${parsed.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
-    const was = (k: string) => current.values[k] ?? (k === "home_sort" ? DEFAULT_SORT : k === "home_detail_fraction" ? HOME_DETAIL_DEFAULT : k === "catch_up_rail_fraction" ? CATCH_UP_RAIL_DEFAULT : k === "search_shortcut" ? DEFAULT_SEARCH_SHORTCUT : k === "open_workspace_on" ? DEFAULT_OPEN_WORKSPACE_ON : undefined);
-    const changes = Object.entries(values).filter(([k, v]) => was(k) !== v).map(([key, to]) => ({ key, from: was(key), to }));
+    const was = (k: string) => current.values[k] ?? (k === "home_sort" ? DEFAULT_SORT : k === "home_view" ? DEFAULT_HOME_VIEW : k === "home_detail_fraction" ? HOME_DETAIL_DEFAULT : k === "catch_up_rail_fraction" ? CATCH_UP_RAIL_DEFAULT : k === "search_shortcut" ? DEFAULT_SEARCH_SHORTCUT : k === "open_workspace_on" ? DEFAULT_OPEN_WORKSPACE_ON : undefined);
+    const changes = Object.entries(values).filter(([k, v]) => JSON.stringify(was(k)) !== JSON.stringify(v)).map(([key, to]) => ({ key, from: was(key), to }));
     const planId = changes.length ? this.plan(caller, "set_display", async () => {
       const now = await this.d.display!.read();
       await this.d.display!.write(now.revision, { ...now.values, ...values });
@@ -481,6 +491,21 @@ export class AgentActions {
    * Rename title with AI (server/rename.ts): the dry run asks for a suggestion (or takes `title`, or plans Undo) and shows the
    * name now and the name after; confirm runs the dialog's Rename with that exact name.
    */
+  /** Pin to top / Unpin, the row menu's item: Paseo's own pin, so it shows in Paseo's sidebar and in Follow-up's lists. */
+  private async planPin(caller: string, args: { workspaceId: string; pinned: boolean }) {
+    if (!this.d.pins) throw new Error("pin_workspace isn't available in this Follow-up.");
+    const now = await this.d.pins.read(args.workspaceId);
+    if (!now) throw new Error("pin_workspace: Paseo doesn't list that workspace, or this Paseo has no pins (0.17 and later have them).");
+    const from = !!now.pinnedAt;
+    const planId = from === args.pinned ? null : this.plan(caller, "pin_workspace", async () => {
+      const out = await this.d.pins!.set(args.workspaceId, args.pinned);
+      await this.note(caller, caller, "pin_workspace");
+      return { workspaceId: args.workspaceId, pinnedAt: out.pinnedAt };
+    });
+    return { dryRun: true, planId, workspaceId: args.workspaceId, workspace: now.title, pinned: { from, to: args.pinned },
+      next: planId ? `Only when the developer asked for this: call pin_workspace with confirm=true and planId=${planId} within 5 minutes.` : "Nothing changes." };
+  }
+
   private async planRename(caller: string, args: { workspaceId?: string; title?: string; undo?: boolean }) {
     if (!this.d.rpc) throw new Error("ai_rename isn't available in this Follow-up.");
     if (!args.workspaceId) throw new Error("ai_rename: give workspaceId (a Paseo workspace id, or one from list_prs).");

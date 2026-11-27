@@ -21,6 +21,8 @@ import type { RowMenuItem, RowMenuSection } from "../shared/row-menu";
 import { homeGroupOpen, writeHomeGroupOpen } from "../shared/settings-nav";
 import { useViewVersion } from "./view-store";
 import { usePeekLine } from "./turn-view";
+import { DEFAULT_HOME_VIEW, rowTitle, type ArrangedHome, type HomeView } from "../shared/home-arrange";
+import type { PaseoWorkspaceLite } from "../shared/home";
 
 /**
  * The one list: Home's left side and (on hosts that have it) the sidebar
@@ -74,6 +76,11 @@ export type HomeListProps = {
   stackOverseer?: boolean;
   /** An omnibox ask is on its way to the Overseer. */
   asking?: boolean;
+  /** The Display arrangement (Pinned, grouping, filters: shared/home-arrange.ts). Absent: Home's status groups as they are. */
+  arranged?: ArrangedHome | null;
+  /** Title and Show (shared/home-arrange.ts), and Paseo's facts for each workspace (branch, labels) the detail line reads. */
+  view?: HomeView;
+  facts?: (workspaceId: string) => Pick<PaseoWorkspaceLite, "branch" | "labels" | "pinnedAt" | "background"> | undefined;
   /** Sending rows' Send now (only where the server would take it: Workstream.sendNow). Absent: the list offers none. */
   onSendNow?: (s: Workstream) => Promise<void>;
   /**
@@ -98,7 +105,7 @@ const noMenu: OpenRowMenu = () => undefined;
 /** Where a phone row's text starts: its 14 padding, the 18 glyph, the 10 gap. Older's explainer lines up with it. */
 export const TOUCH_ROW_TEXT = 14 + 18 + 10;
 
-export function HomeList({ model, theme, dense = false, touch, selectedKey, onSelect, briefLine, renderExpanded, header, footer, top, afterNeeds, raised, emptyAction, results, hits = null, activeResult = 0, onResult, filter = null, overseer = null, stackOverseer = false, asking = false, menu, onSendNow, keys, selectedBg }: HomeListProps) {
+export function HomeList({ model, theme, dense = false, touch, selectedKey, onSelect, briefLine, renderExpanded, header, footer, top, afterNeeds, raised, emptyAction, results, hits = null, activeResult = 0, onResult, filter = null, arranged = null, view = DEFAULT_HOME_VIEW, facts, overseer = null, stackOverseer = false, asking = false, menu, onSendNow, keys, selectedBg }: HomeListProps) {
   const c = theme.colors;
   const onOpen = useRowOpen(keys?.onOpen);
   const [openMenu, setOpenMenu] = useState<RowMenuOpen | null>(null);
@@ -110,17 +117,17 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
   const menuKey = openMenu?.s.key ?? null;
   // Group folds persist per device (device document on 0.16), read on every render so the cache paints first. Needs
   // you is the exception: it opens on every mount, and closing it holds only for this mount.
-  const view = useViewVersion();
+  const viewVersion = useViewVersion();
   const [needsClosed, setNeedsClosed] = useState(false);
-  const closed = useMemo(() => { const n = new Set(model.groups.map(g => g.id).filter(id => id !== "needs" && !homeGroupOpen(id))); if (needsClosed) n.add("needs"); return n; }, [model.groups, needsClosed, view]);
+  const closed = useMemo(() => { const n = new Set([...model.groups.map(g => g.id as string), ...(arranged?.sections ?? []).filter(x => x.kind === "project").map(x => x.key)].filter(id => id !== "needs" && !homeGroupOpen(id))); if (needsClosed) n.add("needs"); return n; }, [model.groups, arranged, needsClosed, viewVersion]);
   const [openProjects, setOpenProjects] = useState<Set<string>>(new Set());
   const [pages, setPages] = useState<Record<string, number>>({});
   const toggle = useCallback((key: string) => { if (key === "needs") setNeedsClosed(v => !v); else writeHomeGroupOpen(key, !homeGroupOpen(key)); }, []);
   const toggleProject = useCallback((p: string) => setOpenProjects(s => { const n = new Set(s); if (n.has(p)) n.delete(p); else n.add(p); return n; }), []);
 
-  const data = useMemo(() => listEntries({ model, closed, openProjects, pages, briefLine, results, hits, filter, overseer: !!overseer, touch, afterNeeds: !!afterNeeds }),
+  const data = useMemo(() => listEntries({ model, closed, openProjects, pages, briefLine, results, hits, filter, overseer: !!overseer, touch, afterNeeds: !!afterNeeds, arranged }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [model, closed, openProjects, pages, briefLine, results, hits, filter, !!overseer, touch, !!afterNeeds]);
+    [model, closed, openProjects, pages, briefLine, results, hits, filter, !!overseer, touch, !!afterNeeds, arranged]);
   // A result picks through onResult; Row only knows its key.
   const pickResult = useCallback((key: string) => {
     const item = results?.find(i => !i.ask && i.key === key);
@@ -145,7 +152,7 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
         onSelect={pickResult} onOpen={onOpen} onMenu={item.archived ? noMenu : onMenu} />;
       case "ask": return <AskRow ask={item.ask} theme={theme} active={item.index === activeResult} dense={dense} touch={touch} sending={!!asking} onPress={() => onResult?.({ provider: "overseer", key: ASK_KEY, ask: item.ask })} />;
       case "brief": return <BriefRow theme={theme} line={briefLine ?? ""} selected={!touch && (selectedKey === null || selectedKey === BRIEF_KEY)} touch={touch} onSelect={onSelect} />;
-      case "overseer": return overseer ? <OverseerRow theme={theme} o={overseer} selected={selectedKey === OVERSEER_KEY} touch={touch} stacked={stackOverseer} onSelect={onSelect} selectedBg={selectedBg} /> : null;
+      case "overseer": return overseer ? <OverseerRow theme={theme} o={overseer} pinned={!!item.pinned} selected={selectedKey === OVERSEER_KEY} touch={touch} stacked={stackOverseer} onSelect={onSelect} selectedBg={selectedBg} /> : null;
       case "header": return <GroupHeader theme={theme} title={item.title} count={item.count} open={item.open} tone={item.group === "needs" && item.count ? c.statusWarning : undefined} dense={dense} touch={touch} folds={item.group === "older" || item.group === "quiet"} onPress={() => toggle(item.group)} />;
       case "fold": return <Pressable accessibilityRole="button" aria-expanded={item.open} accessibilityState={{ expanded: item.open }} accessibilityLabel={`${item.project}, ${item.count}. ${item.open ? "Collapse" : "Expand"}`} onPress={() => toggleProject(item.project)}
         style={state => ({ flexDirection: "row", alignItems: "center", gap: 8, minHeight: touch ? 44 : dense ? 28 : 34, paddingHorizontal: dense ? 8 : 16, backgroundColor: (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
@@ -158,15 +165,17 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
         style={{ minHeight: touch ? 44 : 30, justifyContent: "center", paddingHorizontal: dense ? 30 : 42 }}>
         <Text style={{ color: c.foregroundMuted, fontSize: 12 }}>Show {Math.min(QUIET_PAGE, item.left)} more of {item.left}</Text>
       </Pressable>;
+      case "section": return <SectionHeader theme={theme} title={item.title} count={item.count} open={item.open} project={item.project} dense={dense} touch={touch} onPress={item.project ? () => toggle(item.key.slice(2)) : undefined} />;
       case "row": {
         const selected = selectedKey === item.key;
+        const detail = rowDetail(item.s, view, facts, dense || touch);
         return <View>
-          <Row s={item.s} theme={theme} dense={dense} touch={touch} selected={selected} onSelect={onSelect} onOpen={onOpen} sig={item.s.sig} onMenu={onMenu} menuOpen={menuKey === item.key} hit={item.hit} onSendNow={onSendNow} selectedBg={selectedBg} />
+          <Row s={item.s} theme={theme} dense={dense} touch={touch} selected={selected} onSelect={onSelect} onOpen={onOpen} sig={item.s.sig} onMenu={onMenu} menuOpen={menuKey === item.key} hit={item.hit} onSendNow={onSendNow} selectedBg={selectedBg} detail={detail} detailSig={detail.sig} />
           {selected && renderExpanded ? renderExpanded(item.s) : null}
         </View>;
       }
     }
-  }, [theme, c, dense, touch, selectedKey, onSelect, briefLine, renderExpanded, toggle, toggleProject, activeResult, onResult, pickResult, model, overseer?.state, overseer?.line, overseer?.ranges, stackOverseer, asking, afterNeeds, raised, emptyAction, onMenu, menuKey, onSendNow, selectedBg, onOpen]);
+  }, [theme, c, dense, touch, selectedKey, onSelect, briefLine, renderExpanded, toggle, toggleProject, activeResult, onResult, pickResult, model, overseer?.state, overseer?.line, overseer?.ranges, stackOverseer, asking, afterNeeds, raised, emptyAction, onMenu, menuKey, onSendNow, selectedBg, onOpen, view, facts]);
 
   const listRef = useRef<NativeFlatList<Entry>>(null);
   const rootRef = useRef<View>(null);
@@ -202,9 +211,11 @@ function GroupHeader({ theme, title, count, open, tone, dense, touch, folds = fa
   const c = theme.colors;
   return <Pressable accessibilityRole="button" aria-expanded={open} accessibilityState={{ expanded: open }} accessibilityLabel={`${title}, ${count}. ${open ? "Collapse" : "Expand"}`} onPress={onPress}
     style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: touch ? 44 : dense ? 28 : 34, paddingHorizontal: touch ? 16 : dense ? 8 : 16, paddingTop: touch ? 8 : dense ? 4 : 8 }}>
-    {dense && <Icon name={open ? "ChevronDown" : "ChevronRight"} size={touch ? 14 : 12} color={c.foregroundMuted} />}
-    {/* Phones: sentence case at 13, the section role; desktop keeps the small caps. */}
-    <Text accessibilityRole="header" style={touch ? { color: tone ?? c.foregroundMuted, fontSize: 13, lineHeight: 18, fontWeight: "600" } : { color: tone ?? c.foregroundMuted, fontSize: 11, lineHeight: 14, fontWeight: "600", letterSpacing: 0.6, textTransform: "uppercase" }}>{touch ? title.charAt(0) + title.slice(1).toLowerCase() : title}</Text>
+    {/* The sidebar view draws Paseo's quiet section headers (sentence case, no chevron while open); wide Home keeps its
+        small caps, phones sentence case at 13. */}
+    {dense && !touch && !open && <Icon name="ChevronRight" size={12} color={c.foregroundMuted} />}
+    {touch && dense && <Icon name={open ? "ChevronDown" : "ChevronRight"} size={14} color={c.foregroundMuted} />}
+    <Text accessibilityRole="header" style={touch ? { color: tone ?? c.foregroundMuted, fontSize: 13, lineHeight: 18, fontWeight: "600" } : dense ? { color: tone ?? c.foregroundMuted, fontSize: 12, lineHeight: 16, fontWeight: "500" } : { color: tone ?? c.foregroundMuted, fontSize: 11, lineHeight: 14, fontWeight: "600", letterSpacing: 0.6, textTransform: "uppercase" }}>{touch ? title.charAt(0) + title.slice(1).toLowerCase() : title}</Text>
     <Text style={{ color: tone ?? c.foregroundMuted, fontSize: touch ? 13 : 11, lineHeight: touch ? 18 : 14, fontVariant: ["tabular-nums"] }}>{count}</Text>
     {/* A group that starts folded keeps its fold control when open, so it can be folded again. */}
     {!dense && (!open || folds) && <Icon name={open ? "ChevronDown" : "ChevronRight"} size={12} color={c.foregroundMuted} />}
@@ -222,7 +233,7 @@ function BriefRow({ theme, line, selected, touch, onSelect }: { theme: Theme; li
   </Pressable>;
 }
 
-function OverseerRow({ theme, o, selected, touch, stacked = false, onSelect, selectedBg }: { theme: Theme; o: OverseerRowState; selected: boolean; touch: boolean; stacked?: boolean; onSelect: (key: string) => void; selectedBg?: string }) {
+function OverseerRow({ theme, o, selected, touch, stacked = false, pinned = false, onSelect, selectedBg }: { theme: Theme; o: OverseerRowState; selected: boolean; touch: boolean; stacked?: boolean; pinned?: boolean; onSelect: (key: string) => void; selectedBg?: string }) {
   const c = theme.colors;
   const tone = o.state === "asks" ? c.statusWarning : o.state === "error" ? c.statusDanger : o.state === "running" ? runningColor(c) : c.foregroundMuted;
   const icon = o.state === "running" ? <Spinner color={tone} size={13} label="Overseer working" /> : <Icon name="MessagesSquare" size={touch ? 16 : 15} color={o.state === "idle" || o.state === "start" ? c.foregroundMuted : tone} />;
@@ -230,11 +241,13 @@ function OverseerRow({ theme, o, selected, touch, stacked = false, onSelect, sel
   // Wide Home: one line, the phone's shorter start line. Stacked (the sidebar view): the whole line, wrapping to two.
   const line = marks(!stacked && touch && o.state === "start" ? "Ask about any workspace" : o.line, stacked || !(touch && o.state === "start") ? o.ranges : null, c);
   return <Pressable nativeID={rowDomId(OVERSEER_KEY)} accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={`Overseer. ${o.line}`} onPress={() => onSelect(OVERSEER_KEY)}
-    style={state => ({ ...focusRing((state as { focused?: boolean }).focused, c, true), flexDirection: "row", alignItems: stacked ? "flex-start" : "center", gap: 10, minHeight: touch ? 52 : 40, paddingLeft: 14, paddingRight: 16, paddingVertical: stacked ? (touch ? 12 : 8) : 0, borderBottomWidth: 1, borderBottomColor: c.border,
+    style={state => ({ ...focusRing((state as { focused?: boolean }).focused, c, true), flexDirection: "row", alignItems: stacked ? "flex-start" : "center", gap: stacked && !touch ? 8 : 10, minHeight: touch ? 52 : 40, paddingLeft: stacked && !touch ? 8 : 14, paddingRight: stacked && !touch ? 8 : 16, paddingVertical: stacked ? (touch ? 12 : 6) : 0,
+      // In Pinned it is the section's first row, so no rule splits it from the pinned workspaces under it.
+      borderBottomWidth: pinned ? 0 : 1, borderBottomColor: c.border,
       // Its ask isn't a Needs-you row (it's yours to route), so the edge marks it the way blocking rows are marked.
       borderLeftWidth: 2, borderLeftColor: o.state === "asks" || o.state === "error" ? withAlpha(tone, 0.9) : "transparent",
       backgroundColor: selected ? selectedBg ?? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
-    {stacked ? <View style={{ paddingTop: 2 }}>{icon}</View> : icon}
+    {stacked ? <View style={{ width: touch ? 18 : 16, alignItems: "center", paddingTop: 2 }}>{icon}</View> : icon}
     {stacked
       ? <View style={{ flex: 1, gap: 2 }}>
           <Text style={{ color: c.foreground, fontSize: touch ? 14 : 13, fontWeight: "600" }}>Overseer</Text>
@@ -330,8 +343,30 @@ export function marks(text: string, ranges: Range[] | null | undefined, c: Color
  * passes `hit`: the matched words are highlighted where they already are (title, "› agent", the ask line), and a match
  * in a field the row doesn't show replaces line 2 with "<Field> · excerpt", so a result is exactly as tall as the row.
  */
-type RowProps = { s: Workstream; sig: string; theme: Theme; dense: boolean; touch: boolean; selected: boolean; onSelect: (key: string) => void; onOpen?: (key: string) => void; onMenu: OpenRowMenu; menuOpen?: boolean; hit?: RowHit | null; onSendNow?: (s: Workstream) => Promise<void>; selectedBg?: string };
-const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onOpen, onMenu, menuOpen = false, hit = null, onSendNow, selectedBg }: RowProps) {
+/**
+ * What a row draws beside Follow-up's line, from Display's Title and Show: the title (or the branch), and Paseo's
+ * detail line (branch, project, PR, labels) under it, as Paseo's sidebar rows have. Narrow rows only (the sidebar view
+ * and phones); wide Home rows keep their chip rail, where Show decides the PR chip and the time.
+ */
+export type RowDetail = { title: string; branch: string | null; project: string | null; pr: boolean; labels: string[]; time: boolean; meta: boolean; sig: string };
+export function rowDetail(s: Workstream, view: HomeView, facts: HomeListProps["facts"], narrow: boolean): RowDetail {
+  const f = s.workspaceId ? facts?.(s.workspaceId) : undefined;
+  const title = rowTitle(s, view, id => facts?.(id));
+  const branch = narrow && view.show.branch ? f?.branch ?? null : null;
+  const project = narrow && view.show.project ? s.project : null;
+  const labels = narrow && view.show.labels ? f?.labels ?? [] : [];
+  const pr = view.show.pr;
+  const meta = narrow && (!!branch || !!project || labels.length > 0 || (pr && !!s.pr));
+  return { title, branch, project, pr, labels, time: view.show.time, meta, sig: [title, branch, project, pr, labels.join(","), view.show.time].join("|") };
+}
+
+type RowProps = { s: Workstream; sig: string; detail?: RowDetail; detailSig?: string; theme: Theme; dense: boolean; touch: boolean; selected: boolean; onSelect: (key: string) => void; onOpen?: (key: string) => void; onMenu: OpenRowMenu; menuOpen?: boolean; hit?: RowHit | null; onSendNow?: (s: Workstream) => Promise<void>; selectedBg?: string };
+const Row = memo(function Row({ s: raw, theme, dense, touch, selected, onSelect, onOpen, onMenu, menuOpen = false, hit = null, onSendNow, selectedBg, detail }: RowProps) {
+  // Title › Branch name swaps the row's title; everything else reads the workstream as built.
+  const s = detail && detail.title !== raw.title ? { ...raw, title: detail.title } : raw;
+  const showTime = detail?.time ?? true;
+  // Show › Pull request off takes the PR chip off the wide row's rail too.
+  const rail = detail && !detail.pr ? { ...s, pr: null } : s;
   const c = theme.colors;
   const trigger = useRowMenuTrigger(s, onMenu, touch);
   // Desktop rows with an agent peek at its turn under a PeekHost (Home); touch rows keep opening the detail pane.
@@ -356,7 +391,7 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onOp
   const line: ReactNode = s.word && s.group !== "needs" ? (s.line ? <>{s.word} · {lead}{shownLine}</> : s.word) : <>{lead}{shownLine}</>;
   const via = hit?.via ? (() => { const e = excerpt(hit.via.text, hit.via.ranges, touch ? 90 : dense ? 90 : 44); return <>{FIELD_LABEL[hit.via.field]} · {marks(e.text, e.ranges, c)}</>; })() : null;
   const title = <>{marks(s.title, hit?.titleRanges, c)}{s.agent ? <Text style={{ color: c.foregroundMuted, fontWeight: "400" }}>{" › "}{marks(s.agent, hit?.agentRanges, c)}</Text> : null}</>;
-  // Phones: "Working" under every row of a "Running 9" group says nothing the header didn't; one line per row instead.
+  // Phones: "Working" under every row of a "Working 9" group says nothing the header didn't; one line per row instead.
   const generic = touch && !s.word && !s.lead && s.line === "Working";
   // The reason line: AI priority's, else the workspace's first live Compass note (a live note is a reason).
   const why = s.priority?.reason ? { reason: s.priority.reason, source: s.priority.source } : s.compass ? { reason: s.compass, source: { kind: "compass" as const, label: "Compass" } } : null;
@@ -375,31 +410,35 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onOp
       borderLeftWidth: 2, borderLeftColor: blocking ? withAlpha(color, 0.9) : "transparent",
       backgroundColor: selected ? selectedBg ?? c.surface2 : menuOpen || state.pressed && touch ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
     <View style={{ width: touch ? 18 : 16, alignItems: "center", paddingTop: touch ? 2 : dense ? 1 : 0 }}>
-      {s.tone === "running" && s.icon === "LoaderCircle" ? <Spinner color={color} size={13} label="Running" /> : <Icon name={s.icon} size={touch ? 17 : 15} color={color} />}
+      {s.tone === "running" && s.icon === "LoaderCircle" ? <Spinner color={color} size={13} label="Working" /> : <Icon name={s.icon} size={touch ? 17 : 15} color={color} />}
     </View>
     {/* Phones: title 15/20 over two lines, then state · reason, then the PRs as plain text (no bordered chips). */}
     {touch ? <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
       <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
         <Text numberOfLines={2} style={{ flex: 1, minWidth: 0, color: muted ? c.foregroundMuted : c.foreground, fontSize: 15, lineHeight: 20, fontWeight: muted ? "400" : "500" }}>{title}</Text>
-        <View style={{ paddingTop: 2 }}><RowTime s={s} c={c} size={12} /></View>
+        {showTime && <View style={{ paddingTop: 2 }}><RowTime s={s} c={c} size={12} /></View>}
       </View>
       {via ? <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>{via}</Text>
         : (!!s.word || !!s.line || !!s.lead) && !generic && <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>
         {s.word && s.group === "needs" ? <Text style={{ color, fontWeight: "600" }}>{s.word}</Text> : null}{s.word && s.group === "needs" && s.line ? " · " : ""}{line}
       </Text>}
       {!!why && <PriorityLine reason={why.reason} source={why.source} c={c} size={12} lines={2} />}
-      {!!s.pr && <Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 17, fontVariant: ["tabular-nums"], ...(older ? { opacity: 0.6 } : {}) }}><PrSummaryText s={s} c={c} /></Text>}
+      {detail ? detail.meta && <MetaLine s={s} d={detail} c={c} touch dim={older} />
+        : !!s.pr && <Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 17, fontVariant: ["tabular-nums"], ...(older ? { opacity: 0.6 } : {}) }}><PrSummaryText s={s} c={c} /></Text>}
       {sendNow && <View style={{ flexDirection: "row", marginTop: 6 }}>{sendNow}</View>}
     </View> : dense ? <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
-      <Text numberOfLines={1} style={{ color: muted ? c.foregroundMuted : c.foreground, fontSize: 13, lineHeight: 18, fontWeight: muted ? "400" : "500" }}>{title}</Text>
-      {via ? <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{via}</Text>
-        : (!!s.word || !!s.line || !!s.lead) && <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>
+      {/* Paseo's row: the title with the time on its line, Follow-up's line (one line, cut with "…"), then the detail line. */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, color: muted ? c.foregroundMuted : c.foreground, fontSize: 13, lineHeight: 18, fontWeight: muted ? "400" : "500" }}>{title}</Text>
+        {showTime && <RowTime s={s} c={c} size={11} />}
+      </View>
+      {via ? <Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{via}</Text>
+        : (!!s.word || !!s.line || !!s.lead) && <Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>
         {s.word && s.group === "needs" ? <Text style={{ color, fontWeight: "600" }}>{s.word}</Text> : null}{s.word && s.group === "needs" && s.line ? " · " : ""}{line}
       </Text>}
-      {!!why && <PriorityLine reason={why.reason} source={why.source} c={c} size={11} lines={2} />}
-      {touch && (s.pr || s.badges.length > 0) && <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
-        {s.badges.map(b => <BadgeView key={b.text} b={b} c={c} />)}<PrChipView s={s} c={c} />
-      </View>}
+      {/* Three lines at most, like Paseo's rows plus Follow-up's line: the reason line stays on Home and in the workspace view. */}
+      {!detail && !!why && <PriorityLine reason={why.reason} source={why.source} c={c} size={11} lines={2} />}
+      {detail?.meta && <MetaLine s={s} d={detail} c={c} touch={false} dim={older} />}
     </View> : <View style={{ flex: 1, minWidth: 0, gap: 1, paddingVertical: why ? 4 : 0 }}><View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
       {/* The title keeps its width (up to 55 %) and the chips yield; only beside Send now, which can't, does it shrink. */}
       <Text numberOfLines={1} style={{ flexShrink: sendNow ? 1 : 0, minWidth: 0, maxWidth: "55%", color: muted ? c.foregroundMuted : c.foreground, fontSize: 13, fontWeight: muted ? "400" : "500" }}>{title}</Text>
@@ -410,12 +449,49 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onOp
       <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, color: c.foregroundMuted, fontSize: 12, marginLeft: !via && s.word && s.group === "needs" ? -10 : 0 }}>
         {via ?? <>{s.word && s.group === "needs" && s.line ? "\u00a0· " : ""}{line}</>}
       </Text>
-      <ChipRail s={s} c={c} dim={older} />
+      <ChipRail s={rail} c={c} dim={older} />
       {sendNow}
     </View>{!!why && <View style={{ paddingRight: 40 }}><PriorityLine reason={why.reason} source={why.source} c={c} /></View>}</View>}
-    {!touch && <RowTime s={s} c={c} size={dense ? 11 : 12} />}
+    {!touch && !dense && showTime && <RowTime s={s} c={c} size={12} />}
   </Pressable>;
-}, (a, b) => a.sig === b.sig && a.selected === b.selected && a.theme === b.theme && a.dense === b.dense && a.touch === b.touch && a.onSelect === b.onSelect && a.onOpen === b.onOpen && a.onMenu === b.onMenu && a.menuOpen === b.menuOpen && a.hit === b.hit && a.onSendNow === b.onSendNow && a.selectedBg === b.selectedBg);
+}, (a, b) => a.sig === b.sig && a.selected === b.selected && a.theme === b.theme && a.dense === b.dense && a.touch === b.touch && a.onSelect === b.onSelect && a.onOpen === b.onOpen && a.onMenu === b.onMenu && a.menuOpen === b.menuOpen && a.hit === b.hit && a.onSendNow === b.onSendNow && a.selectedBg === b.selectedBg && a.detailSig === b.detailSig);
+
+/**
+ * Paseo's detail line under a row: branch, project, the PR with its checks, labels (as Display › Show leaves them),
+ * the same order and marks as a Paseo sidebar row's, so the two read alike.
+ */
+function MetaLine({ s, d, c, touch, dim }: { s: Workstream; d: RowDetail; c: Colors; touch: boolean; dim: boolean }) {
+  const size = touch ? 12 : 11, glyph = touch ? 12 : 11;
+  const checks = s.pr?.checks;
+  const parts: ReactNode[] = [];
+  if (d.branch) parts.push(<View key="b" style={{ flexDirection: "row", alignItems: "center", gap: 3, flexShrink: 1, minWidth: 0 }}><Icon name="GitBranch" size={glyph} color={c.foregroundMuted} /><Text numberOfLines={1} style={{ flexShrink: 1, color: c.foregroundMuted, fontSize: size }}>{d.branch}</Text></View>);
+  if (d.project) parts.push(<View key="p" style={{ flexDirection: "row", alignItems: "center", gap: 3, flexShrink: 1, minWidth: 0 }}><Icon name="Folder" size={glyph} color={c.foregroundMuted} /><Text numberOfLines={1} style={{ flexShrink: 1, color: c.foregroundMuted, fontSize: size }}>{d.project}</Text></View>);
+  if (d.pr && s.pr) parts.push(<View key="r" style={{ flexDirection: "row", alignItems: "center", gap: 3, flexShrink: 0 }}>
+    <Icon name="GitPullRequest" size={glyph} color={toneColor(c, s.pr.tone)} />
+    <Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: size, fontVariant: ["tabular-nums"] }}>{s.pr.label}</Text>
+    {checks && <Text numberOfLines={1} style={{ color: checks.tone === "muted" ? c.foregroundMuted : badgeColor({ text: "", tone: checks.tone }, c), fontSize: size }}>{checks.text}</Text>}
+  </View>);
+  for (const l of d.labels) parts.push(<View key={`l:${l}`} style={{ flexDirection: "row", alignItems: "center", gap: 4, flexShrink: 1, minWidth: 0 }}><View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.foregroundMuted }} /><Text numberOfLines={1} style={{ flexShrink: 1, color: c.foregroundMuted, fontSize: size }}>{l}</Text></View>);
+  return <View testID="follow-up-row-detail" style={{ flexDirection: "row", alignItems: "center", gap: 8, overflow: "hidden", marginTop: touch ? 2 : 1, ...(dim ? { opacity: 0.6 } : {}) }}>{parts}</View>;
+}
+
+/** Pinned, or a project under Grouping › Project: Paseo's quiet section header. A project folds; Pinned doesn't. */
+function SectionHeader({ theme, title, count, open, project, dense, touch, onPress }: { theme: Theme; title: string; count: number | null; open: boolean; project: string | null; dense: boolean; touch: boolean; onPress?: () => void }) {
+  const c = theme.colors;
+  const initials = project ? project.split(/[/\s_-]+/).filter(Boolean).slice(0, 2).map(w => w[0]!.toUpperCase()).join("") : "";
+  return <Pressable accessibilityRole={onPress ? "button" : "header"} disabled={!onPress} aria-expanded={onPress ? open : undefined} accessibilityState={onPress ? { expanded: open } : undefined}
+    accessibilityLabel={`${title}${count !== null ? `, ${count}` : ""}${onPress ? `. ${open ? "Collapse" : "Expand"}` : ""}`} onPress={onPress}
+    style={state => ({ flexDirection: "row", alignItems: "center", gap: 8, minHeight: touch ? 44 : 28, paddingHorizontal: touch ? 16 : dense ? 8 : 16, paddingTop: touch ? 8 : 6,
+      backgroundColor: onPress && (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
+    {project ? <View style={{ minWidth: touch ? 20 : 18, height: touch ? 20 : 18, paddingHorizontal: 3, borderRadius: 4, alignItems: "center", justifyContent: "center", backgroundColor: c.surface2, borderWidth: 1, borderColor: c.border }}>
+      <Text style={{ color: c.foreground, fontSize: touch ? 10 : 9, fontWeight: "700" }}>{initials}</Text></View> : null}
+    {/* Wide Home speaks in its group headers' small caps (a project keeps its name's case); the sidebar view and phones in Paseo's sentence case. */}
+    <Text numberOfLines={1} style={!dense && !touch ? { flexShrink: 1, color: project ? c.foreground : c.foregroundMuted, fontSize: project ? 12 : 11, lineHeight: 14, fontWeight: "600", ...(project ? {} : { letterSpacing: 0.6, textTransform: "uppercase" as const }) }
+      : { flexShrink: 1, color: project ? c.foreground : c.foregroundMuted, fontSize: touch ? 13 : 12, fontWeight: "500" }}>{title}</Text>
+    {count !== null && <Text style={{ color: c.foregroundMuted, fontSize: touch ? 13 : !dense ? 11 : 12, fontVariant: ["tabular-nums"] }}>{count}</Text>}
+    {onPress && !open && <Icon name="ChevronRight" size={12} color={c.foregroundMuted} />}
+  </Pressable>;
+}
 
 /** The machine-wide auto-send hold, once above Sending's rows: the same words on every width (shared/sending.ts). */
 function HoldLine({ theme, text: line, dense, touch }: { theme: Theme; text: string; dense: boolean; touch: boolean }) {

@@ -84,7 +84,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/send-decision.ts`, `shared/task-rows.ts`, `shared/send-words.ts`, `shared/task-status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/message-queue.ts`, `shared/queue.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/put-in-chat.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `server/scheduled-tasks.ts`, `shared/task-due.ts`, `shared/task-view.ts`, `shared/task-dup.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
 | What each agent is working on now (the agent line on the panel and Home rows; sync_workspace `milestone`, `workspace_now`); what a PR's checks are doing (`checksState`) | `shared/now.ts`, `shared/pr-status.ts`, `client/now-lines.tsx` | [workspaces](docs/workspaces.md#what-each-agent-is-working-on) |
 | Agent peek: an agent's current turn on hover (panel lines, Home rows) or a phone sheet; `TurnView` rows, "timeline already on screen" | `shared/turn.ts`, `shared/peek.ts`, `client/turn-view.tsx`, `client/on-screen.tsx`, `server/transcript.ts` | [client](docs/client.md#agent-peek) |
-| Needs-you inbox, brief, Home | `server/inbox.ts`, `server/brief-timeline.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `server/turn-timeline.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/sending.ts`, `shared/needs-block.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts`, `server/dismiss.ts`, `client/dismiss.tsx`, `shared/catch-up.ts`, `client/catch-up.tsx`, `client/more-context.tsx`, `client/question-context.tsx`, `shared/dictation.ts`, `client/dictation.tsx`, `server/context-requests.ts`, `shared/your-questions.ts` | [needs-you](docs/needs-you.md) |
+| Needs-you inbox, brief, Home | `server/inbox.ts`, `server/brief-timeline.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `server/turn-timeline.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/home-arrange.ts`, `shared/sending.ts`, `shared/needs-block.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts`, `server/dismiss.ts`, `client/dismiss.tsx`, `shared/catch-up.ts`, `client/catch-up.tsx`, `client/more-context.tsx`, `client/question-context.tsx`, `shared/dictation.ts`, `client/dictation.tsx`, `server/context-requests.ts`, `shared/your-questions.ts` | [needs-you](docs/needs-you.md) |
 | Summary (internal id `about`), Rename title with AI | `server/about.ts`, `server/transcript.ts`, `shared/about.ts`, `server/rename.ts`, `shared/rename.ts` | [ai-roles](docs/ai-roles.md) |
 | Dispatch (New before 2.4): start work from an issue, PR, link or words | `shared/dispatch.ts`, `shared/issue-workspace.ts`, `shared/linear-issues.ts`, `shared/new-view.ts`, `server/dispatch.ts`, `server/linear-issues.ts`, `client/new.tsx`, `client/action-row.tsx`, `client/new-entry.tsx`, `shared/new-name.ts`, `shared/new-settings.ts`, `client/new-settings.tsx` | [dispatch](docs/dispatch.md) |
 | Morning brief: the whole Linear queue (sweep, snapshot, changes since you last read it), the brief's Since block, the queue screen, raised issues in Needs you | `shared/linear-queue.ts`, `server/linear-queue.ts`, `shared/brief-since.ts`, `client/brief-since.tsx` | [morning-brief](docs/morning-brief.md) |
@@ -358,7 +358,7 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    rows' opener is required, so right-click, long-press and Shift+F10 open Follow-up's row menu on every list (Home,
    search results, the sidebar view), never the platform's Copy/Paste menu. Items a surface can't serve are left
    out, not shown dead. Guarded by `tests/row-menu.test.ts` ([docs/client.md](docs/client.md#row-menu)).
-14. **Menu glyphs centre on their item** (`menu-glyphs-center-on-their-item`). Every menu item (the sort menu, the row
+14. **Menu glyphs centre on their item** (`menu-glyphs-center-on-their-item`). Every menu item (the Display menu, the row
    menu, the panel's More menu) lays out through `MenuItemContent` (`client/menu-item.tsx`): one leading glyph slot
    centred on the item, sized for touch as its text is. No menu builds its own glyph slot, and none pins a glyph to
    the first line. Guarded by `tests/menu-glyph.test.ts` ([docs/client.md](docs/client.md#row-menu)).
@@ -433,7 +433,7 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    settings category, settings folds, Home group folds and What's new "seen" live in the device settings document
    `follow-up-view` on Paseo 0.16 (`client/view-store.ts`), with localStorage kept as the first-paint cache for one
    release; on 0.15 they stay in localStorage. Anything an agent can set stays host-scoped, so the worker and its
-   tools reach it: `home_sort` is a Display field, never device-scoped. Reads paint the cache first and the document
+   tools reach it: `home_sort` and `home_view` are Display fields, never device-scoped. Reads paint the cache first and the document
    when it loads, never the default in between; a write made while the document loads is replayed into it when it
    arrives (`writes-while-loading-reach-the-document`), so a tab opened at start-up isn't forgotten. Needs you opens on
    every mount. Guarded by
@@ -472,8 +472,9 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    Home's list, so it shows Home's Overseer row whenever Home would, from the same state (`listOverseerRow` over
    `overseerRowState`, `shared/overseer.ts`), stacked like its other rows (`HomeList` `stackOverseer`). Selecting it
    opens the Overseer's chat, or Home's Overseer pane for Start and a failed restart (`overseerRowTarget`). A list
-   filter keeps it only when the query is about it (`overseerMatches`) and marks the match. Guarded by
-   `tests/sidebar-overseer.test.ts`.
+   filter keeps it only when the query is about it (`overseerMatches`) and marks the match. When the host has pins it
+   is the first row of Pinned, above the pinned workspaces; without any it stays on top. Guarded by
+   `tests/sidebar-overseer.test.ts` and `tests/home-arrange.test.ts`.
 27. **One keyboard walk for every list** (`one-keyboard-walk-for-every-list`). Home and the sidebar view walk their rows
    through one hook (`useListKeys`, `client/list-keys.ts`), called once in `HomeList`, with one key map and step
    (`listMove`, `stepKey`, `shared/list-keys.ts`): plain keys only, so Paseo's modified workspace keys stay its own; the
@@ -1771,6 +1772,15 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    to `TURN_ROWS` rows and `TURN_STEPS` steps per run, whatever its length. No peek where that agent's turn is already
    on screen (`timelineOnScreen`: Home's selected row, a surface's mark, the chat beside it). Guarded by
    `tests/agent-peek.test.ts`.
+
+144. **The sidebar view is Paseo's sidebar plus Follow-up's line** (`sidebar-view-is-paseo-s-sidebar-plus-follow-up-s-line`).
+   Home and the sidebar view arrange their rows with one model (`arrangeHome`, `shared/home-arrange.ts`) from one
+   host-scoped Display field (`home_view`), set from one Display menu (`DisplayMenu`) or `set_display`: Grouping, Sort,
+   Title, Show, the Project and Labels filters and Show background. Pins are Paseo's own (`pinnedAt`, written with
+   `setPinned` from the row menu or `pin_workspace`), never a second list: pinned rows leave their group for Pinned,
+   newest first, and still count in it. A host whose workspaces carry no `pinnedAt` (Paseo before 0.17) draws no
+   Pinned section and no pin items. A sidebar row is three lines at most: title and time, Follow-up's line on one
+   line cut with "…", then Paseo's meta line. Guarded by `tests/home-arrange.test.ts`.
 
 ## Bugs
 

@@ -108,7 +108,7 @@ the developer's; it never clears a Needs-you flag and never passes the Overseer'
 | `run_recovery` | `follow.recover` | planned |
 | `workspace_about` | `follow.workspace-about` | read (writes a Summary when none is cached) |
 | `agent_settings`, `set_agent_setting`, `set_wait_for_jobs` | `follow.agent-settings`, `follow.set-agent-setting`, `follow.set-wait` | read / planned |
-| `display_settings`, `set_display` | the host's `settings.display` document, Home's order (`home_sort`) Home's right pane width (`home_detail_fraction`), Catch up's queue rail width (`catch_up_rail_fraction`) and the search-from-anywhere key (`search_shortcut`) among it | read / planned |
+| `display_settings`, `set_display` | the host's `settings.display` document, Home's order (`home_sort`), how its list is arranged (`home_view`: grouping, title, show, filters), Home's right pane width (`home_detail_fraction`), Catch up's queue rail width (`catch_up_rail_fraction`) and the search-from-anywhere key (`search_shortcut`) among it | read / planned |
 | `follow_settings`, `set_follow_settings` | `follow.follow-settings`, `follow.set-follow-settings` | read / planned |
 | `project_settings`, `set_project_tracking` | `follow.project-settings`, `follow.set-project-tracking` | read / planned |
 | `pr_workflow`, `set_pr_workflow` | `follow.pr-workflow`, `follow.set-pr-workflow` | read / planned |
@@ -133,6 +133,7 @@ the developer's; it never clears a Needs-you flag and never passes the Overseer'
 | `ai_rename` | `follow.rename-status` (the dry run: name now, suggestion, undoable rename), `follow.rename-workspace` (rename or `undo`) | planned. `title` skips the model; `undo=true` restores the name before the last rename for 24 h. |
 | `dispatch` | `follow.dispatch-preview` (the dry run: source, action, project and why, base, branch, agent, the exact instructions), `follow.dispatch` (confirm) | planned. Dispatch's start from a Linear key or link, a GitHub issue or PR link, another link or words; confirm is refused when the instructions changed since the dry run ([dispatch.md](dispatch.md)). |
 | `dispatch_sources`, `dispatch_records` | `follow.dispatch-sources` (open Linear issues, or `query` to search, plus the latest starts), `follow.dispatch-records` (the last 50) | read |
+| `pin_workspace` | Paseo's `setPinned` on the workspace (the same pin as Paseo's sidebar) | planned. Pin to top or Unpin, as the row menu does |
 | `dispatch_undo` | `follow.dispatch-undo` | planned. Cancels a start still waiting for Paseo, or archives what it created within 10 minutes. |
 | `dispatch_actions`, `set_dispatch_actions` | `follow.dispatch-actions`, `follow.set-dispatch-actions` (upsert, move, hide, reset, delete, reset-all) | read / planned |
 | `dispatch_settings`, `set_dispatch_settings` | `follow.dispatch-settings`, `follow.set-dispatch-settings` (team rules, bases, the no-team rule) | read / planned |

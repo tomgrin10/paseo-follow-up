@@ -1935,6 +1935,17 @@ export default function contribute(server: PluginServerContext) {
     toolTransport: () => toolTransport, startedAt,
   });
   const agentActions = new AgentActions({ timeZone: () => clientTimeZone, autoSendsHeld: () => !governor.allowsBackground(), store, prActions: actions, engine, inbox, priorities: priorityStore, about, agentSettings, wait: { status: currentWait }, prWorkflows: () => prWorkflowView(), rpc: rpcBridge, display: displayBridge, report: { run: (caller, args) => reportKit.reporter.run(caller, args) }, agentTitle: async id => (await api?.agents.ref(id).refresh().catch(() => null))?.agent?.title ?? null,
+    pins: {
+      async read(workspaceId) {
+        const w = await api?.workspaces.ref(workspaceId).refresh().catch(() => null) as { name?: string; title?: string | null; pinnedAt?: string | null } | null | undefined;
+        return w && "pinnedAt" in w ? { title: w.title || w.name || workspaceId, pinnedAt: w.pinnedAt ?? null } : null;
+      },
+      async set(workspaceId, pinned) {
+        const ref = api?.workspaces.ref(workspaceId) as { setPinned?: (p: boolean) => Promise<{ pinnedAt: string | null }> } | undefined;
+        if (typeof ref?.setPinned !== "function") throw new Error("This Paseo can't pin workspaces.");
+        return ref.setPinned(pinned);
+      },
+    },
     // The directory's agent list (metadata only): a claim never loads or refreshes the main agent.
     agentInfo: async agentId => { const row = gateway.directory.cached(agentId) ?? (await gateway.directory.read()).agents.find(r => r.agent.id === agentId)?.agent; return row ? { status: row.status, activeTurn: row.activeTurn, pendingPermissions: row.pendingPermissions, archivedAt: row.archivedAt } : null; } });
   // 0.15 polls priorities once a minute; the raised issues (Q8) ride the same answer instead of a read of their own.

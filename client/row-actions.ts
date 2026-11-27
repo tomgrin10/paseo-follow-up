@@ -32,12 +32,18 @@ export function useRowMenu(host: RowMenuHost) {
   useEffect(() => { bindToast(toast); }, [toast]);
   const cache = useQueryClient();
   // Archive is Paseo's own request (archive_workspace_request, what Paseo's Archive sends), on the host's API when it has it.
-  const paseoApi = usePaseo() as { workspaces?: { archive?: (id: string) => Promise<{ error: string | null; canceled?: boolean }> } } | null;
+  const paseoApi = usePaseo() as { workspaces?: { archive?: (id: string) => Promise<{ error: string | null; canceled?: boolean }>; ref?: (id: string) => { setPinned?: (pinned: boolean) => Promise<{ pinnedAt: string | null }> } } } | null;
   const send = useRpc(sendRpc); const control = useRpc(controlRpc); const about = useRpc(workspaceAboutRpc); const setFollow = useRpc(setFollowSettingsRpc);
   // Read through a ref so build and pick stay one stable pair: the list's memoised rows compare them by identity.
   const archiveWorkspace = typeof paseoApi?.workspaces?.archive === "function" ? (id: string) => paseoApi.workspaces!.archive!(id) : null;
-  const current = useRef({ host, send, control, about, setFollow, cache, archiveWorkspace });
-  current.current = { host, send, control, about, setFollow, cache, archiveWorkspace };
+  // Pin to top / Unpin: Paseo's own setWorkspacePinned, on hosts whose workspace handle has it.
+  const setPinned = typeof paseoApi?.workspaces?.ref === "function" ? (id: string, pinned: boolean) => {
+    const ref = paseoApi.workspaces!.ref!(id);
+    if (typeof ref?.setPinned !== "function") throw new Error("This Paseo can't pin workspaces.");
+    return ref.setPinned(pinned);
+  } : null;
+  const current = useRef({ host, send, control, about, setFollow, cache, archiveWorkspace, setPinned });
+  current.current = { host, send, control, about, setFollow, cache, archiveWorkspace, setPinned };
   return useMemo(() => {
     const deps = () => current.current;
     const build = (s: Workstream) => {
@@ -51,7 +57,7 @@ export function useRowMenu(host: RowMenuHost) {
       const workspaceLater = wsOnly ? { snoozedUntil: wsSnooze ? wakeLabel({ until: wsSnooze.until, at: wsSnooze.at }, Date.now()) || null : null } : null;
       const listed = s.workspaceId ? paseo.get(s.workspaceId) : undefined;
       return rowMenu({ s, workspaceLater, flagged: !!row?.needs, snoozedUntil: row?.needs && row.snooze ? wakeLabel(row.snooze, Date.now()) || null : null, w, needs, branch: listed?.branch ?? null, canAsk: !!prefillAsk && overseerOn,
-        archive: deps().archiveWorkspace ? listed?.archive ?? null : null });
+        archive: deps().archiveWorkspace ? listed?.archive ?? null : null, ...(deps().setPinned && listed && "pinnedAt" in listed ? { pinnedAt: listed.pinnedAt ?? null } : {}) });
     };
     const pick = (s: Workstream, item: RowMenuItem): Promise<boolean> => {
       const { host: { sources: { inbox, live }, openFull, openQuestion, prefillAsk }, send, control, about, setFollow, cache, archiveWorkspace } = deps();
@@ -87,6 +93,8 @@ export function useRowMenu(host: RowMenuHost) {
         case "clear_hold": return runAction({ label: "Resume follow-up", run: async () => { await control({ workspaceId, clearHold: true }); after(); }, success: "Follow-up resumed" }, `hold:${workspaceId}`);
         case "open_chat": return runAction({ label: "Open", run: async () => openFull(s), success: null });
         case "ask_overseer": return runAction({ label: "Ask the Overseer", run: async () => prefillAsk?.(`About ${s.title}: `), success: null });
+        case "pin": return runAction({ label: "Pin to top", run: async () => { await deps().setPinned!(workspaceId, true); }, success: `Pinned ${s.title}`, failure: `Couldn't pin ${s.title}` }, `pin:${workspaceId}`);
+        case "unpin": return runAction({ label: "Unpin", run: async () => { await deps().setPinned!(workspaceId, false); }, success: `Unpinned ${s.title}`, failure: `Couldn't unpin ${s.title}` }, `pin:${workspaceId}`);
         case "copy_branch": return runAction({ label: "Copy branch", run: () => copyText(arg), success: "Branch name copied", failure: "Couldn't copy here" });
         case "rewrite_summary": return runAction({ label: "Rewrite summary", run: async () => cache.setQueryData(aboutKey(workspaceId), await about({ workspaceId, open: true, refresh: true })), success: "Summary rewritten" }, `about:${workspaceId}`);
         case "rename_ai": return runAction({ label: "Rename title with AI", run: async () => openRename({ workspaceId, title: s.title }), success: null });

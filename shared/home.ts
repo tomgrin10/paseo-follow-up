@@ -27,7 +27,7 @@ import { questionLine, questionsByWorkspace } from "./your-questions";
 export const HOME_GROUPS = ["needs", "older", "sending", "running", "waiting", "later", "quiet"] as const;
 export type HomeGroupId = typeof HOME_GROUPS[number];
 export const GROUP_TITLE: Record<HomeGroupId, string> = {
-  needs: "Needs you", older: "Older", sending: "Sending", running: "Running", waiting: "Waiting on others", later: "Later", quiet: "Quiet",
+  needs: "Needs you", older: "Older", sending: "Sending", running: "Working", waiting: "Waiting on others", later: "Later", quiet: "Quiet",
 };
 
 /**
@@ -64,6 +64,12 @@ export type PaseoWorkspaceLite = {
   pr?: { number: number | null; title: string } | null;
   /** What archiving would touch, from the same descriptor (row menu's Archive confirm). */
   archive?: ArchiveFacts;
+  /** Paseo's pin (0.17+, shared with Paseo's sidebar): an ISO time, null when unpinned, absent when the host has no pins. */
+  pinnedAt?: string | null;
+  /** Paseo's workspace labels. */
+  labels?: string[];
+  /** A workspace an agent or plugin started in the background; hidden unless Show background is on. */
+  background?: boolean;
 };
 
 export type Workstream = {

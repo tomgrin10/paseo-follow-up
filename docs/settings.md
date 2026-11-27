@@ -17,9 +17,14 @@
 
 - **Booleans** use positive `enable_` names. Fields only ever gain defaults, so documents saved by older versions
   keep parsing.
-- **Home's order** is the Display field `home_sort` (absent until first chosen, read as Priority). The sort menu on
+- **Home's order** is the Display field `home_sort` (absent until first chosen, read as Priority). The Display menu's Sort on
   Home and in the sidebar view writes it, so the order is the same on every device, and `set_display` sets it with
   `{ values: { home_sort: "recent" } }`.
+- **How Home's list is arranged** is the Display field `home_view` (`shared/home-arrange.ts`): grouping
+  (`status`, `project`, `none`), title (`title`, `branch`), show (`branch`, `project`, `pr`, `labels`, `time`),
+  `projects` and `labels` filters, and `show_background`. The Display menu on Home and in the sidebar view writes it;
+  `set_display` takes a partial one (`{ values: { home_view: { grouping: "project" } } }`). A saved `home_sort` of
+  `project` (the old By project) is read as grouping Project with Priority and written back once.
 - **Home's right pane width** is the Display field `home_detail_fraction`: the pane's share of Home's width, 0.2 to
   0.8, absent until first dragged (read as 0.42). Dragging the divider (or moving it with the keyboard) writes it once,
   on release, through `writeDisplay` (`shared/display.ts`); `set_display` sets it with

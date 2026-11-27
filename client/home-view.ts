@@ -6,7 +6,8 @@ import { openFeed } from "./feeds";
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type { Priority } from "../shared/priorities";
 import { DEFAULT_SORT, isSortMode, type SortMode } from "../shared/sort";
-import { homeSortSync } from "../shared/display";
+import { homeSortSync, writeDisplay } from "../shared/display";
+import { DEFAULT_HOME_VIEW, parseHomeView, type HomeView } from "../shared/home-arrange";
 import type { AgentLite } from "../shared/search";
 import { NO_USAGE, USAGE_POLL_MS, type Usage } from "../shared/usage";
 import type { z } from "zod";
@@ -28,6 +29,8 @@ import type { ContextRequest } from "../shared/catch-up";
  * the list opens in the right order before the setting arrives, and as the value the first device migrates.
  */
 const SORT_KEY = "follow-up.home.sort";
+/** This device's copy of the Display setting `home_view`, so the list opens arranged before the setting arrives. */
+const VIEW_KEY = "follow-up.home.view";
 const PRIORITY_POLL_MS = 60_000;
 
 /** Per-device storage where the host has it (web, desktop). Native or blocked storage: memory only. */
@@ -41,7 +44,9 @@ type AgentEntry = { agent?: { id?: string; title?: string | null; workspaceId?: 
 export function createHomeExtras(client: PluginClientContext) {
   const saved = storage.get(SORT_KEY);
   let sort: SortMode = isSortMode(saved) ? saved : DEFAULT_SORT;
-  const sync = homeSortSync(client, () => sort, next => { sort = next; storage.set(SORT_KEY, next); });
+  let view: HomeView = (() => { try { const v = storage.get(VIEW_KEY); return v ? parseHomeView(JSON.parse(v)) : DEFAULT_HOME_VIEW; } catch { return DEFAULT_HOME_VIEW; } })();
+  const keepView = (next: HomeView) => { view = next; storage.set(VIEW_KEY, JSON.stringify(next)); };
+  const sync = homeSortSync(client, () => sort, next => { sort = next; storage.set(SORT_KEY, next); }, { current: () => view, adopt: keepView });
   const writeSort = sync.write, readSort = sync.read;
   // Ranker runs this client started ("Re-rank now"), resolved when the feed says the run is over.
   const rankWaiters = new Set<() => void>();
@@ -226,6 +231,14 @@ export function createHomeExtras(client: PluginClientContext) {
     sort: () => sort,
     /** Home's and the sidebar view's order: shown at once, saved as the Display setting `home_sort`. */
     setSort(next: SortMode) { if (next === sort) return; sort = next; storage.set(SORT_KEY, next); emit(); void writeSort(next).catch(() => undefined); },
+    /** Grouping, Title, Show, the filters and Show background (shared/home-arrange.ts), for Home and the sidebar view. */
+    view: () => view,
+    /** Shown at once, saved as the Display setting `home_view`. */
+    setView(patch: Partial<HomeView>) {
+      const next = parseHomeView({ ...view, ...patch });
+      if (JSON.stringify(next) === JSON.stringify(view)) return;
+      keepView(next); emit(); void writeDisplay(client, { home_view: next }).catch(() => undefined);
+    },
     priorities: () => priorities,
     usage: () => usage,
     /** The ranker: on or off, its last run and which sources it could read. */

@@ -88,7 +88,7 @@ const paseo016 = /(^|\D)0\.1[6-9]\.\d+/.test(paseoVersion ?? "");
 if (only.includes("sidebar") && only.some(n => n !== "sidebar")) fail("shoot --only sidebar on its own, with HARNESS_PASEO=0.16");
 if (only.includes("sidebar") && !paseo016) fail(`the sidebar shot needs the Paseo CLI 0.16.x (found ${paseoVersion ?? "none"}); run with HARNESS_PASEO=0.16`);
 if (only.includes("feeds") && only.length > 1) fail("run --only feeds on its own (npm run test:feeds)");
-const paseoOk = only.includes("menu-bounds") || only.includes("settings-tabs") || only.includes("new") || only.includes("onboarding") || PASTE_LIKE(only) || only.includes("gallery") || only.includes("search-focus") || only.includes("frames") || only.includes("your-questions") || only.includes("peek") ? /(^|\D)0\.1[5-7]\.\d+/ : only.includes("sidebar") || only.includes("feeds") || only.includes("put-in-chat") || argv.includes("--sidebar-review") || argv.includes("--overseer-review") || argv.includes("--keys-review") || argv.includes("--rank-review") || argv.includes("--sortfoot-review") || argv.includes("--secsearch-review") || argv.includes("--github-wait-review") ? /(^|\D)0\.1[56]\.\d+/ : /(^|\D)0\.15\.\d+/;
+const paseoOk = only.includes("menu-bounds") || only.includes("settings-tabs") || only.includes("new") || only.includes("onboarding") || PASTE_LIKE(only) || only.includes("gallery") || only.includes("search-focus") || only.includes("frames") || only.includes("your-questions") || only.includes("peek") || argv.includes("--parity-review") ? /(^|\D)0\.1[5-7]\.\d+/ : only.includes("sidebar") || only.includes("feeds") || only.includes("put-in-chat") || argv.includes("--sidebar-review") || argv.includes("--overseer-review") || argv.includes("--keys-review") || argv.includes("--rank-review") || argv.includes("--sortfoot-review") || argv.includes("--secsearch-review") || argv.includes("--github-wait-review") ? /(^|\D)0\.1[56]\.\d+/ : /(^|\D)0\.15\.\d+/;
 if (!paseoVersion || !paseoOk.test(paseoVersion)) fail(`needs the Paseo CLI 0.15.x on PATH (found ${paseoVersion ?? "none"}); run through harness-slot or put ~/paseo-harness/cli/0.15.4/bin first`);
 if (changelogArg && !existsSync(changelogArg)) fail(`--whats-new-changelog: no file at ${changelogArg}`);
 const optimiser = await findOptimiser();
@@ -1181,10 +1181,10 @@ async function checkFeeds({ seeded, call, cli, home }) {
       ["pill (collapsed): its label", pillPage, async (page, timeout) => { await page.waitForFunction(before => [...document.querySelectorAll('[aria-label^="Follow-up · "]')].some(el => el.getAttribute("aria-label") !== before), pillBefore, { timeout }); }],
     ], { note: "includes the fixture agent's turn" });
     await fresh("Sort set by another client (set_display home_sort)", () => agentAct("set_display", { values: { home_sort: "name" } }), [
-      ["Home: sort button", homePage, label(/^Sort: Name/)],
+      ["Home: sort button", homePage, label(/^Display: .*sort Name/)],
     ]);
     await fresh("Sort set back by another client", () => agentAct("set_display", { values: { home_sort: "priority" } }), [
-      ["Home: sort button", homePage, label(/^Sort: Priority/)],
+      ["Home: sort button", homePage, label(/^Display: .*sort Priority/)],
     ]);
     await fresh("Priorities written (the ranker's store write, via set_priorities)", () => agentAct("set_priorities", { priorities: [{ workspace: ws("billing").workspaceId, score: 90, reason: "Feeds check: first priority" }], replace: false }), [
       ["Home: the priority line", homePage, text("Feeds check: first priority")],
@@ -1580,8 +1580,9 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       await page.getByText("Follow-up: Needs you", { exact: true }).last().click();
       await openHome(page);
       const view = page.getByTestId("plugin-sidebar-view");
-      await view.getByRole("button", { name: /^Sort: / }).first().click();
-      await view.getByRole("menuitem", { name: /Re-rank now/ }).first().waitFor({ timeout: 60000 });
+      await view.getByRole("button", { name: /^Display: / }).first().click();
+      await page.getByRole("menuitem", { name: /^Sort/ }).first().click();
+      await page.getByRole("menuitem", { name: /Re-rank now/ }).first().waitFor({ timeout: 60000 });
       return view;
     };
     const footer = async (scope, text) => { await scope.getByText(text).first().waitFor({ timeout: 30000 }); log(`sortfoot: footer reads "${await scope.getByText(text).first().textContent()}"`); };
@@ -1591,12 +1592,73 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
     await shoot("sortfoot-home-dark", SIDEBAR, "dark", async page => {
       await openHome(page);
       // Home's own sort button, not the sidebar view's beside it.
-      for (const b of await page.getByRole("button", { name: /^Sort: / }).all()) if (!await b.evaluate(e => !!e.closest('[data-testid="plugin-sidebar-view"]'))) { await b.click(); break; }
+      for (const b of await page.getByRole("button", { name: /^Display: / }).all()) if (!await b.evaluate(e => !!e.closest('[data-testid="plugin-sidebar-view"]'))) { await b.click(); break; }
+      await page.getByRole("menuitem", { name: /^Sort/ }).first().click();
       await page.getByRole("menuitem", { name: /Re-rank now/ }).first().waitFor({ timeout: 30000 });
       await footer(page, /^Ranked /);
     });
     await actPlanned(call, caller, "set_display", { values: { enable_ranker: false } });
     await fs.rm(rankerFile, { force: true });
+  }
+  // Sidebar parity (--parity-review, Paseo 0.17 with pins: HARNESS_PASEO=0.16 runs the ~/.local CLI): the sidebar view
+  // as Paseo's sidebar plus Follow-up's line (invariant sidebar-view-is-paseo-s-sidebar-plus-follow-up-s-line). Two
+  // workspaces pinned from Follow-up's own row menu (Paseo's pin), then: the view dark and light, the Display menu,
+  // Grouping › Project, Home on a phone and on a desktop after Running became Working.
+  if (argv.includes("--parity-review")) {
+    const caller = seeded.workspaces.find(w => w.key === "audit").agentId;
+    const parityView = async page => {
+      await page.goto(`${ORIGIN}/settings/sidebar`);
+      await page.getByText("Default view", { exact: true }).first().click();
+      await page.getByText("Follow-up: Needs you", { exact: true }).last().click();
+      await openHome(page);
+      await page.setViewportSize(SIDEBAR);
+      const view = page.getByTestId("plugin-sidebar-view");
+      await view.getByRole("button", { name: /^Billing retries/ }).first().waitFor({ timeout: 60000 });
+      return view;
+    };
+    const pin = async (page, view, title) => {
+      await view.getByRole("button", { name: new RegExp(`^${title}`) }).first().click({ button: "right", position: { x: 60, y: 12 } });
+      await page.getByRole("menu", { name: `Actions for ${title}` }).getByRole("menuitem", { name: "Pin to top" }).click();
+      await view.getByText("Pinned", { exact: true }).first().waitFor({ timeout: 30000 });
+    };
+    const pinnedFirst = async view => { const t = await view.innerText(); if (t.indexOf("Pinned") < 0 || t.indexOf("Pinned") > t.indexOf("Webhook signing")) throw new Error("Pinned is not on top"); };
+    await shoot("parity-sidebar-dark", SIDEBAR, "dark", async page => {
+      const view = await parityView(page);
+      await pin(page, view, "Billing retries");
+      await pin(page, view, "Webhook signing");
+      await pinnedFirst(view);
+      if (await view.getByText("Running", { exact: true }).count()) throw new Error("the Running group is still named Running");
+    });
+    await shoot("parity-sidebar-light", SIDEBAR, "light", async page => { await pinnedFirst(await parityView(page)); });
+    await shoot("parity-menu-dark", SIDEBAR, "dark", async page => {
+      const view = await parityView(page);
+      await view.getByRole("button", { name: /^Display: / }).first().click();
+      await page.getByRole("menuitem", { name: /^Show background/ }).first().waitFor();
+    });
+    await shoot("parity-grouping-menu-dark", SIDEBAR, "dark", async page => {
+      const view = await parityView(page);
+      await view.getByRole("button", { name: /^Display: / }).first().click();
+      await page.getByRole("menuitem", { name: /^Grouping/ }).first().click();
+      await page.getByRole("menuitem", { name: /^Project/ }).first().waitFor();
+    });
+    await shoot("parity-grouping-project-dark", SIDEBAR, "dark", async page => {
+      const view = await parityView(page);
+      await view.getByRole("button", { name: /^Display: / }).first().click();
+      await page.getByRole("menuitem", { name: /^Grouping/ }).first().click();
+      await page.getByRole("menuitem", { name: /^Project/ }).first().click();
+      await view.getByRole("button", { name: /^Display: grouping Project/ }).first().waitFor({ timeout: 15000 });
+    });
+    await actPlanned(call, caller, "set_display", { values: { home_view: { grouping: "status" } } });
+    await shoot("parity-phone-dark", PHONE, "dark", async page => {
+      await openHome(page);
+      await page.setViewportSize(PHONE);
+      await page.getByText("Pinned", { exact: true }).first().waitFor({ timeout: 30000 });
+    });
+    for (const scheme of ["dark", "light"]) await shoot(`parity-home-${scheme}`, DESKTOP, scheme, async page => {
+      await openHome(page);
+      await page.getByText("Needs you", { exact: true }).first().waitFor({ timeout: 30000 });
+      log(`parity: Home shows Working ${await page.getByText("Working", { exact: true }).count()}, Running ${await page.getByText("Running", { exact: true }).count()}`);
+    });
   }
   // Section search (--secsearch-review, Paseo 0.16): the panel's Pull requests, Tasks and Activity searched in place, on
   // Billing retries with five more tasks (three done, so the "done" fold holds them). Each section light and dark (the
@@ -3108,10 +3170,10 @@ async function homeKeysShots({ shoot, out }) {
     // Enter on another control stays that control's: the sort button opens its menu, Home stays.
     await openHome(page);
     await (await homeRow(page, TITLE)).click(); await page.waitForTimeout(300);
-    const sort = page.getByRole("button", { name: /^Sort: / }).filter({ visible: true }).first();
+    const sort = page.getByRole("button", { name: /^Display: / }).filter({ visible: true }).first();
     await sort.focus(); const stay = page.url();
     await page.keyboard.press("Enter"); await page.waitForTimeout(600);
-    check("Enter on the sort button opens its menu and stays on Home", page.url() === stay && await page.getByRole("menu").filter({ visible: true }).count() > 0, { url: page.url() });
+    check("Enter on the Display button opens its menu and stays on Home", page.url() === stay && await page.getByRole("menu").filter({ visible: true }).count() > 0, { url: page.url() });
     await page.keyboard.press("Escape");
     // S toggles the keys sheet; S typed in the search types.
     await openHome(page); await page.waitForTimeout(300);

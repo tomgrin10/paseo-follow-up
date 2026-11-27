@@ -57,8 +57,8 @@ test("Make main agent waits while the main agent's background work runs", () => 
   assert.match(checkMainClaim(w, "helper", "developer", { ...idle, backgroundWork: { count: 1 } }, clock).blockers.join(), /background work running/);
 });
 
-test("the browser line reads Running, not Finished, while background work runs", () => {
+test("the browser line reads Working (Home's group), not Finished, while background work runs", () => {
   const idle = { status: "idle", pendingPermissions: [], requiresAttention: true, attentionReason: "finished" };
   assert.equal(browserWorkspaceState(workspace(), idle, clock).state, "Needs you · Finished");
-  assert.equal(browserWorkspaceState(workspace(), { ...idle, backgroundWork: { count: 1 } }, clock).state, "Running");
+  assert.equal(browserWorkspaceState(workspace(), { ...idle, backgroundWork: { count: 1 } }, clock).state, "Working");
 });

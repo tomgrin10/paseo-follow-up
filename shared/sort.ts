@@ -16,6 +16,12 @@ export const SORT_HINT: Record<SortMode, string> = {
   project: "Project, then most important",
 };
 export const DEFAULT_SORT: SortMode = "priority";
+/**
+ * The sorts the Display menu offers. "By project" became Grouping › Project (shared/home-arrange.ts): a saved
+ * `home_sort: "project"` still parses and is moved to that grouping with Priority on first read (`legacyProjectSort`).
+ */
+export const MENU_SORTS = ["priority", "recent", "oldest", "name"] as const satisfies readonly SortMode[];
+export const isMenuSort = (v: unknown): v is typeof MENU_SORTS[number] => typeof v === "string" && (MENU_SORTS as readonly string[]).includes(v);
 export const isSortMode = (v: unknown): v is SortMode => typeof v === "string" && (SORT_MODES as readonly string[]).includes(v);
 
 /**
