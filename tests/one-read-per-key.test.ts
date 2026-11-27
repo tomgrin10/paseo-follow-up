@@ -28,7 +28,8 @@ async function mountReads(withFeeds: boolean) {
     for (let ms = 0; ms < 4_000; ms += 250) { mock.timers.tick(250); await settle(); }
   } finally { live.stop(); inbox.stop(); await extras.stop(); display(); mock.timers.reset(); }
   const byName = new Map<string, number>(); for (const c of host.calls) byName.set(c.name, (byName.get(c.name) ?? 0) + 1);
-  return byName;
+  const subscribed = new Map<string, number>(); for (const name of host.subscriptions) subscribed.set(name, (subscribed.get(name) ?? 0) + 1);
+  return Object.assign(byName, { subscribed });
 }
 
 test("one-read-per-key-at-mount: on Paseo 0.16 the stores read each thing at most once at open, and the feeds' documents aren't read again", { timeout: 60_000 }, async () => {
@@ -37,6 +38,10 @@ test("one-read-per-key-at-mount: on Paseo 0.16 the stores read each thing at mos
   assert.deepEqual(twice, [], "a read the stores share goes out once (client/shared-read.ts)");
   assert.equal(reads.get("settings.display.read") ?? 0, 0, "the Display feed's first event is the document: no read of it");
   assert.equal(reads.get("follow.usage"), 1, "the meters' poll reuses the open read");
+  // 2026-11-27, live beta.4's first Home open: follow.display-feed subscribed twice (the Display store and Home's order).
+  const feeds = [...reads.subscribed].filter(([, n]) => n > 1).map(([name, n]) => `${name} ×${n}`);
+  assert.deepEqual(feeds, [], "each feed is subscribed once: Home's order follows the Display store's feed (followDisplayDoc)");
+  assert.equal(reads.subscribed.get("follow.display-feed"), 1);
 });
 
 test("one-read-per-key-at-mount: on Paseo 0.15 the Display store and Home's order share one read", { timeout: 60_000 }, async () => {
@@ -48,4 +53,27 @@ test("one-read-per-key-at-mount: the brief pane re-reads the queue only when its
   assert.equal(queueMoved("", "q1"), false, "the feed's first revision after the pane's own read");
   assert.equal(queueMoved("q1", "q1"), false);
   assert.equal(queueMoved("q1", "q2"), true, "a sweep ended or a dismissal: read again");
+});
+
+test("one-read-per-key-at-mount: Home's order follows the Display store's one feed, whichever store starts first", { timeout: 60_000 }, async () => {
+  for (const displayFirst of [true, false]) {
+    const stores = await bundleStores(); stores.resetSharedReads();
+    mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: Date.parse("2026-11-27T12:00:00Z") });
+    const host = fakeHost(true);
+    let display = displayFirst ? stores.contributeDisplay(host.client as never, {} as never) : null;
+    const extras = stores.createHomeExtras(host.client as never);
+    try {
+      for (let ms = 0; ms < 500; ms += 250) { mock.timers.tick(250); await settle(); }
+      // The document arrives before Home's store follows it (display first) or after (Home first): both take it.
+      host.push("follow.display-feed", { status: "ready", revision: "r1", values: { home_sort: "recent" } });
+      display ??= stores.contributeDisplay(host.client as never, {} as never);
+      if (!displayFirst) host.push("follow.display-feed", { status: "ready", revision: "r1", values: { home_sort: "recent" } });
+      for (let ms = 0; ms < 1_000; ms += 250) { mock.timers.tick(250); await settle(); }
+      assert.equal(extras.sort(), "recent", `Home's order takes the pushed document (${displayFirst ? "Display store first" : "Home first"})`);
+      host.push("follow.display-feed", { status: "ready", revision: "r2", values: { home_sort: "name" } });
+      for (let ms = 0; ms < 500; ms += 250) { mock.timers.tick(250); await settle(); }
+      assert.equal(extras.sort(), "name", "and every later push");
+      assert.equal(host.subscriptions.filter(n => n === "follow.display-feed").length, 1, "through one subscription");
+    } finally { await extras.stop(); display?.(); mock.timers.reset(); }
+  }
 });

@@ -1868,13 +1868,17 @@ These are product rules. Each has tests, and breaking one is a bug even when the
 142. **A mount reads each thing once** (`one-read-per-key-at-mount`). When the client's modules start together (the
    live list, Home's extras, the Display store, the search shortcut, Home), a document one of them already has or is
    reading isn't read again: a feed's first event is its document (the Display document on Paseo 0.16, so Home's order
-   and the search shortcut read none and take the Display store's copy, `displayValues`/`subscribeDisplay`), and a
+   and the search shortcut read none and take the Display store's copy, `displayValues`/`subscribeDisplay`), each feed
+   is subscribed once per client (Home's order follows the Display store's `follow.display-feed` through
+   `followDisplayDoc`, which hands a late follower the last document), and a
    read they share goes through `sharedRead` (`client/shared-read.ts`), which joins the one in flight or reuses its
    answer for a stated window (the usage meters, `USAGE_SHARED_MS`). A store re-reads when what it shows moved, never
    when a value arrives for the first time (the brief pane's queue, `queueMoved`). A write never goes through
    `sharedRead`. 2026-11-27 (live-sized seed, the broad perf check, Home's first open): `settings.display.read` three
-   times in one millisecond, `follow.usage` twice within 3 s and `follow.linear-queue` three times. Guarded by
-   `tests/one-read-per-key.test.ts` (the real stores on a 0.16 and a 0.15 host, each read at most once).
+   times in one millisecond, `follow.usage` twice within 3 s and `follow.linear-queue` three times; then live beta.4's
+   first Home open subscribed `follow.display-feed` twice (the Display store and Home's order each opened it). Guarded
+   by `tests/one-read-per-key.test.ts` (the real stores on a 0.16 and a 0.15 host, each read at most once and each feed
+   subscribed once, Home's order following pushes whichever store starts first).
 
 148. **Typing never redraws unchanged rows** (`typing-never-redraws-unchanged-rows`). A key in Home's search redraws
    only the rows whose drawn content moved. `Row` (`client/home-list.tsx`) compares its search hit by value

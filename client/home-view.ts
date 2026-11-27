@@ -1,8 +1,9 @@
 import type { DispatchRecord } from "../shared/dispatch";
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import type { ImageUpload } from "../shared/images";
-import { contextAskRpc, contextListRpc, questionActionRpc, dispatchRecordsRpc, displayFeed, homeFeed, queueNeedsSchema, overseerAskRpc, overseerRestartRpc, overseerStartRpc, overseerStatusRpc, prioritiesRpc, prStatsSettingsRpc, rankNowRpc, rankStatusRpc, usageRpc } from "../shared/contracts";
+import { contextAskRpc, contextListRpc, questionActionRpc, dispatchRecordsRpc, homeFeed, queueNeedsSchema, overseerAskRpc, overseerRestartRpc, overseerStartRpc, overseerStatusRpc, prioritiesRpc, prStatsSettingsRpc, rankNowRpc, rankStatusRpc, usageRpc } from "../shared/contracts";
 import { openFeed } from "./feeds";
+import { followDisplayDoc } from "./display";
 import { sharedRead, USAGE_SHARED_MS } from "./shared-read";
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type { Priority } from "../shared/priorities";
@@ -162,12 +163,10 @@ export function createHomeExtras(client: PluginClientContext) {
     down: () => { if (usagePolls) { usagePolls(); usagePolls = null; } homePolls ??= pollHome(); },
     up: () => { homePolls?.(); homePolls = null; },
   });
-  const display = home ? openFeed(client, displayFeed, {}, {
-    event: doc => { if (!stopped) void sync.apply(doc).then(changed => { if (changed) emit(); }); },
-    down: () => { sortPolls ??= pollSort(); },
-    up: () => { sortPolls?.(); sortPolls = null; },
-  }) : null;
-  const stopFeeds = () => { home?.stop(); display?.stop(); for (const off of [homePolls, sortPolls, usagePolls]) off?.(); homePolls = sortPolls = usagePolls = null; };
+  // The Display document comes from the Display store's feed (client/display.tsx), which reads it while that feed is
+  // down: one follow.display-feed per client (invariant 142).
+  const display = home ? followDisplayDoc(doc => { if (!stopped) void sync.apply(doc).then(changed => { if (changed) emit(); }); }) : null;
+  const stopFeeds = () => { home?.stop(); display?.(); for (const off of [homePolls, sortPolls, usagePolls]) off?.(); homePolls = sortPolls = usagePolls = null; };
   if (home) {
     // The Display feed's first event is the document (ValueFeed sends the current value first), so the order and the
     // old-choice migration apply from it (sync.apply): no read of its own at open (one-read-per-key-at-mount).

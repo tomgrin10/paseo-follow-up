@@ -14,7 +14,7 @@ export type Stores = {
   createLiveStore(client: never): { stop(): void; all(): { id: string; title: string }[]; get(id: string): unknown };
   acceptWorkspace(w: unknown): void;
   createInboxStore(client: never): { stop(): void };
-  createHomeExtras(client: never): { stop(): Promise<void>; priorities(): { id: string }[]; usage(): { accounts: unknown[] }; queue(): { needs: { key: string }[]; revision: string }; compass(): Record<string, string> };
+  createHomeExtras(client: never): { stop(): Promise<void>; sort(): string; priorities(): { id: string }[]; usage(): { accounts: unknown[] }; queue(): { needs: { key: string }[]; revision: string }; compass(): Record<string, string> };
   contributeDisplay(client: never, context: never): () => void;
   contributeNewRow(client: never, key: never, enter: never): () => void;
   resetSharedReads(): void;
