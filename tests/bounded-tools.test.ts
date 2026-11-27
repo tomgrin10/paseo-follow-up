@@ -34,7 +34,7 @@ function busy(): Workspace {
 
 /** workspace_status as the agent gets it: the handler's view, then the summary (compact) or the whole view (full). */
 const status = (w: Workspace, input: Record<string, unknown> = {}) => {
-  const view = agentView(w, { kind: input.history as never, offset: input.offset as number | undefined, limit: input.limit as number | undefined }, undefined, input.detail === "full" ? undefined : view => compact("workspace_status", input, view));
+  const view = agentView(w, { kind: input.history as never, live: input.live as never, offset: input.offset as number | undefined, limit: input.limit as number | undefined }, undefined, input.detail === "full" ? undefined : view => compact("workspace_status", input, view));
   return input.detail === "full" ? view : compact("workspace_status", input, view);
 };
 
@@ -50,7 +50,7 @@ test("workspace_status summary and full stay under TOOL_BUDGET in the busiest wo
   assert.equal(summary.obligations.length, 10, "every open task");
   assert.equal(summary.completedObligations, 190);
   assert.equal(summary.openQuestions.length, 3, "every open question");
-  assert.deepEqual(summary.history.prs, { total: 350, offset: 0, shown: PAGE.recentDone, more: 345, hint: "workspace_status history=prs offset/limit pages these (newest first)" });
+  assert.deepEqual(summary.history.prs, { total: 350, offset: 0, shown: PAGE.recentDone, more: 345, hint: "workspace_status detail=full history=prs offset/limit pages these (newest first)" });
   assert.equal(summary.history.batches.total, 400);
   assert.equal(full.batches.length, PAGE.recentDone, "full: settled batches are the newest few too");
 });
@@ -59,13 +59,14 @@ test("workspace_status history=<kind> pages every finished item, newest first, e
   const w = busy();
   for (const [kind, total, key] of [["prs", 350, "prs"], ["tasks", 190, "obligations"], ["questions", 172, "questions"], ["batches", 400, "batches"]] as const) {
     const seen: string[] = [];
-    for (let offset = 0; ; offset += PAGE.toolPage) {
+    for (let offset = 0; ;) {
       const page = status(w, { detail: "full", history: kind, offset }) as any;
       assert.ok(size(page) < TOOL_BUDGET, `${kind} at ${offset}: ${size(page)} characters`);
       assert.equal(page.history[kind].offset, offset);
       const doneIds = page[key].map((x: any) => x.key ?? x.id).filter((id: string) => !seen.includes(id));
       seen.push(...doneIds);
       if (!page.history[kind].more) break;
+      offset += page.history[kind].shown;
     }
     assert.ok(seen.length >= total, `${kind}: walked ${seen.length} of ${total}`);
   }
@@ -150,7 +151,7 @@ test("workspace_status at the scale seed's size fits the budget with what the ha
     const view = agentView(w, {}, extra) as any;
     assert.ok(JSON.stringify(view).length <= TOOL_BUDGET, `summary: ${JSON.stringify(view).length} characters`);
     const open = w.questions.filter((q: any) => !q.answer && !q.closed).map((q: any) => q.id);
-    assert.ok(open.length >= 10 && open.every((id: string) => view.questions.some((q: any) => q.id === id && q.options)), "every open question whole, options and all");
+    assert.ok(open.length >= 10 && open.every((id: string) => view.questions.some((q: any) => q.id === id)), "every open question remains represented");
     assert.ok(view.prs.filter((p: any) => p.snapshot?.state === "OPEN").length >= 3, "the open PRs come");
     const merged = view.prs.find((p: any) => p.snapshot?.state === "MERGED");
     assert.ok(merged && !("reviewers" in merged.snapshot) && merged.snapshot.title, "a merged PR at a glance: title and state, not its review evidence");
@@ -292,4 +293,60 @@ test("summary budget is measured after compaction, independently of full-only me
   const sent = compact("workspace_status", {}, view) as any;
   assert.ok(size(sent) <= TOOL_BUDGET);
   for (const kind of ["prs", "tasks", "questions", "batches", "prActions"] as const) assert.equal(sent.history[kind].shown, PAGE.recentDone, kind);
+});
+
+// No section can consume the budget of another: even the live-only payload can exceed the tool limit.
+test("oversized live sections keep every glance and page their complete evidence", () => {
+  const w = workspaceSchema.parse(closedHistory());
+  w.prs.push(...Array.from({ length: 8 }, (_, i) => pr({ key: `example/app#${1000 + i}`, number: 1000 + i,
+    snapshot: snapshot({ state: "OPEN", title: `Invoice retry rollout ${i}`, failedChecks: ["Verify invoice retry".repeat(30)] }) })));
+  w.obligations = [ ...w.obligations.filter(finishedTask).map(o => ({ ...o, evidence: "Verified the invoice worker after rollout. ".repeat(95).slice(0, 4000) })),
+    ...Array.from({ length: 24 }, (_, i) => ({ id: `active-${i}`, title: `Verify invoice worker ${i}`, status: "waiting" as const,
+      afterPrs: [], evidence: "Verified retries and inspected the queue. ".repeat(95), note: "Invoice background. ".repeat(95), enable_follow_up: true, revision: 0 })) ];
+  const questions = bigHistory({ questions: 13, batches: 0, open: 1 }).questions.map((q, i) => ({ ...q, id: `Q${1000 + i}`, taskId: `active-${i}`,
+    background: "The invoice provider can time out after accepting a request. ".repeat(65),
+    answer: q.answer ? { ...q.answer, words: "Check each invoice receipt before retrying the request. ".repeat(25) } : null,
+    options: q.options.map(o => ({ ...o, consequence: "Check the receipt before retrying the invoice. ".repeat(12) })) }));
+  w.questions.push(...questions);
+  workspaceSchema.parse(w);
+  const extra = { nextMessageInfo: { to: "main-agent", tasks: [], text: "Check invoice receipts. ".repeat(260), reason: "Waiting", eta: null } };
+  assert.ok(size(w.obligations.filter(o => !finishedTask(o))) > TOOL_BUDGET, "live tasks alone overflow the old budget");
+  assert.throws(() => agentView(w, { live: "tasks", kind: "tasks" }), /Choose history or live/);
+  const view = agentView(w, {}, extra);
+  assert.ok(size(view) <= TOOL_BUDGET, `${size(view)} chars`);
+  assert.ok(agentStatusRpc.output.safeParse(view).success);
+  for (const kind of ["prs", "tasks", "questions", "batches", "prActions"] as const) assert.equal(view.history[kind].shown, PAGE.recentDone, kind);
+  for (const [kind, key, active] of [
+    ["prs", "prs", w.prs.filter(p => !finishedPr(p))],
+    ["tasks", "obligations", w.obligations.filter(o => !finishedTask(o))],
+    ["questions", "questions", questions],
+  ] as const) {
+    assert.equal(view.live![kind].total, active.length);
+    assert.ok(view.live![kind].hint?.includes(`detail=full live=${kind}`));
+    const seen = new Set<string>();
+    for (let offset = 0; ;) {
+      const page = agentView(w, { live: kind, offset, limit: 10 }, extra) as any;
+      assert.ok(size(page) <= TOOL_BUDGET, `${kind} page: ${size(page)} chars`);
+      assert.ok(agentStatusRpc.output.safeParse(page).success, `${kind}: page contract`);
+      const info = page.live[kind];
+      assert.ok(info.shown > 0, `${kind}: evidence page progresses`);
+      for (const original of active.slice(offset, offset + info.shown)) {
+        const id = "key" in original ? original.key : original.id;
+        assert.deepEqual(page[key].find((x: any) => (x.key ?? x.id) === id), original, `${kind}: exact full record`);
+        seen.add(id);
+      }
+      for (const k of ["prs", "tasks", "questions", "batches", "prActions"] as const) assert.equal(page.history[k].shown, PAGE.recentDone, `${kind} page keeps ${k} history`);
+      assert.equal(page.prs.filter((p: any) => !finishedPr(p)).length, 8, "every live PR keeps its glance");
+      assert.equal(page.obligations.filter((o: any) => !finishedTask(o)).length, 24, "every live task keeps its glance");
+      assert.ok(questions.every(q => page.questions.some((item: any) => item.id === q.id)), "every live question keeps its glance");
+      if (!info.more) break;
+      offset += info.shown;
+    }
+    assert.equal(seen.size, active.length, `${kind}: every full record accessible`);
+  }
+  const summary = compact("workspace_status", {}, agentView(w, {}, extra, v => compact("workspace_status", {}, v))) as any;
+  assert.ok(size(summary) <= TOOL_BUDGET);
+  assert.ok(summary.prs.filter((p: any) => p.state === "OPEN").every((p: any) => p.glance && p.failedChecksCount === 1), "summary glances retain failure counts");
+  assert.ok(summary.openQuestions.every((q: any) => q.glance), "summary labels compact pending questions");
+  for (const kind of ["prs", "tasks", "questions", "batches", "prActions"] as const) assert.equal(summary.history[kind].shown, PAGE.recentDone, kind);
 });

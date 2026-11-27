@@ -25,7 +25,7 @@ const trigger = { type: ["object", "null"], properties: { event: { type: "string
 const milestoneText = { type: "string", minLength: 1, maxLength: 80 };
 const milestone = { type: ["object", "null"], description: "The milestone toward the workspace goal you are on now, in a few words ('Releasing the beta'), not the current step. done/next: the milestones before and after it. Pass it when it changes, even mid-turn; omitted keeps the last; null clears it.", properties: { now: milestoneText, done: { type: "array", items: milestoneText, maxItems: 8 }, next: { type: "array", items: milestoneText, maxItems: 8 } }, required: ["now"], additionalProperties: false };
 const tools = [
-  ["workspace_status", "Read the tracked workspace's durable goal, PRs, tasks, work queue and optional recovery history. Read after compaction. Returns current work by default; detail=full includes complete evidence. Finished PRs, tasks, questions and batches come as a count plus the newest few; history=<kind> with offset/limit pages the rest. Normal follow-up does not require recovery.", "follow.agent-status", { detail: { type: "string", enum: ["summary", "full"] }, history: { type: "string", enum: ["prs", "tasks", "questions", "batches", "prActions"] }, ...paging }, []],
+  ["workspace_status", "Read the tracked workspace's durable goal, PRs, tasks, work queue and optional recovery history. Read after compaction. Returns current work by default; detail=full includes complete evidence. Finished PRs, tasks, questions and batches come as a count plus the newest few; history=<kind> with offset/limit pages the rest. When evidence exceeds the budget, live records come as glances; detail=full live=<kind> with offset/limit pages their complete records. Normal follow-up does not require recovery.", "follow.agent-status", { detail: { type: "string", enum: ["summary", "full"] }, history: { type: "string", enum: ["prs", "tasks", "questions", "batches", "prActions"] }, live: { type: "string", enum: ["prs", "tasks", "questions", "batches", "prActions"] }, ...paging }, []],
   ["sync_workspace", "Silently confirm the sidebar matches your work before finishing, after registering owned PRs and substantive tasks. Call even when no changes are needed. Keep the summary in this tool; never announce sync or recap sidebar/plugin status to the developer. Does not declare Done, run recovery, or start repairs. Tracked root agents only.", "follow.sync", { summary: { ...string, minLength: 1, maxLength: 1000 }, milestone }, ["summary"]],
   ["workspace_now", "What each agent in this workspace is working on now and its state (working, a permission, an ask, CI, idle), as the developer sees it. Read-only.", "follow.workspace-now", {}, []],
   ["enroll_workspace", "Refine this developer-activated workspace's goal. Ownership is initialized by Track this workspace or the project’s default-tracking setting. This tool cannot activate another workspace. Never ask the developer to enter this. Keep the goal concise; new scope reopens completion.", "follow.enroll", { goal: string }, ["goal"]],
@@ -369,9 +369,9 @@ function validate(value, schema, path = "arguments") {
 }
 function currentWork(w) {
   return { id: w.id, title: w.title, goal: w.goal, mainAgentId: w.mainAgentId, enable_tracking: w.enable_tracking, enable_auto_sends: w.enable_auto_sends, hold: w.hold, archived: w.archived, runtimeBusy: w.runtimeBusy, runtimeReason: w.runtimeReason, backgroundBusy: w.backgroundBusy, mainBusy: w.mainBusy ?? null, completion: w.completion,
-    prs: w.prs.map(p => ({ key: p.key, stack: p.stack, parent: p.parent, disposition: p.disposition, error: p.error, ...(p.snapshot ? { title: p.snapshot.title, state: p.snapshot.state, head: p.snapshot.head, draft: p.snapshot.draft, reviewDecision: p.snapshot.reviewDecision, conflict: p.snapshot.conflict, openThreads: p.snapshot.threads?.length ?? 0, failedChecks: p.snapshot.failedChecks, otherFailedChecks: p.snapshot.otherFailedChecks ?? [], deployment: p.snapshot.deployment } : {}) })),
+    prs: w.prs.map(p => ({ ...(p.glance ? { glance: true } : {}), key: p.key, stack: p.stack, parent: p.parent, disposition: p.disposition, error: p.error, ...(p.snapshot ? { title: p.snapshot.title, state: p.snapshot.state, head: p.snapshot.head, draft: p.snapshot.draft, reviewDecision: p.snapshot.reviewDecision, conflict: p.snapshot.conflict, openThreads: p.snapshot.openThreadsCount ?? p.snapshot.threads?.length ?? 0, ...(p.glance ? { failedChecksCount: p.snapshot.failedChecksCount ?? 0 } : {}), failedChecks: p.snapshot.failedChecks, otherFailedChecks: p.snapshot.otherFailedChecks ?? [], deployment: p.snapshot.deployment } : {}) })),
     obligations: w.obligations.filter(o => !["done", "waived"].includes(o.status)), completedObligations: w.history?.tasks.total ?? w.obligations.filter(o => ["done", "waived"].includes(o.status)).length,
-    openQuestions: (w.questions ?? []).filter(q => !q.answer && !q.closed).map(q => ({ id: q.id, title: q.title, question: q.question, options: q.options, recommend: q.recommend, big: q.big, mode: q.mode, askedBy: q.askedBy, taskId: q.taskId })),
+    openQuestions: (w.questions ?? []).filter(q => !q.answer && !q.closed).map(q => ({ ...(q.glance ? { glance: true } : {}), id: q.id, title: q.title, question: q.question, options: q.options, recommend: q.recommend, big: q.big, mode: q.mode, askedBy: q.askedBy, taskId: q.taskId })),
     // Dismissed by the developer: no longer matters, nothing was sent. Don't ask these again or point at them.
     dismissedQuestions: (w.questions ?? []).filter(q => !q.answer && q.closed?.dismissed).slice(-20).map(q => ({ id: q.id, title: q.title, at: q.closed.at, by: q.closed.by, taskId: q.taskId })),
     // Needs-you items the developer dismissed (merge, reviewers, a stuck repair…): hidden until they change; nothing was sent.
@@ -380,7 +380,7 @@ function currentWork(w) {
     ...(w.dismissedAsk ? { dismissedAsk: w.dismissedAsk } : {}),
     spec: w.spec?.url ? { url: w.spec.url, title: w.spec.title, source: w.spec.source } : null,
     recentAnswers: (w.questions ?? []).filter(q => q.answer).slice(-5).map(q => ({ id: q.id, title: q.title, choice: q.answer.choice, words: q.answer.words, delivery: q.answer.delivery.state })),
-    batches: w.batches.filter(b => !["completed", "cancelled"].includes(b.state)).map(b => ({ id: b.id, state: b.state, tasks: b.tasks, result: b.result, recipientAgentId: b.recipientAgentId, contextPath: b.contextPath })),
+    batches: w.batches.filter(b => !["completed", "cancelled"].includes(b.state)).map(b => ({ ...(b.glance ? { glance: true } : {}), id: b.id, state: b.state, tasks: b.tasks, result: b.result, recipientAgentId: b.recipientAgentId, contextPath: b.contextPath })),
     nextMessage: w.nextMessageInfo ?? null, sending: w.sending ?? null, heldTasks: w.heldTasks ?? [],
     // GitHub budget low: Follow-up's PR reads wait until this time (null: they run); PR statuses are from the last read.
     githubWait: w.githubWait ?? null,
@@ -388,7 +388,7 @@ function currentWork(w) {
     ...(w.githubOff ? { githubOff: w.githubOff } : {}),
     excludedStacks: w.excludedStacks.map(s => ({ name: s.name, reason: s.reason, prs: s.prs.map(p => p.key) })), ...(w.prWorkflow ? { prWorkflow: w.prWorkflow } : {}),
     // Finished items left out of prs, obligations, questions and batches: how many, and how to page them.
-    ...(w.history ? { history: w.history } : {}), detail: "summary" };
+    ...(w.history ? { history: w.history } : {}), ...(w.live ? { live: w.live } : {}), detail: "summary" };
 }
 function compact(tool, input, result) {
   if (actionNames.has(tool)) return result;
@@ -456,7 +456,7 @@ if (isMain()) runMain().catch(error => { console.error(error?.message ?? String(
 async function runMain() {
 const command = process.argv[2];
 if (command === "list" || command === "--help" || command === "help") {
-  process.stdout.write(command === "list" ? JSON.stringify({ tools: schemas([...callableTools(undefined, false, true, false, true), ...overseerTools]) }, null, 2) + "\n" : "Usage: node mcp.mjs list | call <tool> '<json>' [--compact]\nNative MCP returns compact receipts; workspace_status({detail:full}) requests complete evidence; history=<kind> pages finished items. CLI calls retain full replies unless --compact is supplied.\n");
+  process.stdout.write(command === "list" ? JSON.stringify({ tools: schemas([...callableTools(undefined, false, true, false, true), ...overseerTools]) }, null, 2) + "\n" : "Usage: node mcp.mjs list | call <tool> '<json>' [--compact]\nNative MCP returns compact receipts; workspace_status({detail:full}) requests complete evidence; history=<kind> pages finished items; detail=full live=<kind> pages current evidence. CLI calls retain full replies unless --compact is supplied.\n");
 } else if (command === "call") {
   try {
     const callable = [...callableTools(undefined, false, await briefEnabled(), false, await actionsEnabled()), ...(await overseerEnabled() ? overseerTools : [])];
@@ -465,6 +465,8 @@ if (command === "list" || command === "--help" || command === "help") {
     const input = JSON.parse(process.argv[4] ?? "{}");
     validate(input, schemas([tool])[0].inputSchema);
     if (process.argv.slice(5).some(arg => arg !== "--compact")) throw new Error("Unknown CLI option. Use --compact or omit it for a full reply.");
+    // CLI callers receive full replies unless they opt into compaction; fit that actual representation.
+    if (tool[0] === "workspace_status" && !process.argv.includes("--compact")) input.detail = "full";
     const { name, args, value: result } = await runTool(tool, input, callable, call, workflowsOf());
     process.stdout.write(JSON.stringify(process.argv.includes("--compact") && args.detail !== "full" ? compact(name, args, result) : result, null, 2) + "\n");
   } catch (error) { console.error(error.message); process.exitCode = 1; }

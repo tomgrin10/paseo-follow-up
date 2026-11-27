@@ -951,7 +951,7 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    and 400 batches. Guarded by `tests/paged-lists.test.ts` (render bounds, paging, search across pages, the wire
    bound, a scan for any "Show all" that draws every row) and `test:scale:live` (`pagedReplyVerdict`: the live-sized
    seed's 300-question, 400-batch workspace, enforced). **An agent tool's answer stays under `TOOL_BUDGET`** whatever a
-   workspace's history: live items come whole, finished ones (merged or closed PRs, done tasks, settled questions,
+   workspace's history: live items come whole while they fit, otherwise as glances with evidence-page pointers; finished ones (merged or closed PRs, done tasks, settled questions,
    batches, PR actions, quiet inbox rows, settled context asks, older release notes) come as the newest
    `PAGE.recentDone` plus a count with one line saying how to page the rest (`boundDone`, `agentView`, `offset`/`limit`,
    `history=<kind>`). **Finished items are never live** (`finished-items-are-history`): `shared/finished.ts` owns
@@ -966,9 +966,13 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    of every kind while fitting `TOOL_BUDGET`, and history pages must remain usable.
    2026-11-27: budget the representation actually sent, after summary compaction, never the larger intermediate RPC.
    Delivered answers retained as live-task context use compact question records (answer, delivery and task link);
-   pending questions and pending deliveries stay whole. Old options/background must not erase recent history.
+   pending questions and pending deliveries stay whole while they fit. When live evidence exceeds the budget,
+   every live section keeps schema-backed glances with `detail=full live=<kind>` offset/limit pointers to complete
+   records. Compact evidence before fitting pages; never empty another section's live or recent-history glance.
+   Shorten glance text further when needed; pages retain exact original text. Old options/background must not erase history.
    Finished tasks also use a schema-backed glance without evidence or notes; `history=tasks` returns their full
-   records. Both summary and full must retain five of every kind on the evidence-heavy seed with handler extras.
+   records. Both summary and full must retain five of every kind with handler extras, even when the live-only
+   payload exceeds `TOOL_BUDGET` (the 8-PR, 24-task, 13-question evidence-heavy regression).
    2026-11-26: a busy workspace's `workspace_status` summary was ~207k characters, 98% of it merged
    PRs, and the agent couldn't read its own status. Guarded by `tests/bounded-tools.test.ts` and the same
    `pagedReplyVerdict` (`follow.agent-status` summary and full on the live-sized seed).

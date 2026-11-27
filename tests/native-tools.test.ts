@@ -59,6 +59,10 @@ test("a call runs the RPC handler with the daemon's agent id, re-checks the role
   const ok = await status.execute({}, context);
   assert.equal(ok.isError, undefined); assert.equal(calls.at(-1)!.input.agentId, "agent-1");
   assert.equal(JSON.parse(ok.text!).detail, "summary", "compact receipt by default");
+  const evidence = await status.execute({ detail: "full", live: "tasks", offset: 3, limit: 2 }, context);
+  assert.equal(evidence.isError, undefined);
+  assert.deepEqual(calls.at(-1), { method: "follow.agent-status", input: { detail: "full", live: "tasks", offset: 3, limit: 2, agentId: "agent-1" } });
+  assert.equal(JSON.parse(evidence.text!).detail, undefined, "full evidence bypasses summary compaction");
   const act = tools.find(t => t.name === "follow_run_action")!;
   await act.execute({ action: "list_prs", args: {} }, context);
   assert.deepEqual(calls.at(-1), { method: "follow.agent-act", input: { tool: "list_prs", args: {}, agentId: "agent-1" } });

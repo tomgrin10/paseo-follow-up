@@ -46,7 +46,7 @@ is missing from AGENTS.md or docs/, so add a line here when you add one.
 
 | Tool | RPC | Use |
 | --- | --- | --- |
-| `workspace_status` | `follow.agent-status` | The workspace's goal, PRs, tasks and work queue. `detail=full` adds evidence. Finished items (merged or closed PRs, done or waived tasks, settled questions, batches and PR actions) are a count plus the newest few in both details (`history`); `history=<kind>` with `offset`/`limit` pages one kind (see [Bounded answers](#bounded-answers)). Includes the PR workflow, `nextMessage` (recipient, tasks, exact text, reason, eta: Preview's agent form), `heldTasks` and `githubWait` (while GitHub's budget is low, when Follow-up checks this workspace's PRs again; null otherwise). |
+| `workspace_status` | `follow.agent-status` | The workspace's goal, PRs, tasks and work queue. `detail=full` adds evidence. Finished items (merged or closed PRs, done or waived tasks, settled questions, batches and PR actions) are a count plus the newest few in both details (`history`); `history=<kind>` with `offset`/`limit` pages one kind; `detail=full live=<kind>` pages live evidence when budget pressure compacts it (see [Bounded answers](#bounded-answers)). Includes the PR workflow, `nextMessage` (recipient, tasks, exact text, reason, eta: Preview's agent form), `heldTasks` and `githubWait` (while GitHub's budget is low, when Follow-up checks this workspace's PRs again; null otherwise). |
 | `workspace_now` | `follow.workspace-now` | read. Every agent in the caller's workspace, main agent first: what it is working on toward the goal (`work`: text, source, the agent's own done/next and its place, "2 of 4") and its state (working, a permission, an ask, compacting, a background job, CI, idle), the same line the panel and Home draw (`nowOf`, [shared/now.ts](../shared/now.ts)). Built from the record and the inbox rows the worker holds; no daemon read, nothing woken. |
 | `sync_workspace` | `follow.sync` | Confirms the sidebar matches the work. The Stop hook asks for it after code-changing turns. Optional `milestone {now, done?, next?}`: what the agent is working on toward the goal, in a few words, with the milestones before and after it (each ≤80 chars, ≤8 per list). Stored per agent on the workspace record (`milestones`); omitted keeps the last one, null clears it; cleared at Done and when the agent leaves. The panel and Home show it as the agent's line (`workspace_now`). |
 | `enroll_workspace` | `follow.enroll` | Refines the goal of a workspace the developer activated. |
@@ -181,12 +181,18 @@ and superseded batches are finished even without settlement timestamps; a blocke
 supersession remains live.
 
 Delivered answers kept as context for unfinished tasks retain their answer, delivery and task link in compact
-question records; pending questions and pending deliveries stay whole. The budget measures the final summary after
+question records; pending questions and pending deliveries stay whole while they fit. When live evidence exceeds
+the budget, every
+section keeps its glance and `detail=full live=<kind>` with `offset`/`limit` pages the complete original records.
+`live.<kind>` counts the complete records shown and carries the page pointer. A page keeps the other sections’
+glances and all recent history; `history` and `live` select alternative evidence pages. The budget measures the
+final summary after
 compaction, or the full reply for `detail=full`, including the handler’s extra fields. Finished-task glances omit
 evidence and notes; `history=tasks` pages those records whole.
 
 Every list-returning agent tool answers within `TOOL_BUDGET` (`shared/paged.ts`), however big a workspace's history:
-what is live comes whole, what is finished comes as the newest `PAGE.recentDone` plus a count (`boundDone`), and
+what is live comes whole while it fits, otherwise as glances with live evidence pages; what is finished comes as
+the newest `PAGE.recentDone` plus a count (`boundDone`), and
 `offset`/`limit` page the rest, newest first, `PAGE.toolPage` a page by default. 2026-11-26: `workspace_status`
 summary was ~207k characters in a busy workspace (357 PRs, almost all merged), over a tool result's limit.
 

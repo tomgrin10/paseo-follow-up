@@ -1,1 +1,1 @@
-- Recent workspace history stays visible when unfinished tasks retain answers to earlier questions, including when completed tasks carry long verification notes.
+- Recent workspace history stays visible even when current tasks and questions carry long notes. Complete evidence stays available a page at a time.

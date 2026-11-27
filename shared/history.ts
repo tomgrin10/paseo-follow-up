@@ -5,7 +5,7 @@ import { activityFields, questionFields } from "./section-search";
 import { filterItems, type ItemHit } from "./search";
 import { PAGE, TOOL_BUDGET, boundDone, newestFirst, window, type DoneInfo, type HistoryKind } from "./paged";
 import { z } from "zod";
-import { batchSchema, deploymentSchema, obligationSchema, prObjectSchema, snapshotSchema, taskSchema } from "./model";
+import { batchSchema, deploymentSchema, obligationSchema, prObjectSchema, snapshotSchema, taskSchema, workspaceSchema } from "./model";
 import { questionSchema } from "./questions";
 import { finishedPr, finishedTask, finishedQuestion, finishedBatch, finishedPrAction } from "./finished";
 import type { ListPr, ListWorkspace } from "./list";
@@ -46,32 +46,35 @@ export function boundHistory<W extends Hist>(w: W, keep = HISTORY_KEPT): W {
 
 export type AgentHistory = Record<HistoryKind, DoneInfo>;
 /** One short line, in the tool's own words: how an agent gets what was left out. */
-export const HISTORY_HINT = (kind: HistoryKind) => `workspace_status history=${kind} offset/limit pages these (newest first)`;
+export const HISTORY_HINT = (kind: HistoryKind) => `workspace_status detail=full history=${kind} offset/limit pages these (newest first)`;
+export const LIVE_HINT = (kind: HistoryKind) => `workspace_status detail=full live=${kind} offset/limit pages complete live records`;
 
 type AgentW = Hist & { prs: readonly ListPr[]; obligations: readonly { status: string; id: string; coveredBy?: string; finishedAt?: string }[] };
 
 /**
- * workspace_status for an agent (summary and full alike): every live item in full, each finished kind as its newest
- * `PAGE.recentDone` plus a count (`history`), or one page of one kind (`kind` with offset/limit, the others counts only). A busy workspace
+ * workspace_status: live items whole while they fit, otherwise schema-backed glances and live evidence pages.
+ * Every finished kind keeps its newest `PAGE.recentDone`; evidence pages never empty other sections. A busy workspace
  * (350 merged PRs, 400 settled batches) made the summary ~207k characters, over a tool result's limit.
  */
-export function agentView<W extends AgentW, X extends object = {}>(w: W, { kind, offset, limit }: { kind?: HistoryKind; offset?: number; limit?: number } = {}, extra?: X, sent: (view: W & X & { history: AgentHistory }) => unknown = view => view): W & X & { history: AgentHistory } {
-  // Budget the final sent representation, after summary compaction (invariant 63). Pending work stays whole; when a busy
-  // workspace's live items and its finished glance run over, fewer finished items come (a history page shrinks), and
-  // `history` says how many were left out. 2026-11-26: scale-live's 153-PR workspace read 52k with five of each kind.
-  let recent: number = PAGE.recentDone, size = Math.min(limit ?? PAGE.toolPage, PAGE.maxLimit);
+export function agentView<W extends AgentW, X extends object = {}>(w: W, { kind, live, offset, limit }: { kind?: HistoryKind; live?: HistoryKind; offset?: number; limit?: number } = {}, extra?: X, sent: (view: W & X & { history: AgentHistory; live?: AgentHistory }) => unknown = view => view): W & X & { history: AgentHistory; live?: AgentHistory } {
+  if (kind && live) throw new Error("Choose history or live, not both.");
+  let size = Math.min(limit ?? PAGE.toolPage, PAGE.maxLimit), compactLive = !!live, glanceChars = 250;
   for (;;) {
-    // `extra`: what the reply carries beside the workspace (dismissed items, the next message, the PR workflow), measured with it.
-    const view = { ...agentViewOf(w, { kind, offset, limit: size, recent }), ...(extra ?? {}) } as W & X & { history: AgentHistory };
-    if (JSON.stringify(sent(view)).length <= TOOL_BUDGET || (kind ? size <= 1 : recent <= 0)) return view;
-    if (kind) size = Math.max(1, Math.floor(size / 2)); else recent--;
+    const view = { ...agentViewOf(w, { kind, live, offset, limit: size, compactLive, glanceChars }), ...(extra ?? {}) } as W & X & { history: AgentHistory; live?: AgentHistory };
+    // Measure what the transport sends. Compact all live sections before shrinking an evidence page;
+    // each other section keeps its glance, including all five recent records of every finished kind.
+    if (JSON.stringify(sent(view)).length <= TOOL_BUDGET) return view;
+    if (!compactLive) { compactLive = true; continue; }
+    if ((kind || live) && size > 1) { size = Math.max(1, Math.floor(size / 2)); continue; }
+    if (glanceChars > 60) { glanceChars = Math.floor(glanceChars / 2); continue; }
+    throw new Error("Workspace status evidence exceeds the tool budget even at its smallest page.");
   }
 }
 
-function agentViewOf<W extends AgentW>(w: W, { kind, offset, limit, recent }: { kind?: HistoryKind; offset?: number; limit: number; recent: number }): W & { history: AgentHistory } {
+function agentViewOf<W extends AgentW>(w: W, { kind, live, offset, limit, compactLive, glanceChars }: { kind?: HistoryKind; live?: HistoryKind; offset?: number; limit: number; compactLive: boolean; glanceChars: number }): W & { history: AgentHistory; live?: AgentHistory } {
   const covers = new Set(w.obligations.filter(o => !finishedTask(o)).flatMap(o => [o.coveredBy, ...w.questions.filter(q => (q as { taskId?: string | null }).taskId === o.id).map(q => q.id)]).filter((x): x is string => !!x));
-  // A history page carries that kind's page; the other kinds' finished items are counts only on that call.
-  const page = (k: HistoryKind) => k === kind ? { offset: offset ?? 0, limit } : kind ? { recent: 0 } : { recent };
+  // An evidence page never removes another section's recent glance.
+  const page = (k: HistoryKind) => k === kind ? { offset: offset ?? 0, limit } : { recent: PAGE.recentDone };
   const done = {
     prs: finishedPr, tasks: finishedTask,
     questions: (q: Q) => finishedQuestion(q, covers), batches: finishedBatch, prActions: finishedPrAction,
@@ -81,44 +84,67 @@ function agentViewOf<W extends AgentW>(w: W, { kind, offset, limit, recent }: { 
   const questions = boundDone(w.questions, done.questions, { newestFirst: newestFirst(w.questions, q => Math.max(at(q.askedAt), at(q.answer?.at), at(q.closed?.at))), hint: HISTORY_HINT("questions"), ...page("questions") });
   const batches = boundDone(w.batches, done.batches, { newestFirst: newestFirst(w.batches, b => at(b.settledAt ?? b.sentAt ?? b.createdAt)), hint: HISTORY_HINT("batches"), ...page("batches") });
   const prActions = boundDone(w.prActions, done.prActions, { newestFirst: newestFirst(w.prActions, a => at(a.createdAt)), hint: HISTORY_HINT("prActions"), ...page("prActions") });
-  // The newest few finished items are a glance; history pages carry them whole. Delivered answers retained
-  // for live tasks are compact context too: keep the answer and task link, without old options/background.
-  // Pending delivery is never compacted.
-  const glance = <T>(k: HistoryKind, items: T[], isDone: (x: T) => boolean): T[] => k === kind ? items : items.map(x => isDone(x) ? BRIEF_DONE[k](x as Record<string, any>) as T : x);
+  const liveInfo = {} as AgentHistory;
+  const glance = <T>(k: HistoryKind, items: T[], isDone: (x: T) => boolean): T[] => {
+    const active = items.filter(x => !isDone(x));
+    const selected = live === k ? window(active, offset ?? 0, limit) : null;
+    const whole = selected ? new Set(selected.items) : null;
+    const result = items.map(x => {
+      if (isDone(x)) return k === kind ? x : BRIEF_DONE[k](x as Record<string, any>, glanceChars) as T;
+      if (whole?.has(x)) return x;
+      if (compactLive || k === "questions" && finishedQuestion(x as Q)) return BRIEF_DONE[k](x as Record<string, any>, glanceChars) as T;
+      return x;
+    });
+    const shown = selected?.items.length ?? result.filter((x, i) => !isDone(items[i]) && x === items[i]).length;
+    liveInfo[k] = { total: active.length, offset: selected?.offset ?? 0, shown, more: active.length - (selected?.offset ?? 0) - shown,
+      hint: shown < active.length ? LIVE_HINT(k) : null };
+    return result;
+  };
   const inventory = (w as { inventory?: { candidates?: string[] } | null }).inventory;
   return { ...w,
-    prs: glance("prs", prs.items, done.prs), obligations: glance("tasks", tasks.items, done.tasks), questions: glance("questions", questions.items, done.questions).map(q => !done.questions(q) && finishedQuestion(q) ? BRIEF_DONE.questions(q) as typeof q : q),
+    prs: glance("prs", prs.items, done.prs), obligations: glance("tasks", tasks.items, done.tasks), questions: glance("questions", questions.items, done.questions),
     batches: glance("batches", batches.items, done.batches), prActions: glance("prActions", prActions.items, done.prActions),
     // Every PR key the inventory ever considered grows with the workspace: the live PRs' keys, and how many there were.
     ...(inventory?.candidates ? { inventory: { ...inventory, candidates: inventory.candidates.filter(k => w.prs.some(p => p.key === k && !finishedPr(p))), candidatesTotal: inventory.candidates.length } } : {}),
+    live: liveInfo,
     history: { prs: prs.done, tasks: tasks.done, questions: questions.done, batches: batches.done, prActions: prActions.done } };
 }
 
 /**
- * A finished item at a glance: what it was and how it ended, without its evidence (a merged PR's checks and reviewers, a
- * settled question's options and background, a batch's task fingerprints), marked `glance: true`; history=<kind> pages
- * them whole. Each shape is picked from the stored item's own schema, and follow.agent-status's contract takes either
+ * An item at a glance: what it is and its status, without its evidence (a merged PR's checks and reviewers, a
+ * question's options and background, a batch's task fingerprints), marked `glance: true`; history=<kind> or live=<kind>
+ * pages them whole. Each shape is picked from the stored item's own schema, and follow.agent-status's contract takes either
  * (shared/contracts.ts), so what agentView builds and what the RPC validates are one definition.
  */
 const glance = z.literal(true);
-export const prGlanceSchema = prObjectSchema.pick({ key: true, repo: true, number: true, stack: true, parent: true, disposition: true }).extend({
-  snapshot: snapshotSchema.pick({ title: true, url: true, state: true, mergedAt: true, observedAt: true, mergeCommit: true })
-    .extend({ deployment: deploymentSchema.pick({ state: true, environment: true }).nullable().optional() }).nullable(),
+export const prGlanceSchema = prObjectSchema.pick({ key: true, repo: true, number: true, stack: true, parent: true, disposition: true, error: true }).extend({
+  snapshot: snapshotSchema.pick({ title: true, url: true, state: true, mergedAt: true, observedAt: true, mergeCommit: true, reviewDecision: true, conflict: true, draft: true })
+    .extend({ deployment: deploymentSchema.pick({ state: true, environment: true }).nullable().optional(), failedChecksCount: z.number().optional(), openThreadsCount: z.number().optional() }).nullable(),
   glance,
 });
-export const taskGlanceSchema = obligationSchema.pick({ id: true, title: true, afterPrs: true, finishedAt: true, category: true })
-  .extend({ status: z.enum(["done", "waived"]), glance });
+export const taskGlanceSchema = obligationSchema.pick({ id: true, title: true, status: true, afterPrs: true, finishedAt: true, category: true, coveredBy: true, need: true })
+  .extend({ glance });
 export const questionGlanceSchema = questionSchema.pick({ id: true, title: true, prKey: true, taskId: true, askedBy: true, askedAt: true, mode: true, answer: true, closed: true }).extend({ glance });
 export const batchGlanceSchema = batchSchema.pick({ id: true, state: true, createdAt: true, sentAt: true, settledAt: true, result: true, recipientAgentId: true })
   .extend({ tasks: z.array(taskSchema.pick({ key: true, kind: true, target: true, title: true })), glance });
+export const prActionGlanceSchema = workspaceSchema.shape.prActions.unwrap().element.pick({ id: true, kind: true, prs: true, createdAt: true, state: true, merge: true }).extend({ glance });
 /** The glance of one item; an item its glance schema can't read (an older record) comes whole, which the contract takes too. */
-const brief = (schema: z.ZodTypeAny) => (x: Record<string, unknown>) => { const r = schema.safeParse({ ...x, glance: true }); return r.success ? r.data : x; };
-const BRIEF_DONE: Record<HistoryKind, (x: Record<string, any>) => unknown> = {
+const brief = (schema: z.ZodTypeAny) => (x: Record<string, any>, chars = 250) => {
+  const short = (s: unknown, n: number) => typeof s === "string" && s.length > n ? `${s.slice(0, n - 1)}…` : s;
+  const input = { ...x, glance: true,
+    ...(typeof x.title === "string" ? { title: short(x.title, chars) } : {}),
+    ...(typeof x.result === "string" ? { result: short(x.result, chars * 2) } : {}),
+    ...(x.answer ? { answer: { ...x.answer, words: short(x.answer.words, chars * 2) } } : {}),
+    ...(x.snapshot ? { snapshot: { ...x.snapshot, title: short(x.snapshot.title, chars), failedChecksCount: x.snapshot.failedChecks?.length, openThreadsCount: x.snapshot.threads?.length } } : {}),
+  };
+  const r = schema.safeParse(input); return r.success ? r.data : x;
+};
+const BRIEF_DONE: Record<HistoryKind, (x: Record<string, any>, chars?: number) => unknown> = {
   prs: brief(prGlanceSchema),
   tasks: brief(taskGlanceSchema),
   questions: brief(questionGlanceSchema),
   batches: brief(batchGlanceSchema),
-  prActions: a => a,
+  prActions: brief(prActionGlanceSchema),
 };
 
 export type ActivityTab = "timeline" | "questions";
