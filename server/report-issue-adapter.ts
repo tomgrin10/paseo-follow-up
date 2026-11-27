@@ -59,8 +59,8 @@ async function stateSection(d: FollowUpReportDeps): Promise<DiagnosticsSection> 
     const errors = tracked.flatMap(w => w.prs.filter(p => p.error)).length;
     if (errors) rows.push(["PRs that failed to refresh", String(errors)]);
   }
-  const follow = await d.call("follow.follow-settings", {}).catch(() => null) as { enable_follow_every?: boolean; enable_auto_sends_default?: boolean; activeWindowDays?: number } | null;
-  if (follow) rows.push(["Following", `follow every workspace: ${onOff(follow.enable_follow_every)} · Auto-send default: ${onOff(follow.enable_auto_sends_default)} · active window: ${follow.activeWindowDays ?? "?"} days`]);
+  const follow = await d.call("follow.follow-settings", {}).catch(() => null) as { enable_follow_every?: boolean; enable_auto_sends_default?: boolean; activeWindowDays?: number; maxAutoSends?: number } | null;
+  if (follow) rows.push(["Following", `follow every workspace: ${onOff(follow.enable_follow_every)} · Auto-send default: ${onOff(follow.enable_auto_sends_default)} · active window: ${follow.activeWindowDays ?? "?"} days · repairs at once: ${follow.maxAutoSends ?? "?"}`]);
   const display = await d.call("settings.display", {}).catch(() => null) as { values?: Record<string, unknown> } | null;
   if (display?.values) rows.push(["Display", `Needs-you inbox: ${onOff(display.values.enable_inbox)}`]);
   const u = await d.updates().catch(() => null);

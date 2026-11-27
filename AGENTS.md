@@ -114,12 +114,15 @@ These are product rules. Each has tests, and breaking one is a bug even when the
 
 1. **Never wake a dormant agent.** Reading an unloaded agent's timeline or provider subagents loads it (about 650 MB)
    for an hour. Check `isLoaded()` (`shared/agent-load.ts`) or use the cached directory first. For an unloaded
-   agent, read its transcript on disk (`server/transcript.ts`). Auto-send skips agents that aren't loaded or that
-   had no user message within the active window. The exception is a message the agent requested: a time trigger or
-   `wait_for_checks` verdict resumes an unloaded agent, including status `closed` (Paseo's idle runtime cleanup,
-   shutdown or provider retirement). It waits for a running turn and cancels only for an archived workspace,
-   an archived agent or a gone agent. Follow-up's own nudges, repairs, briefs and auto-sends keep the normal rule.
-   Guarded by `tests/never-wake.test.ts`,
+   agent, read its transcript on disk (`server/transcript.ts`). Sending is not reading: whether Paseo has an agent
+   loaded never decides an Auto-send (Q177; Paseo unloads after an idle hour, so 106 of 118 main agents read unloaded
+   and Auto-send almost never sent), and a send resumes it. What decides is the developer: a main agent they haven't
+   messaged within the active window (`activeWindowDays`, Settings → Following → Advanced) gets its repairs on their
+   Send only (`sendWait` `stale`, "you haven't messaged this agent lately, so it waits for you"), and the limit of
+   invariant 133 paces the rest. A message the agent requested (a time trigger or `wait_for_checks` verdict) resumes an
+   unloaded agent too, including status `closed` (Paseo's idle runtime cleanup, shutdown or provider retirement),
+   outside the window and the limit. It waits for a running turn and cancels only for an archived workspace, an
+   archived agent or a gone agent. Guarded by `tests/never-wake.test.ts`, `tests/auto-send-limit.test.ts`,
    `tests/daemon-load.test.ts` and `npm run test:scale`. See [docs/resources.md](docs/resources.md).
 2. **Stay inside resource budgets.**
    - One worker process, and no process per agent or per job.
@@ -1653,6 +1656,15 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    `tests/brief-timeline.test.ts`. The unchecked append predates 2.6.0-beta.1; that beta added the provider turn-end
    check path, but no evidence ties that path to the observed append failures.
 
+133. **Auto-send runs a few turns at a time** (`auto-send-runs-a-few-turns-at-a-time`). At most `maxAutoSends` turns
+   that Auto-send started run at once across every workspace (default `DEFAULT_MAX_AUTO_SENDS` = 2, 1-10 in Settings →
+   Advanced, `set_follow_settings maxAutoSends`), loaded agents or not, so waking many agents never floods Paseo. A
+   turn counts from its dispatch (`Batch.automatic`) until its batch is acknowledged or the main agent's turn ends
+   (`autoTurnRunning`, `shared/send-decision.ts`). The rest wait as `sendWait` `limit` ("waits until another
+   workspace's repair finishes", waiting on Follow-up) and take turns oldest batch first as they free
+   (`Engine.turnFree`). The developer's Send, a repair riding along with an answer and messages an agent asked for
+   (time triggers, `wait_for_checks`) are never held by it and never count. The governor and budgets of invariant 2
+   still apply. Guarded by `tests/auto-send-limit.test.ts`.
 134. **Menus stay visible** (`menus-stay-visible`). Every custom menu and popover uses `FloatingSurface`:
    a context-preserving React Native modal portal above host chrome, with one placement function that flips or shifts
    within the visual viewport and caps the width and scrollable height. Nonmodal keys help is instead bounded to

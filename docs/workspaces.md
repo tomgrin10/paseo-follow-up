@@ -86,7 +86,12 @@ Tests: `tests/main-claim.test.ts`, `tests/main-handover.test.ts`.
    (`mainBusy`, `runtimeReason`, `sendWait`, PR reads, the batch's last refusal). It sends when:
    - Auto-send is on, nothing is held, and the agent isn't dormant or gone.
    - The batch has no completion check.
-   - The main agent is loaded and recently used (else `sendWait` is `unloaded`) and free: `mainBusy` (`server/daemon.ts`
+   - The developer messaged the main agent within the active window (`activeWindowDays`, Settings → Advanced; else
+     `sendWait` is `stale` and it waits for their Send). Whether Paseo has it loaded doesn't matter (Q177): the send
+     resumes it.
+   - Fewer than `maxAutoSends` Auto-send turns run across all workspaces (invariant 133; else `sendWait` is `limit`,
+     and turns go oldest batch first). The developer's Send and messages an agent asked for skip this.
+   - The main agent is free: `mainBusy` (`server/daemon.ts`
      `observe`, the same read that sets `runtimeBusy`) is its own turn (`turn`), its own background job while Wait for
      background jobs is on (`jobs`), a permission prompt or question (`permission`), a Session Guard pause (`guard`) or
      a compaction (`compacting`), each said in `MAIN_WAIT`'s words. Another agent in the workspace, a subagent the main

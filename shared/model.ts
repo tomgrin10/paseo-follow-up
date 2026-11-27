@@ -136,6 +136,11 @@ export const batchSchema = z.object({
   receipt: deliveryReceiptSchema.nullable().optional(),
   /** The last automatic send Follow-up refused for this queued batch (shared/send-decision.ts). Cleared on a send or a task change. */
   refusal: z.object({ reason: z.string(), at: z.string() }).nullable().optional(),
+  /**
+   * Auto-send put it on its way, so its turn counts against the limit (invariant 133, autoTurnRunning). Never set by the
+   * developer's Send, a ride-along or a recovery; cleared when the developer sends it or the queue hands it back.
+   */
+  automatic: z.boolean().optional(),
   /** The agent's turn ended without acknowledge_batch; Follow-up settled it from GitHub instead (settleUnacknowledged). */
   unacknowledged: z.boolean().optional(),
   /**
@@ -199,7 +204,7 @@ export const workspaceSchema = z.object({
   /** The main agent declared Done while only Follow-up's own waits remained (a rollout, a refresh); recorded as Done once they clear. */
   declaration: z.object({ summary: textSchema, at: z.string() }).nullable().optional(),
   /** Why the worker holds queued repairs although nothing in this record blocks them (unloaded/long-idle agent, setup). */
-  sendWait: z.enum(["unloaded", "setup"]).nullable().optional(),
+  sendWait: z.enum(["stale", "limit", "setup", "unloaded"]).nullable().optional(),
   updatedAt: z.string(), managedDoneLabel: z.boolean(),
   runtimeReason: z.string().nullable(), runtimeBusy: z.boolean(), backgroundBusy: z.boolean().default(false),
   /**
@@ -273,8 +278,13 @@ export const stateSchema = z.object({
   workspaceOptOuts: z.array(idSchema).optional(),
   /** One-time migrations already applied, so they never run twice. */
   migrations: z.array(z.string()).optional(),
-  /** Days without a user message before a followed workspace goes dormant. Absent means 3. */
+  /**
+   * Days without a user message to the main agent before a followed workspace goes dormant and its repairs wait for the
+   * developer's Send (Q177; Settings → Advanced). Absent means 3.
+   */
   activeWindowDays: z.number().int().min(1).max(60).optional(),
+  /** Invariant 133: the most Auto-send turns running at once, machine-wide (Settings → Advanced). Absent means 2. */
+  maxAutoSends: z.number().int().min(1).max(10).optional(),
   /** Workspaces whose auto-send the active-scope migration turned off; it turns back on when they become active. */
   autoSendsParked: z.array(idSchema).optional(),
 });

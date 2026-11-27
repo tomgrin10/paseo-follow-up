@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | Display (header button, sidebar item, Dispatch's sidebar row, composer pill, inbox, closed-PR flags, brief nudge, Overseer, ranker, trust bypass, Home's order) | Paseo host settings document `display` (`displayPreferences`). It's host-scoped and keeps older saved sidebar values. | `shared/display.ts`, `client/display.tsx` |
 | Question mode | host settings `questionPreferences` | `shared/questions.ts` |
-| Following, projects, per-workspace exceptions, active window | `state.json` | `shared/settings.ts`; RPCs `follow.follow-settings`, `follow.set-follow-settings`, `follow.project-settings`, `follow.set-project-tracking` |
+| Following, projects, per-workspace exceptions; Advanced: the active window (`activeWindowDays`) and repairs at once (`maxAutoSends`) | `state.json` | `shared/settings.ts`; RPCs `follow.follow-settings`, `follow.set-follow-settings`, `follow.project-settings`, `follow.set-project-tracking` |
 | Agents (incl. Dispatch, role `dispatch`) and Wait | `agents.json` | [ai-roles.md](ai-roles.md), [wait.md](wait.md) |
 | Shipping PRs | `pr-workflow.json` | [prs.md](prs.md) |
 | PR statistics (which repositories are on, window, team filter, hidden people, clock, GitHub share) | `stats.json` | [pr-stats.md](pr-stats.md), `client/pr-stats-settings.tsx` |

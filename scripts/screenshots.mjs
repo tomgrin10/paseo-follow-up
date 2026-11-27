@@ -4217,7 +4217,7 @@ async function sendingShots({ shoot, seeded, call, home }) {
   await call("follow.inbox-act", { action: "sign_off", agentIds: [ws("email").agentId] });
   await call("follow.control", { workspaceId: ws("email").workspaceId, enable_auto_sends: true });
   const held = [/^Auto-sends are paused on this machine/, busyLine];
-  await shoot("sending-hold-home-light", DESKTOP, "light", shown([...held, "The agent is idle; Follow-up doesn't wake it"]));
+  await shoot("sending-hold-home-light", DESKTOP, "light", shown([...held, "You haven't messaged this agent lately, so it waits for you"]));
   await shoot("sending-hold-home-phone-light", PHONE, "light", shown(held, true));
   await fs.writeFile(process.env.FOLLOW_SHOTS_CGROUP, JSON.stringify({ high: 1000, current: 100 }));
 }

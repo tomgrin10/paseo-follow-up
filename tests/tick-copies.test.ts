@@ -33,14 +33,14 @@ test("a-tick-copies-the-state-at-most-once: a 140-workspace tick where every sen
   const mutate = store.mutate.bind(store);
   store.mutate = (work => { mutates++; return mutate(work); }) as typeof store.mutate;
   store.onChanged = async () => { changed++; };
-  // Every main agent is unloaded, so sendWait goes null -> "unloaded" on all 140; a tenth also drop the Done label.
-  const runtime: Runtime = { busy: false, reason: null, archived: false, mainLoaded: false };
+  // No main agent was messaged within the active window, so sendWait goes null -> "stale" on all 140; a tenth also drop the Done label.
+  const runtime: Runtime = { busy: false, reason: null, archived: false, mainRecent: false };
   const gateway: Gateway = { prepareRecovery: async () => ({ agentId: "r", contextPath: "/r.json" }), observe: async () => runtime, send: async () => {}, label: async () => {} };
   const github = { observe: async (prs: { key: string; snapshot: unknown }[]) => new Map(prs.map(p => [p.key, { snapshot: p.snapshot, error: null }])) };
   const engine = new Engine(store, github as never, gateway, () => clock);
   await engine.tick();
   const state = await store.snapshot();
-  assert.equal(state.workspaces.filter(w => w.sendWait === "unloaded").length, N, "every sendWait flipped");
+  assert.equal(state.workspaces.filter(w => w.sendWait === "stale").length, N, "every sendWait flipped");
   assert.equal(state.workspaces.filter(w => w.managedDoneLabel).length, 0, "every Done label dropped");
   assert.ok(mutates <= 1, `whole-state store.mutate calls in one tick: ${mutates} (each copies the whole state)`);
   assert.ok(store.writes - writesBefore <= 1, `state.json saves in one tick: ${store.writes - writesBefore}`);

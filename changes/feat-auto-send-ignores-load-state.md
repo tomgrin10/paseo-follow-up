@@ -1,0 +1,2 @@
+- Repairs now go out on their own to any agent you messaged in the last 3 days, even one Paseo has put to sleep. Before, most repairs waited because the agent had been idle for an hour.
+- At most 2 repairs run at once across your workspaces, so waking agents never overloads Paseo. The rest go out as those finish. Change both in Settings → Advanced.

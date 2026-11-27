@@ -126,14 +126,18 @@ async function engineFixture(t: any, w: Workspace, runtime: Runtime) {
   return { store, engine, sends, observed, advance: (ms: number) => { now += ms; }, get: async () => (await store.snapshot()).workspaces[0], failWith: (f: typeof send) => { send = f; } };
 }
 
-test("no auto-send to an unloaded or long-idle main agent, and completion checks never go out on their own", async t => {
+test("no auto-send to a main agent unused within the active window, loaded or not, and completion checks never go out on their own", async t => {
   const repair = () => workspace({ enable_auto_sends: true, prs: [pr({ snapshot: snapshot({ conflict: true }) })] });
-  for (const runtime of [{ mainLoaded: false, mainRecent: true }, { mainLoaded: true, mainRecent: false }]) {
+  for (const runtime of [{ mainLoaded: true, mainRecent: false }, { mainLoaded: false, mainRecent: false }]) {
     const f = await engineFixture(t, repair(), { busy: false, reason: null, archived: false, ...runtime });
     await f.engine.tick(); f.advance(61_000); await f.engine.tick();
     assert.equal(f.sends.length, 0, JSON.stringify(runtime));
-    assert.equal((await f.get()).batches[0].state, "pending", "the batch waits for the agent's next live turn, or Tom");
+    assert.equal((await f.get()).batches[0].state, "pending", "the batch waits for the developer's Send");
   }
+  // Q177: loaded or not never decides it; an unloaded, recently used agent gets its repair (the send resumes it).
+  const unloaded = await engineFixture(t, repair(), { busy: false, reason: null, archived: false, mainLoaded: false, mainRecent: true });
+  await unloaded.engine.tick(); unloaded.advance(61_000); await unloaded.engine.tick();
+  assert.equal(unloaded.sends.length, 1);
   const live = await engineFixture(t, repair(), { busy: false, reason: null, archived: false, mainLoaded: true, mainRecent: true });
   await live.engine.tick(); live.advance(61_000); await live.engine.tick();
   assert.equal(live.sends.length, 1, "a loaded, recently used agent still gets its repairs");

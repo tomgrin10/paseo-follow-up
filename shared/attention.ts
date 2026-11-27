@@ -7,7 +7,7 @@ import { deliveryStatus } from "./queue";
 import { sentence } from "./errors";
 import { blockedOnDeveloper, completionCheck, liveWorkingTask, statusKnown, summary, type Task, type Status } from "./model";
 import type { ListBatch as Batch, ListPr as Pr, ListWorkspace as Workspace } from "./list";
-import { IDLE_REASON, MAIN_WAIT, NO_PROGRESS_CAP, QUIET_WAIT, holdsQueue, mainWait, personPart, stuckBatch } from "./send-decision";
+import { STALE_REASON, MAIN_WAIT, NO_PROGRESS_CAP, QUIET_WAIT, holdsQueue, mainWait, personPart, stuckBatch } from "./send-decision";
 import { workingLine } from "./task-status";
 import { owedTask } from "./task-view";
 import { taskDue } from "./task-due";
@@ -361,7 +361,7 @@ function computeAllNeeds(w: Workspace, now: number): NeedItem[] {
   // until then it still shows as a decision.
   for (const o of followUpObligations(w).filter(o => blockedOnDeveloper(o) && !o.coveredBy && !questions.some(q => q.taskId === o.id && q.taskRevision !== null)))
     items.push({ kind: "decision", key: `decision:${o.id}`, obligationId: o.id, title: o.title, detail: o.ask! });
-  // Repairs Auto won't send (an idle agent Follow-up doesn't wake) wait on you just like hand-sent ones (shared/status.ts).
+  // Repairs Auto won't send (an agent the developer hasn't messaged within the active window) wait on you just like hand-sent ones (shared/status.ts).
   const view = batchView(w, now);
   const idleWait = (b: Batch) => view?.batch.id === b.id && view.phase === "queued" && view.waitingOn === "you" && !w.hold && !w.goneAgent && !w.dormant;
   for (const b of pendingSends(w).filter(b => completionCheck(b) ? !w.completion : !w.enable_auto_sends || idleWait(b))) {
@@ -369,7 +369,7 @@ function computeAllNeeds(w: Workspace, now: number): NeedItem[] {
       ? { kind: "send", key: `send:${b.id}`, batchId: b.id, tasks: b.tasks.map(t => t.title), what: sendItems(b.tasks), blocker: sendBlocker(w, b), title: FINISH_LINE, finish: true }
       : { kind: "send", key: `send:${b.id}`, batchId: b.id, tasks: b.tasks.map(t => t.title), what: sendItems(b.tasks), blocker: sendBlocker(w, b),
       // Say it once: the tasks are rows in Tasks; the send item says only why it waits on you, and its button how many.
-      title: w.enable_auto_sends ? capitalize(IDLE_REASON) : autoOffLine(b.tasks) });
+      title: w.enable_auto_sends ? capitalize(STALE_REASON) : autoOffLine(b.tasks) });
   }
   const blocking = (pr: Pr) => w.prActions.some(a => prActionBlocks(a, [pr.key]));
   // One click merges the PR and its unmerged downstack (a-click-on-merge-merges), so Merge is offered only when every

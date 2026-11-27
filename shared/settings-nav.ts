@@ -18,6 +18,8 @@ export const SETTINGS_CATEGORIES = [
   // Was Morning brief: the one place for what sets the developer's priorities (one-place-for-priority-inputs). The id
   // stays, so saved links and screen ids land here.
   { id: "brief", title: "Compass", icon: "Compass", blurb: "What sets your priorities, this week's plan" },
+  // Q177: the few knobs most developers never touch, last so they stay out of the way.
+  { id: "advanced", title: "Advanced", icon: "SlidersHorizontal", blurb: "When workspaces rest, repairs at once" },
 ] as const;
 export type SettingsCategory = typeof SETTINGS_CATEGORIES[number]["id"];
 export const DEFAULT_CATEGORY: SettingsCategory = "general";

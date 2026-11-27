@@ -95,6 +95,7 @@ import { batchArchive, pruneUnsent } from "./server/batch-archive";
 import { statusCheck } from "./server/status-check";
 import { NO_USAGE, usageKey } from "./shared/usage";
 import { isLoaded, activeWindowMs, DEFAULT_ACTIVE_WINDOW_DAYS } from "./server/agent-load";
+import { DEFAULT_MAX_AUTO_SENDS } from "./shared/send-decision";
 import { ACTIVE_SCOPE_MIGRATION, PRUNE_MIGRATION, autoSendsByDefault, FOLLOW_EVERY_MIGRATION, followsByDefault, followsEvery, migrateFollowEvery, optedOut } from "./shared/settings";
 import { Overseer, OVERSEER_TOOLS, type OverseerPaseo, type OverseerTool, providerModel } from "./server/overseer";
 import { OVERSEER_LABEL, isOverseerAgent } from "./shared/overseer";
@@ -745,15 +746,16 @@ export default function contribute(server: PluginServerContext) {
   });
   const followSettings = async () => {
     const state = await store.snapshot();
-    return { enable_follow_every: followsEvery(state), enable_auto_sends_default: autoSendsByDefault(state), activeWindowDays: state.activeWindowDays ?? DEFAULT_ACTIVE_WINDOW_DAYS,
+    return { enable_follow_every: followsEvery(state), enable_auto_sends_default: autoSendsByDefault(state), activeWindowDays: state.activeWindowDays ?? DEFAULT_ACTIVE_WINDOW_DAYS, maxAutoSends: state.maxAutoSends ?? DEFAULT_MAX_AUTO_SENDS,
       workspaces: state.workspaces.filter(w => !w.archived).map(w => ({ id: w.id, title: w.title, enable_tracking: w.enable_tracking, enable_auto_sends: w.enable_auto_sends, optedOut: optedOut(state, w.id), dormant: !!w.dormant, parked: !!state.autoSendsParked?.includes(w.id) }))
         .sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id)) };
   };
   handle(rpc.followSettingsRpc, async () => { await requireReady(); return followSettings(); });
-  handle(rpc.setFollowSettingsRpc, async ({ enable_follow_every, enable_auto_sends_default, activeWindowDays, workspace }) => {
+  handle(rpc.setFollowSettingsRpc, async ({ enable_follow_every, enable_auto_sends_default, activeWindowDays, maxAutoSends, workspace }) => {
     await requireReady();
     await store.mutate(state => {
       if (activeWindowDays !== undefined) state.activeWindowDays = activeWindowDays;
+      if (maxAutoSends !== undefined) state.maxAutoSends = maxAutoSends;
       if (enable_follow_every !== undefined) state.enable_follow_every = enable_follow_every;
       if (enable_auto_sends_default !== undefined) state.enable_auto_sends_default = enable_auto_sends_default;
       if (!workspace) return;

@@ -5,7 +5,7 @@ import { compact } from "../server/mcp.mjs";
 import type { Batch, Task, Workspace } from "../shared/model";
 import { buildHome, homeCounts, type HomeModel } from "../shared/home";
 import { autoSendHold, HELD_REASON, sendingOf, UNACKNOWLEDGED_NOTE } from "../shared/sending";
-import { IDLE_REASON, SETTLE_REASON } from "../shared/send-decision";
+import { STALE_REASON, SETTLE_REASON } from "../shared/send-decision";
 import { homeViolations, violations } from "../shared/status-invariants";
 import { workstreams } from "../shared/overseer";
 import type { Resources } from "../shared/resources";
@@ -50,7 +50,7 @@ test("in flight: the send glyph, what it waits for, and no Send now", () => {
 });
 
 test("a send that waits on the developer is in Needs you only, said once without the row's title", () => {
-  for (const patch of [{ sendWait: "unloaded" as const }, { enable_auto_sends: false }]) {
+  for (const patch of [{ sendWait: "stale" as const }, { enable_auto_sends: false }]) {
     const model = home([ws("idle", patch)]);
     const s = row(model, "idle");
     assert.equal(s.group, "needs", JSON.stringify(patch));
@@ -58,8 +58,8 @@ test("a send that waits on the developer is in Needs you only, said once without
     assert.equal(s.word, "Send");
     assert.ok(!s.line.toLowerCase().includes(s.title.toLowerCase()), `say it once: "${s.line}" repeats the row title`);
   }
-  assert.equal(row(home([ws("idle", { sendWait: "unloaded" })]), "idle").line, "The agent is idle; Follow-up doesn't wake it");
-  assert.equal(IDLE_REASON, "the agent is idle; Follow-up doesn't wake it");
+  assert.equal(row(home([ws("idle", { sendWait: "stale" })]), "idle").line, "You haven't messaged this agent lately, so it waits for you");
+  assert.equal(STALE_REASON, "you haven't messaged this agent lately, so it waits for you");
 });
 
 test("cap reached: the capped task moves to Needs you and the workspace leaves Sending", () => {
@@ -100,7 +100,7 @@ test("the hold line: the same words everywhere, the percentage only when it is r
 });
 
 test("home-group-count-equals-rows: the strip's counts are the rows, and the invariant catches a drift", () => {
-  const model = home([ws("a"), ws("b", { runtimeBusy: true }), ws("c", { sendWait: "unloaded" }), ws("d", { batches: [batch("sent")] }), ws("e", { batches: [] })]);
+  const model = home([ws("a"), ws("b", { runtimeBusy: true }), ws("c", { sendWait: "stale" }), ws("d", { batches: [batch("sent")] }), ws("e", { batches: [] })]);
   const counts = homeCounts(model);
   assert.equal(counts.sending, 3); assert.equal(counts.needs, 1);
   assert.deepEqual(homeViolations(model, [], clock), []);
