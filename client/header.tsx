@@ -57,10 +57,10 @@ function LiveGlyph({ icon, colors }: { icon: LiveIcon; colors: Colors }) {
   }
 }
 
-export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings, onRefresh, refreshing, onAuto, autoPending, notice, onOpenPr, resize, hideTitle = false, onHome, more, openAgent, agentLines = false }: {
+export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings, onRefresh, refreshing, onAuto, autoPending, notice, onOpenPr, resize, hideTitle = false, onHome, more, openAgent, agentLines = false, dense = false, titleLead, titleTail, actions, forceTitle = false, moves }: {
   workspace: Workspace; theme: Theme; compact: boolean; now: number; onSettings: (category?: SettingsCategory) => void; onRefresh: () => void; refreshing: boolean; onAuto: (next: boolean) => void; autoPending: boolean; notice: string | null; onOpenPr?: (key: string) => void;
-  /** Expand to the larger view, or collapse back to the panel. Absent where the panel is already as wide as it gets. */
-  resize?: { icon: "Maximize2" | "Minimize2"; label: string; onPress: () => void } | null;
+  /** The place's icon action: the side panel's "Open in a tab", the tab's "Open chat". */
+  resize?: { icon: "Maximize2" | "Minimize2" | "MessageSquare"; label: string; onPress: () => void } | null;
   /** The larger view's screen bar already names the workspace. */
   hideTitle?: boolean;
   /** Phones: the panel's Home link joins the header's own bar, one 44px row instead of two. */
@@ -71,6 +71,14 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
   openAgent?: (agentId: string) => void;
   /** Each agent's line is drawn below (client/now-lines.tsx), so "Main agent is working (on 1 repair)" isn't said twice. */
   agentLines?: boolean;
+  /** The dense tier (shared/workspace-layout.ts): under 560 px of content. */
+  dense?: boolean;
+  /** Home's title line: before the title (Back, the row's glyph), after it (" › agent"), and its Open. */
+  titleLead?: ReactNode; titleTail?: ReactNode; actions?: ReactNode;
+  /** Home: the title shows on a phone too (its host header says Follow-up, not the workspace). */
+  forceTitle?: boolean;
+  /** Home's moves on this item (Sign off, Sign off & next, Later), last in the head. */
+  moves?: ReactNode;
 }) {
   const c = theme.colors; const t = text(c, compact);
   const parts = headline(w, now);
@@ -80,6 +88,7 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
   const toneOf = (tone?: string) => tone === "warning" ? c.statusWarning : tone === "danger" ? c.statusDanger : tone === "success" ? c.statusSuccess : undefined;
   const pad = compact ? 16 : 12;
   const controls = <View style={{ flexDirection: "row", alignItems: "center", gap: 2, marginVertical: compact ? -12 : -4, marginRight: compact ? -10 : -4 }}>
+    {actions}
     {resize && <IconButton icon={resize.icon} label={resize.label} onPress={resize.onPress} theme={theme} compact={compact} />}
     {more}
     <IconButton icon="Settings" label="Follow-up settings" onPress={() => onSettings()} theme={theme} compact={compact} />
@@ -99,9 +108,10 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
       <Text numberOfLines={1} style={[t.small, { flexShrink: 1 }, stale && !w.githubOff ? { color: c.statusWarning } : null]}>{w.githubOff ? "Not checking GitHub" : checked ? `Checked ${ago(checked, now)}${stale ? " · may be out of date" : ""}` : "Checks GitHub every 15s"}</Text>
       <IconButton icon="RefreshCw" label={w.githubOff ? "Check GitHub again" : "Refresh PR status"} onPress={onRefresh} theme={theme} compact={compact} disabled={refreshing} spinning={refreshing} />
       <View style={{ flex: 1 }} />
-      <Switch theme={theme} compact={compact} label="Auto-send" accessibilityLabel="Auto-send repairs" hint="Send repairs to the main agent on its own when the agent is idle. Off means each message waits for your click."
+      <Switch theme={theme} compact={compact} label={dense ? "Auto" : "Auto-send"} accessibilityLabel="Auto-send repairs" hint="Send repairs to the main agent on its own when the agent is idle. Off means each message waits for your click."
         value={w.enable_auto_sends} disabled={autoPending} onChange={onAuto} />
     </View>
+    {moves}
   </>;
   if (compact && onHome) return <View style={{ paddingHorizontal: pad, paddingTop: 4, paddingBottom: 12, gap: 8, borderBottomWidth: 1, borderBottomColor: c.border }}>
     {/* One bar: Home on the left, settings on the right. The host header above names the workspace,
@@ -127,12 +137,13 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
   return <View style={{ paddingHorizontal: pad, paddingTop: compact ? 14 : 12, paddingBottom: 10, gap: 6, borderBottomWidth: 1, borderBottomColor: c.border }}>
     <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
       {/* On phones the host header right above already shows the workspace name. */}
-      {compact || hideTitle ? <View style={{ flex: 1, minWidth: 0, paddingTop: 2 }}><SummaryLine workspace={w} theme={theme} compact={compact} lead={hideTitle && !compact} /></View>
-        : <Text accessibilityRole="header" style={[t.title, { flex: 1 }]}>{w.title}</Text>}
+      {titleLead}
+      {(compact && !forceTitle) || hideTitle ? <View style={{ flex: 1, minWidth: 0, paddingTop: 2 }}><SummaryLine workspace={w} theme={theme} compact={compact} lead={hideTitle && !compact} /></View>
+        : <Text accessibilityRole="header" numberOfLines={3} style={[t.title, { flex: 1 }]}>{w.title}{titleTail}</Text>}
       {controls}
     </View>
     {/* The Summary takes the goal's place; the goal shows until there is one. */}
-    {!compact && !hideTitle && <SummaryLine workspace={w} theme={theme} compact={false} />}
+    {(!compact || forceTitle) && !hideTitle && <SummaryLine workspace={w} theme={theme} compact={compact} />}
     {/* The references line: Spec and Linked, one line, only when there's a spec or anything linked. */}
     <ReferencesLine workspace={w} theme={theme} compact={compact} />
     <WhyItMatters workspace={w} theme={theme} compact={compact} openAgent={openAgent} />

@@ -53,7 +53,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
                                                                                          wait runner: plugin-data/.../wait/run-job.sh
 ```
 
-- **Client** (`index.client.tsx`, `client/`): registers Paseo surfaces (Home screen, larger view, workspace panel,
+- **Client** (`index.client.tsx`, `client/`): registers Paseo surfaces (Home screen, the workspace view's side panel and tab,
   settings screen, header button, sidebar item, composer pill, Command Center items, the `/follow-up` slash command,
   chat timeline renderers). It reads and writes only through RPCs. Map: [docs/client.md](docs/client.md).
 - **Shared** (`shared/`): zod schemas, RPC contracts and pure logic (grouping, precedence, copy). Both sides import
@@ -102,6 +102,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | Onboarding, release notes and What's new, display settings, trust bypass | `server/onboarding.ts`, `server/release-notes.ts`, `server/trust-bypass.ts`, `shared/onboarding.ts`, `shared/setup-popup.ts`, `shared/changelog.ts`, `shared/version.ts`, `shared/display.ts`, `shared/settings-nav.ts` | [settings](docs/settings.md) |
 | Self-update (check, install, watchdog, rollback), 2.0's move from 1.x | `server/plugin-move.ts`, `server/data-move.ts`, `shared/plugin-move.ts`, `shared/legacy.ts`, `server/updater.ts`, `server/update-registry.ts`, `server/update-provenance.ts`, `server/update-watchdog.mjs`, `server/updates.ts`, `shared/updates.ts`, `shared/update-policy.ts`, `client/updates.tsx` | [updates](docs/updates.md) |
 | Resource governor, never waking agents, worker memory, usage meters | `server/governor.ts`, `server/memory.ts`, `server/agent-load.ts`, `server/usage.ts`, `shared/agent-load.ts`, `shared/resources.ts`, `shared/usage.ts` | [resources](docs/resources.md) |
+| The workspace view (Home's pane, side panel, tab), its agent card and section hints | `client/panel.tsx`, `client/agent-card.tsx`, `client/hint.tsx`, `shared/workspace-layout.ts`, `client/large.tsx` | [client](docs/client.md#the-workspace-view) |
 | UI | `index.client.tsx`, `client/`, `client/row-badges.tsx`, `shared/row-badges.ts`, `client/host-slot.tsx`, `client/scroll-allowlist.ts`, `client/split.tsx`, `shared/split.ts`, `client/pane-allowlist.ts`, `client/search-key.ts`, `shared/search-key.ts`, `client/search-focus.ts`, `shared/search-focus.ts`, `shared/home-keys.ts` | [client](docs/client.md) |
 | Chat card for agents and workspaces an agent creates | `shared/created.ts`, `server/created-items.ts`, `client/created.tsx` | [client](docs/client.md#created-agent-and-workspace-cards) |
 | Pasted images in every field whose words reach an agent (caps, the store, who takes them, the one component) | `shared/images.ts`, `server/image-store.ts`, `server/image-support.ts`, `client/image-attach.tsx`, `client/unsent-images.ts` | [client](docs/client.md#pasted-images), [rpcs-and-tools](docs/rpcs-and-tools.md#pasted-images) |
@@ -124,7 +125,9 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    invariant 133 paces the rest. A message the agent requested (a time trigger or `wait_for_checks` verdict) resumes an
    unloaded agent too, including status `closed` (Paseo's idle runtime cleanup, shutdown or provider retirement),
    outside the window and the limit. It waits for a running turn and cancels only for an archived workspace, an
-   archived agent or a gone agent. Guarded by `tests/never-wake.test.ts`, `tests/auto-send-limit.test.ts`,
+   archived agent or a gone agent. Recent steps in the workspace view (invariant 135) never loads an agent: it reads
+   live while the agent is loaded and its saved transcript otherwise (`follow.agent-turn`); Home's item pane has no
+   Load button any more. Guarded by `tests/never-wake.test.ts`, `tests/auto-send-limit.test.ts`,
    `tests/daemon-load.test.ts` and `npm run test:scale`. See [docs/resources.md](docs/resources.md).
 2. **Stay inside resource budgets.**
    - One worker process, and no process per agent or per job.
@@ -230,7 +233,7 @@ These are product rules. Each has tests, and breaking one is a bug even when the
      `tests/list-cache.test.ts` (1 of 150).
    - **A list carries only what lists draw** (`a-list-carries-only-what-lists-draw`): `follow.list` and the
      workspaces feed send each workspace's list form (`shared/list.ts`), never its detail. A surface that draws detail
-     (the panel, the larger view, the PR sheet, the question sheet) reads the full workspace with `follow.get`
+     (the workspace view, the PR sheet, the question sheet) reads the full workspace with `follow.get`
      (`useWorkspace`); the list copy only tells it when to read again. A surface holding both copies (Home's open row, the
      pill's popover) draws the newer (`openRowCopy`), and a sheet waiting on the read closes with the error toast if
      the read fails (`useDetailGate`), never a click that does nothing. Agent tools read the stored workspace. List
@@ -1216,7 +1219,7 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    in the plugin is allowed by name) and `tests/row-menu.test.ts`.
 89. **Tasks are the agent's** (`tasks-are-the-agent-s`). The panel's Tasks card is the agent's to-do list as the
    developer reads it: "Agent's tasks", folded to one line by default in every state ("6 open · 2 due · 1 stale"; due
-   neutral, only stale amber). Opened, a row per open task says what moves it (`taskViewRows`, `shared/task-view.ts`),
+   neutral, stale too: a heavier word and a larger dot, never amber, which is Needs you's alone (invariant 135)). Opened, a row per open task says what moves it (`taskViewRows`, `shared/task-view.ts`),
    stale and due first; a task waiting on the developer says "In Needs you" with no question id and comes last; no
    section search. Finished tasks are in Activity, the send queue and repairs in the Messages to the agent card
    (`client/messages.tsx`), the schedule editor behind a row's "Send on a schedule…". The header's live line names a
@@ -1720,6 +1723,19 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    one 101 (≈17.7k), the Overseer 107 (≈18.6k). Now 21 (≈5.8k), 5 (≈1.4k) and 11 (≈2.3k); a native root session lists
    22. Guarded by `tests/tool-budget.test.ts` (each role's token budget, the lookup, run_action's errors, and a scan of
    each role's session text for tools it doesn't list).
+
+135. **One workspace view** (`one-workspace-view`). Home's detail pane, the right side panel (`follow-up`) and the
+   main-area tab (`follow-up-view`) draw one `WorkspaceView` (`client/panel.tsx`), its layout from its own width only
+   (`layoutFor`, `shared/workspace-layout.ts`: one dense column under 560, one roomy under 760, two under 1400, then
+   three), never from where it is mounted. In more than one column the left (wide) column is Needs you's while
+   anything waits on the developer, else the agent card's. Only the head's controls and the reply box differ by place: the side panel
+   never draws the reply box and its Recent steps start folded (the developer's fold wins, invariant 132). The agent
+   card puts Recent steps (the peek's `TurnView` rows) and the reply box together, reading the saved transcript for an
+   unloaded agent (invariant 1). Amber is Needs you's alone; permissions sit in it. Opening a workspace from the
+   sidebar list or Home's Open follows `open_workspace_on` (`view` by default; Cmd/Ctrl opens the other). The larger
+   view (`LARGE_SCREEN`) is retired: its id only redirects to the tab. 2026-11-27, the developer: one view instead of
+   the panel, the larger view and Home's pane each laying out the same workspace differently. Guarded by
+   `tests/workspace-view.test.ts` and `scripts/screenshots.mjs --only workspace-view`.
 
 136. **Checks say what they are doing** (`checks-say-what-they-are-doing`). One helper, `checksState`
    (`shared/pr-status.ts`), says what a PR's checks are doing: failed, running (a check in progress, `checksRunning`),

@@ -98,6 +98,8 @@ export const PANEL_FOLDS = {
   tasks: "panel.tasks",
   activity: "panel.activity",
   workspace: "panel.workspace",
+  /** The agent card's Recent steps (and its reply box): open by default, folded by default in the side panel. */
+  steps: "panel.steps",
 } as const;
 export type PanelFold = keyof typeof PANEL_FOLDS;
 

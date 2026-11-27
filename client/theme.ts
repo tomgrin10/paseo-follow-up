@@ -61,14 +61,6 @@ export function contrast(a: string, b: string): number | null {
   return (hi + 0.05) / (lo + 0.05);
 }
 
-/**
- * Stale, the one colour in Agent's tasks (tasks-are-the-agent-s): amber. Light hosts' warning token is a dark brown
- * (#7b5d39) that reads as brown beside black text, so light themes use amber 700, 5:1 on white (a 12px word passes
- * 4.5:1, the dot 3:1); dark themes keep the host's warning, already amber.
- */
-export const STALE_LIGHT = "#b45309";
-export const staleColor = (colors: Colors): string => isLight(colors) ? STALE_LIGHT : colors.statusWarning;
-
 export function withAlpha(color: string, alpha: number): string {
   const rgb = channels(color);
   return rgb ? `rgba(${rgb.join(", ")}, ${alpha})` : color;

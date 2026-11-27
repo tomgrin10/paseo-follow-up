@@ -2,12 +2,13 @@
 
 `index.client.tsx` registers everything with Paseo's plugin client:
 
-- **Screens:** the Home screen (`OVERVIEW`), the larger view (`LARGE_SCREEN`), and the settings screen `projects`
-  (plus legacy screen ids).
-- **Workspace panel:** `PANEL`.
+- **Screens:** the Home screen (`OVERVIEW`) and the settings screen `projects` (plus legacy screen ids, among them
+  the retired larger view's `LARGE_SCREEN`, which now opens the workspace and its view tab).
+- **Workspace panels:** `PANEL` (`follow-up`, the right side panel) and `VIEW` (`follow-up-view`, the workspace view
+  as a main-area tab). Both draw the workspace view (invariant 135).
 - **Header button:** one per workspace.
 - **Sidebar item.**
-- **Command Center items:** open, larger view, spec, Home, Search, Done while you were away, settings, Set up
+- **Command Center items:** open (the view tab), open in the side panel, spec, Home, Search, Done while you were away, settings, Set up
   again, and Ask the Overseer.
 - **Slash command:** `/follow-up`.
 - **Chat renderers, the composer pill, inbox commands and the brief card.**
@@ -71,10 +72,13 @@ Nothing polls while the app is hidden.
 | `client/home-data.ts` | Paseo's own workspace list, for untracked rows (Quiet) and header buttons. |
 | `client/sidebar-view.tsx`, `client/sidebar-visibility.ts` | Home's list as Paseo's sidebar (on hosts that support it), and its registration. |
 | `client/row-badges.tsx`, `shared/row-badges.ts` | Paseo 0.17.1+: Follow-up's badges on Paseo's own sidebar workspace rows (`addWorkspaceRowBadgeItem`). One item, "Follow-up: Done" in the sidebar's Show menu: a green Done where Home shows the workspace as Done, read from the live store (no poll of its own). It replaces the worker's Done label there; older hosts register nothing and keep the label (invariant 113). |
-| `client/panel.tsx` | The workspace panel: this workspace only. |
+| `client/panel.tsx` | The workspace view (`WorkspaceView`) and its two panels: this workspace only. |
 | `client/fold.tsx` | The one fold (panel-sections-fold): `useFold` (open or closed per device, per section) and `FoldButton` (the header button with its expanded state), used by every panel section (`Card`'s `fold`, Your questions) and settings' `Disclosure`. Section ids are `PANEL_FOLDS` (`shared/settings-nav.ts`). |
 | `client/recovery-actions.ts` | The Recovery block's one primary action per state (`recovery-offers-one-primary-action`): Retry recovery after a failure, Run recovery (or Run queued recovery) otherwise, plus Open recovery agent when an agent exists. |
-| `client/large.tsx` | The panel as a two-column screen. |
+| `client/large.tsx` | The retired larger view's screen id, redirecting to the workspace and its view tab. |
+| `client/agent-card.tsx` | The workspace view's agent card: each agent's row, then Recent steps (`RecentSteps`, the peek's `TurnView` rows) and the reply box. |
+| `shared/workspace-layout.ts` | The workspace view's tiers from width (`layoutFor`) and its card placement into the shorter column (`placeCards`). |
+| `client/hint.tsx` | A section's help behind a ? after its title (`useHint`, `HintIcon`, `HintBubble`). |
 | `client/header.tsx` | The stack bar and the header status. |
 | `client/stacks.tsx` | Stacks drawn top to base. |
 | `client/section-search.tsx`, `shared/section-search.ts` | Section search in the panel's Pull requests and Activity. See [Section search](#section-search). |
@@ -215,6 +219,45 @@ Rules:
   `set_priorities` only takes ranker scores. The workspace panel's navigator and the sidebar view don't have the menu
   yet.
 
+## The workspace view
+
+One `WorkspaceView` (`client/panel.tsx`, invariant 135 `one-workspace-view`) draws a workspace in three places: Home's
+detail pane (`place` "home"), the right side panel (`follow-up`, "panel") and a main-area tab (`follow-up-view`,
+"tab"). Its layout comes from its own width only (`layoutFor`, `shared/workspace-layout.ts`):
+
+| Width | Layout | Recent steps |
+| --- | --- | --- |
+| under 560 | one column, dense: the head's moves are icon buttons | 5 |
+| 560 to 759 | one column, labelled buttons | 6 |
+| 760 to 1399 | two columns, the left at 55%: Needs you's while it has items, else the agent's | 8 |
+| 1400 and up | three columns, the left one Needs you's or the agent's as in two | 10 |
+
+The head spans every column; nothing is centred in a max-width box. In one column the order is Shipped, Needs you, the
+agent card, Messages to the agent, Your questions, the shipped history, Pull requests, Agent's tasks, Activity, then
+Spec, agent and recovery. In more columns the left column (the wide one in two) holds Shipped, the agent card, Messages
+and the history; Needs you, Your questions, Pull requests and Agent's tasks take the next. While anything waits on the
+developer, Needs you takes the left column under Shipped instead and the agent card, Messages and the history move to
+the next, so the decision reads first as it does in one column. Activity and Spec go to the shorter column
+(`placeCards`, with 32 px of hysteresis so a card never flips back and forth).
+
+- **The agent card** (`client/agent-card.tsx`): each agent's row (a row selects it, Cmd/Ctrl opens its chat), then
+  Recent steps, the peek's `TurnView` rows for the selected agent, and the reply box under them. Recent steps reads
+  live while shown and an unloaded agent's saved transcript otherwise (`follow.agent-turn`), never waking it
+  (invariant 1). "live" shows only while the agent works.
+- **Per place** only two things differ: the head's own controls and the reply box. Home's head carries Back, Open
+  (per `open_workspace_on`), Sign off, Sign off & next and Later; the side panel's "Open in a tab"; the tab's "Open
+  chat". The side panel never draws the reply box (the chat is beside it) and never marks the agent's timeline as on
+  screen; Home's pane and the tab mark it while Recent steps shows, so its status-line peek stays shut. On a phone
+  Home's moves and reply box sit in the bottom dock.
+- **Permissions** an agent waits on sit at the top of Needs you with Allow and Deny.
+- **Amber is Needs you's alone**: stale tasks and Your questions' unread chip are neutral.
+
+## Section hints
+
+A section's help sits behind a small ? after its title (`client/hint.tsx`; `Card`'s `hint`), never as text in its
+body. Desktop shows it on hover or focus; touch opens it on a tap and closes it on a tap elsewhere. The bubble draws
+under the header, over the section's content, so nothing moves.
+
 ## Panel sections fold
 
 Every section of the workspace panel (Needs you, Your questions, Messages to the agent, Pull requests, Agent's tasks,
@@ -226,19 +269,20 @@ panel-sections-fold):
   listener takes it first). Controls in the header (search, Activity's tabs) sit beside the button
   and show only while the section is open. Only `FoldButton` draws the chevron: one size and color, in a box that
   never shrinks, last in the button, so it always sits at the right just before the section's own controls.
-- **The larger view** shows the same folds. It is a screen without Paseo's panel-only client state, so Spec, agent
-  and recovery reads agent titles there through `AgentTitleSource` (short ids) instead of `useAgent`, which throws.
+- **Home's pane** draws the same view and folds. It is a screen without Paseo's panel-only client state, so Spec,
+  agent and recovery reads agent titles there through `AgentTitleSource` (short ids) instead of `useAgent`, which throws.
 - **Folded**, the body unmounts and the header keeps its count, plus a short plain line where it helps: Needs you's
   first ask, the next message ("2 repairs queued"), the PRs ("6 PRs in 2 stacks") when the open count doesn't say it,
   Activity's latest event, the tasks' line (shown open too). No new labels.
 - **Remembered per device, per section**, never per workspace: the device document's `follow-up.settings.fold.panel.<id>`
   (`PANEL_FOLDS`), the same store as settings' folds (invariant 22), so it survives reloads. Open by default, except
   Agent's tasks and Spec, agent and recovery, which start folded as before.
-- The larger view and phones draw the same sections, so they fold the same way. Home's detail pane draws Needs you and
-  Your questions without the fold.
+- Every place and phones draw the same sections, so they fold the same way. Recent steps (`PANEL_FOLDS.steps`) is open
+  by default in Home's pane and the tab and folded in the side panel, which sits beside the chat; the developer's own
+  fold wins.
 - **Adding a section**: give its card `fold={{ id }}` with a new `PANEL_FOLDS` id, or an exemption with a reason in
   `tests/panel-folds.test.ts`, which fails on any element the panel lays out without one, and on any `Card` without
-  a fold that isn't an error or empty state. Exempt today: each agent's line, the Shipped notice, and the shipped
+  a fold that isn't an error or empty state. Exempt today: the Shipped notice and the shipped
   history fold.
 
 ## Section search
@@ -476,7 +520,7 @@ the portal without claiming another surface's popup. A hidden opener closes its 
 and its own scroller, outside a host sheet's gesture context. Host-owned modals/popovers
 and inline sheet bodies keep the host's positioning. Use this shared component for future custom popovers.
 
-The larger workspace view (`client/large.tsx`) receives the same `HomeSources` as the panel, so its existing shared
+The workspace view's tab (`follow-up-view`) receives the same `HomeSources` as the side panel, so its existing shared
 More menu is available and uses the same bounded portal on the main tab.
 
 Web Escape is handled on keydown. React Native Web's modal keyup callback is disabled so the same Escape cannot

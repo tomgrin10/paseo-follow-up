@@ -12,7 +12,7 @@ import { finishedParts, summaryParts, taskSummary, taskViewRows, type TaskViewRo
 import { Button, Card, text, type Theme, SubmitScope } from "./kit";
 import { usePagedList } from "./paged-list";
 import { Spinner } from "./motion";
-import { staleColor, type Colors } from "./theme";
+import type { Colors } from "./theme";
 import { RichText } from "./rich-text";
 import { runAction } from "./toasts";
 import { DeliveryGlyph } from "./messages";
@@ -103,15 +103,15 @@ function OpenAgentLink({ status, openAgent, theme, compact, lead = true }: { sta
   </Pressable></>;
 }
 
-/** A small dot: the due row's mark (muted) and the stale one's (amber, the one thing worth a glance). */
+/** A small dot: the due row's mark (muted) and the stale one's (foreground: amber is Needs you's alone, invariant 89). */
 const Dot = ({ color, size = 6 }: { color: string; size?: number }) => <View style={{ width: 14, height: 14, alignItems: "center", justifyContent: "center" }}><View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: color }} /></View>;
 
-/** One glyph per kind of move, all muted but stale: the shape says what moves it before the words do. */
+/** One glyph per kind of move, all muted but stale (foreground): the shape says what moves it before the words do. */
 function TaskGlyph({ row, w, colors }: { row: TaskViewRow; w: Workspace; colors: Colors }) {
   const muted = colors.foregroundMuted;
   switch (row.kind) {
     // Stale is the one mark with colour, and a size step so it never leans on hue alone; due is muted like the rest.
-    case "stale": return <Dot color={staleColor(colors)} size={8} />;
+    case "stale": return <Dot color={colors.foreground} size={8} />;
     case "due": return <Dot color={muted} size={7} />;
     case "working": return row.status.tone === "working" ? <Spinner color={colors.accent} size={13} /> : <Dot color={muted} />;
     case "blocked": return <Icon name="CirclePause" size={14} color={muted} />;
@@ -120,7 +120,7 @@ function TaskGlyph({ row, w, colors }: { row: TaskViewRow; w: Workspace; colors:
     case "scheduled":
       if (row.status.tone === "queued" || row.status.tone === "sent") return <DeliveryGlyph state={row.status.tone} w={w} colors={colors} />;
       // A time trigger that couldn't go out is the developer's to notice (amber, its own shape); one that went out is a send.
-      if (row.o.trigger?.event === "at" && row.o.trigger.notSent) return <Icon name="CircleAlert" size={14} color={staleColor(colors)} />;
+      if (row.o.trigger?.event === "at" && row.o.trigger.notSent) return <Icon name="CircleAlert" size={14} color={colors.foreground} />;
       if (row.o.trigger?.event === "at" && row.o.trigger.sentAt) return <Icon name="Send" size={14} color={muted} />;
       return <Icon name="Clock" size={14} color={muted} />;
     case "needs-you": return <Icon name={linkedQuestion(row.o, w)?.need === "action" ? "Hand" : "MessageCircleQuestion"} size={14} color={muted} />;
@@ -133,7 +133,7 @@ function MetaLine({ row, theme }: { row: TaskViewRow; theme: Theme }) {
   const c = theme.colors; const t = text(c);
   if (row.kind !== "stale" && !row.meta.startsWith(DIDNT_GO_OUT)) return <Text style={[t.meta, { fontVariant: ["tabular-nums"] }]}>{row.meta}</Text>;
   const [word, ...rest] = row.meta.split(" · ");
-  return <Text style={[t.meta, { fontVariant: ["tabular-nums"] }]}><Text style={{ color: staleColor(c), fontWeight: "600" }}>{word}</Text>{rest.length ? ` · ${rest.join(" · ")}` : ""}</Text>;
+  return <Text style={[t.meta, { fontVariant: ["tabular-nums"] }]}><Text style={{ color: c.foreground, fontWeight: "600" }}>{word}</Text>{rest.length ? ` · ${rest.join(" · ")}` : ""}</Text>;
 }
 
 /** The agent's own words under a stale or due row, two lines at most; the whole note opens with the row. */
@@ -208,7 +208,7 @@ export function TasksCard({ workspace: w, theme, compact, open, toggle, onOpenQu
   const parts = summaryParts(sum);
   const footer = finishedParts(sum);
   const label = `${parts.neutral}${parts.stale ? ` · ${parts.stale}` : ""}`;
-  const line = <Text numberOfLines={1} style={{ flexShrink: 1, color: c.foregroundMuted, fontSize: 12, lineHeight: 17, fontVariant: ["tabular-nums"] }}>{parts.neutral}{parts.stale ? <Text style={{ color: staleColor(c), fontWeight: "600" }}>{` · ${parts.stale}`}</Text> : null}</Text>;
+  const line = <Text numberOfLines={1} style={{ flexShrink: 1, color: c.foregroundMuted, fontSize: 12, lineHeight: 17, fontVariant: ["tabular-nums"] }}>{parts.neutral}{parts.stale ? <Text style={{ color: c.foreground, fontWeight: "600" }}>{` · ${parts.stale}`}</Text> : null}</Text>;
   return <Card theme={theme} compact={compact} icon="ListTodo" title="Agent's tasks" fold={{ id: "tasks", defaultOpen: false, summary: line, openSummary: line, label }}>
     {page.shown.map(r => {
       const q = linkedQuestion(r.o, w);

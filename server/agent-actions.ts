@@ -27,7 +27,7 @@ import { base64Bytes, imagesPlanLine } from "../shared/images";
 import { waitNote, type WaitStatus } from "../shared/wait";
 import { reportInputSchema } from "./report-issue";
 import type { RenameStatus } from "../shared/rename";
-import { DISPLAY_KEYS, displayPreferences, HOME_DETAIL_DEFAULT, CATCH_UP_RAIL_DEFAULT } from "../shared/display";
+import { DISPLAY_KEYS, displayPreferences, HOME_DETAIL_DEFAULT, CATCH_UP_RAIL_DEFAULT, DEFAULT_OPEN_WORKSPACE_ON, OPEN_WORKSPACE_ON } from "../shared/display";
 import { DEFAULT_SEARCH_SHORTCUT, NEW_SHORTCUTS, SEARCH_SHORTCUTS } from "../shared/search-key";
 import { DEFAULT_SORT, SORT_MODES } from "../shared/sort";
 import { SCALE } from "../shared/scale";
@@ -362,14 +362,14 @@ export class AgentActions {
   private async displayTool(caller: string, tool: "display_settings" | "set_display", args: Record<string, any>) {
     if (!this.d.display) throw new Error(`${tool} isn't available in this Follow-up.`);
     const current = await this.d.display.read();
-    if (tool === "display_settings") return { values: { home_sort: DEFAULT_SORT, home_detail_fraction: HOME_DETAIL_DEFAULT, catch_up_rail_fraction: CATCH_UP_RAIL_DEFAULT, search_shortcut: DEFAULT_SEARCH_SHORTCUT, ...current.values }, sorts: SORT_MODES, search_shortcuts: SEARCH_SHORTCUTS, new_shortcuts: NEW_SHORTCUTS, change: "set_display changes these, only when the developer asked. home_sort orders Home and the sidebar view. home_detail_fraction is the share of Home's width its right pane takes (0.2 to 0.8, default 0.42). catch_up_rail_fraction is the share of the Catch up screen its queue rail takes on a desktop (0.16 to 0.5, default 0.28). search_shortcut is the key that opens Home's search from anywhere: mod-shift-k (the default), mod-shift-h or none. new_shortcut is the key that opens New from anywhere: mod-shift-n, mod-shift-o or none; unset, it is ⌘⇧N in Paseo's desktop app and ⌘⇧O in a browser tab (Chrome keeps Ctrl/Cmd+Shift+N)." };
+    if (tool === "display_settings") return { values: { home_sort: DEFAULT_SORT, home_detail_fraction: HOME_DETAIL_DEFAULT, catch_up_rail_fraction: CATCH_UP_RAIL_DEFAULT, search_shortcut: DEFAULT_SEARCH_SHORTCUT, open_workspace_on: DEFAULT_OPEN_WORKSPACE_ON, ...current.values }, sorts: SORT_MODES, open_workspace_on: OPEN_WORKSPACE_ON, search_shortcuts: SEARCH_SHORTCUTS, new_shortcuts: NEW_SHORTCUTS, change: "set_display changes these, only when the developer asked. home_sort orders Home and the sidebar view. home_detail_fraction is the share of Home's width its right pane takes (0.2 to 0.8, default 0.42). catch_up_rail_fraction is the share of the Catch up screen its queue rail takes on a desktop (0.16 to 0.5, default 0.28). search_shortcut is the key that opens Home's search from anywhere: mod-shift-k (the default), mod-shift-h or none. new_shortcut is the key that opens New from anywhere: mod-shift-n, mod-shift-o or none; unset, it is ⌘⇧N in Paseo's desktop app and ⌘⇧O in a browser tab (Chrome keeps Ctrl/Cmd+Shift+N). open_workspace_on is what opening a workspace from Follow-up's sidebar list and Home's Open shows: view (its workspace view as a tab, the default) or chat (its main agent's chat)." };
     const values = args.values as Record<string, boolean | string | number> | undefined;
     if (!values || !Object.keys(values).length) throw new Error("set_display: give values, e.g. { enable_trust_bypass: false } or { home_sort: \"recent\" }. display_settings lists them.");
     const unknown = Object.keys(values).filter(k => !DISPLAY_KEYS.includes(k));
     if (unknown.length) throw new Error(`set_display: unknown setting ${unknown.join(", ")}. display_settings lists them.`);
     const parsed = displayPreferences.schema.safeParse({ ...current.values, ...values });
     if (!parsed.success) throw new Error(`set_display: ${parsed.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
-    const was = (k: string) => current.values[k] ?? (k === "home_sort" ? DEFAULT_SORT : k === "home_detail_fraction" ? HOME_DETAIL_DEFAULT : k === "catch_up_rail_fraction" ? CATCH_UP_RAIL_DEFAULT : k === "search_shortcut" ? DEFAULT_SEARCH_SHORTCUT : undefined);
+    const was = (k: string) => current.values[k] ?? (k === "home_sort" ? DEFAULT_SORT : k === "home_detail_fraction" ? HOME_DETAIL_DEFAULT : k === "catch_up_rail_fraction" ? CATCH_UP_RAIL_DEFAULT : k === "search_shortcut" ? DEFAULT_SEARCH_SHORTCUT : k === "open_workspace_on" ? DEFAULT_OPEN_WORKSPACE_ON : undefined);
     const changes = Object.entries(values).filter(([k, v]) => was(k) !== v).map(([key, to]) => ({ key, from: was(key), to }));
     const planId = changes.length ? this.plan(caller, "set_display", async () => {
       const now = await this.d.display!.read();

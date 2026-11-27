@@ -28,7 +28,7 @@ const WORKSPACE_DETAIL = { inventory: true, excludedStacks: true, nextMessage: t
 
 /**
  * What only an open PR's line reads. A merged PR is terminal: its list form keeps identity, title, url, when it merged
- * and its deploy state (stack bars, "N merged below", deploy waits, search), never its checks, threads or reviewers.
+ * and its deploy state (stack bars, "N more merged", deploy waits, search), never its checks, threads or reviewers.
  * Optional in the list type, so a list view that reads one must handle a merged PR without it.
  */
 const OPEN_ONLY = { head: true, draft: true, graphiteMergeStatus: true, conflict: true, reviewDecision: true, reviewers: true, mergeWhenReady: true, threads: true, failedChecks: true, otherFailedChecks: true, checksPending: true, checksRunning: true, mergeStateStatus: true, inMergeQueue: true } as const;

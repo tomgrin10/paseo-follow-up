@@ -59,6 +59,11 @@ import { questionsByWorkspace } from "../shared/your-questions";
 import { ResizableSplit } from "./split";
 import { PeekHost } from "./turn-view";
 import { useMarkTimelineOnScreen } from "./on-screen";
+import { WorkspaceView, useSessionFolds } from "./panel";
+import { RecentSteps } from "./agent-card";
+import { rowOpens } from "../shared/display";
+import { displayValues } from "./display";
+import type { Workspace } from "../shared/model";
 import type { SearchKey } from "./search-key";
 
 import { displayPreferences, displayRpc, writeDisplay, HOME_DETAIL_DEFAULT, HOME_DETAIL_MAX, HOME_DETAIL_MIN, type DisplayClient } from "../shared/display";
@@ -279,7 +284,7 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
   const detail = selected === OVERSEER_KEY && overseer
     ? <OverseerPane theme={theme} compact={compact} o={overseer} focus={replyFocus} pending={pendingAsk} agentId={overseerStatus?.agentId ?? null} model={overseerStatus?.model ?? null} restartWith={overseerStatus?.restartWith ?? null} configured={overseerStatus?.configured ?? null} deps={deps} navigation={navigation} onBack={compact && !route ? () => setSelected(null) : undefined} />
     : current
-    ? <DetailPane key={current.key} s={current} model={model} theme={theme} compact={compact} deps={deps} openFull={openFull} signOffNext={signOffNext} ask={ask?.key === current.key ? ask : null} onBack={compact && !route ? () => setSelected(null) : undefined} openAgent={navigation ? agentId => navigation.openAgent({ agentId }) : undefined} />
+    ? <DetailPane key={current.key} s={current} model={model} theme={theme} compact={compact} deps={deps} openFull={openFull} signOffNext={signOffNext} ask={ask?.key === current.key ? ask : null} onBack={compact && !route ? () => setSelected(null) : undefined} openAgent={navigation ? agentId => navigation.openAgent({ agentId }) : undefined} navigation={navigation} />
     : <BriefPane theme={theme} compact={compact} pane={pane} catchUp={deps.openCatchUp} deckSize={deckSize} onSelect={key => route ? route(key) : setSelected(key)} openLog={deps.openLog} sources={deps.sources}
       queue={deps.openQueue ? <SinceBlock theme={theme} compact={compact} openQueue={deps.openQueue} onStarted={() => deps.sources.extras.refreshDispatches()} navigation={navigation} raised={raisedKeys} revision={queue.revision} /> : null} />;
   // Nothing followed at all: no sort, no meters, just the empty state and its action.
@@ -437,6 +442,8 @@ export function useAgentLive(agentId: string | null) {
 }
 
 /** The last steps Home read per agent this session, and when, shown while the agent isn't loaded. */
+/** Home is a screen: the workspace view's host props it doesn't use. */
+const NO_HOST = { id: "", label: "" };
 const seenSteps = new Map<string, { steps: TailStep[]; at: number }>();
 /**
  * "Recent · last N steps", read only for the selected agent, refreshed when its status or flag changes.
@@ -501,8 +508,10 @@ function DetailSendNow({ s, theme, compact, deps }: { s: Workstream; theme: Them
   </View>;
 }
 
-function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask, onBack, openAgent }: {
+function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask, onBack, openAgent, navigation }: {
   s: Workstream; model: HomeModel; theme: Theme; compact: boolean; deps: HomeDeps;
+  /** Home's navigation: the workspace view's links, and Open on the view's tab. */
+  navigation?: PluginScreenProps["navigation"];
   openFull: (s: Workstream) => void; signOffNext: (s: Workstream) => void; onBack?: () => void;
   /** Why it matters' Ask the Overseer opens the Overseer's chat with the draft in it. */
   openAgent?: (agentId: string) => void;
@@ -524,7 +533,6 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
   const readBrief = useRpc(inboxBriefRpc);
   const control = useRpc(controlRpc);
   const brief = useQuery({ queryKey: ["follow-up", "home-brief", s.agentId, row?.seq ?? 0], queryFn: () => readBrief({ agentId: s.agentId! }), enabled: !!s.agentId && !!row?.brief });
-  const tail = useTail(agent.handle, `${row?.seq ?? 0}:${agent.status ?? ""}`);
   const browserRead = useRpc(browserStatusRpc);
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" } | null>(null);
   const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), enabled: !!sheet, staleTime: 0, refetchOnMount: "always" });
@@ -658,27 +666,10 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
     </Modal.Content>
   </Modal>;
 
-  const steps = s.agentId && <View style={{ gap: 8 }}>
-    {/* Phones: an unloaded agent is one row, label and why on the left, a quiet Load on the right. */}
-    {compact && tail.asleep && !tail.steps?.length && !tail.error ? <View style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 48 }}>
-      <Icon name="History" size={16} color={c.foregroundMuted} />
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={t.label}>Recent steps</Text>
-        <Text style={t.meta}>{tail.seenAt ? `Last seen ${age(new Date(tail.seenAt).toISOString(), Date.now())} ago. ` : ""}Not loaded. Loading keeps it in memory for about an hour.</Text>
-      </View>
-      <Button theme={theme} compact kind="ghost" title={tail.loading ? "Loading…" : "Load"} accessibilityLabel="Load recent steps" accessibilityHint="Loads the agent into memory for about an hour" loading={tail.loading} disabled={tail.loading} onPress={tail.load} />
-    </View> : <>
-      <Text style={compact ? t.section : [t.small, { fontWeight: "600", letterSpacing: 0.5, textTransform: "uppercase" }]}>{tail.asleep && tail.seenAt ? `Last seen · ${age(new Date(tail.seenAt).toISOString(), Date.now()) === "now" ? "just now" : `${age(new Date(tail.seenAt).toISOString(), Date.now())} ago`}` : tail.steps?.length ? `Recent · last ${tail.steps.length} steps` : "Recent steps"}</Text>
-      {!!tail.error && <Text style={t.meta}>{`Couldn't load the agent's steps: ${tail.error}`}</Text>}
-      {tail.steps === null ? <Spinner color={c.foregroundMuted} size={12} label="Loading the agent's steps" />
-        : tail.steps.length === 0 ? (tail.error ? null : <Text style={t.meta}>{tail.asleep ? "This agent isn't loaded, so its steps aren't shown." : "No steps yet."}</Text>)
-        : <PrLinksProvider prs={w ? prLinksByNumber(w.prs) : undefined}>{tail.steps.map((step, i) => <Step key={i} step={step} c={c} last={i === tail.steps!.length - 1} />)}</PrLinksProvider>}
-      {(tail.asleep || (tail.woken && tail.loading)) && <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-        <Button theme={theme} compact={compact} kind="secondary" title={tail.loading ? "Loading…" : "Load recent steps"} loading={tail.loading} disabled={tail.loading} onPress={tail.load} />
-        <Text style={[t.small, { flex: 1, minWidth: 160 }]}>Loads the agent into memory for about an hour.</Text>
-      </View>}
-      {!compact && !!tail.steps?.length && <Text style={t.small}>A preview, not the whole session. Open full for the chat.</Text>}
-    </>}
+  // Recent steps for a row without a workspace (an untracked agent): read live or from the saved transcript, never
+  // woken (invariant 1). The dock below holds its reply box. A workspace row draws the workspace view instead.
+  const steps = s.agentId && <View style={{ marginHorizontal: compact ? -16 : -20 }}>
+    <RecentSteps agentId={s.agentId} name={s.title} theme={theme} compact={compact} steps={compact ? 5 : 6} place="home" reply={false} prs={w?.prs as Workspace["prs"] | undefined} />
   </View>;
   // "No ask stated" only repeats the chat; the panel already hides it, and on a phone it's dead weight above the ask.
   // Nor beside a drawn Needs-you item (shared briefCardShown, a-brief-without-an-ask-never-sits-beside-needs-you).
@@ -689,6 +680,49 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
   const inBlock = !!w && !!showBrief && !later && briefAsks(b, row);
 
   const running = useWorkspaceRunning(deps.sources.paseo, w?.id ?? "");
+  const folds = useSessionFolds(s.workspaceId ?? "");
+  // Open: the workspace view's tab or the agent's chat, as Display open_workspace_on says (Enter still opens the chat,
+  // invariant 57).
+  const opensView = s.workspaceId ? rowOpens(s, displayValues()?.open_workspace_on, false) === "view" : false;
+  const open = () => { if (opensView && s.workspaceId) { navigation?.openWorkspace({ workspaceId: s.workspaceId }); deps.openPanel(s.workspaceId); } else openFull(s); };
+  // A workspace row is the workspace view (invariant 135), with Home's own moves in its head and, on a phone, its dock.
+  if (s.workspaceId && full) {
+    const view = <WorkspaceView theme={theme} layout={{ compact, platform: Platform.OS === "web" ? "web" : Platform.OS === "ios" ? "ios" : "android" }} host={NO_HOST} navigation={navigation}
+      workspace={full} place="home" folds={folds} resize={null} openSettings={deps.openSettings} openOverview={deps.openHome} sources={deps.sources} inbox={inbox}
+      ask={inBlock && b ? { brief: b, card: <BriefCard {...({ embedded: true, bare: true, item: { data: b }, theme, layout: { compact }, agentId: s.agentId, deps: deps.briefDeps } as unknown as Parameters<typeof BriefCard>[0])} /> } : null}
+      onSent={() => inbox.refresh()}
+      head={{
+        lead: !compact && <>{onBack && <IconButton theme={theme} compact icon="ChevronLeft" label="Back to Home" onPress={onBack} />}<View style={{ paddingTop: 3 }}><Icon name={s.icon} size={16} color={color} /></View></>,
+        tail: s.agent && s.agent !== "Main agent" ? <Text style={{ color: c.foregroundMuted, fontWeight: "400" }}>{` › ${s.agent}`}</Text> : null,
+        actions: compact ? <IconButton theme={theme} compact icon="PanelRightOpen" label="Open" onPress={open} />
+          : <Button theme={theme} compact={compact} icon="PanelRightOpen" title="Open" keyHint={opensView ? undefined : "↵"} accessibilityHint={opensView ? "Opens the workspace view as a tab" : "Opens the agent's chat (Enter)"} onPress={open} />,
+      }}
+      moves={l => compact ? null : <View style={{ gap: 8, marginTop: 4 }}>
+        {(!row?.needs && s.sendNow) ? <DetailSendNow s={s} theme={theme} compact={compact} deps={deps} /> : null}
+        {canMove && <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+          <Button nativeID={PANE_PRIMARY} theme={theme} compact={compact} kind={plan.primary === "sign_off" && !asks.length && !agent.permissions.length ? "primary" : "secondary"} icon={signOffIcon} title="Sign off" loading={busy === "sign_off"}
+            onPress={() => void run("sign_off", () => inbox.signOff([s.agentId!]))} />
+          {l.dense ? <IconButton theme={theme} icon="ArrowRight" label="Sign off & next" tooltip onPress={() => signOffNext(s)} />
+            : <Button theme={theme} compact={compact} icon="ArrowRight" title="Sign off & next" onPress={() => signOffNext(s)} />}
+          {l.dense ? <IconButton theme={theme} icon="AlarmClock" label="Later…" tooltip onPress={() => setLaterOpen(v => !v)} />
+            : <Button theme={theme} compact={compact} icon="AlarmClock" title="Later…" onPress={() => setLaterOpen(v => !v)} />}
+        </View>}
+        {laterOpen && <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+          {laterChoices(new Date()).map(([k, label]) =>
+            <Button key={k} theme={theme} compact={compact} kind="ghost" title={label} onPress={() => { setLaterOpen(false); void inbox.snooze([s.agentId!], snoozeUntil(k, new Date())); }} />)}
+        </View>}
+        {laterBlock}
+      </View>}
+      dock={compact && s.agentId ? ({ yields, typingInContent }) => !typingInContent && <View nativeID={TOAST_ANCHOR} style={[{ borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.surface0 }, bottomInset(compact)]}>
+        {!yields && moves}
+        {!yields && laterBlock && <View style={{ paddingHorizontal: 12, paddingTop: 8 }}>{laterBlock}</View>}
+        <ReplyBox theme={theme} compact={compact} agentName={s.title} placeholder="Reply to the agent" target={{ kind: "agent", agentId: s.agentId! }} onSend={async (text, images) => {
+          await agent.handle!.send(text, images?.length ? { images } : undefined);
+          inbox.refresh();
+        }} />
+      </View> : undefined} />;
+    return <DismissReveal.Provider value="always">{view}{laterModal}</DismissReveal.Provider>;
+  }
   // Home's detail pane is the selected workspace: every x in it shows without hover (client/dismiss.tsx).
   return <DismissReveal.Provider value="always"><DockedPane compact={compact} header={header} style={{ backgroundColor: c.surface0 }} contentContainerStyle={{ padding: compact ? 16 : 20, gap: 16, paddingBottom: 24 }}
     dock={({ yields, typingInContent }) => s.agentId && !typingInContent && <View nativeID={compact ? TOAST_ANCHOR : undefined} style={[{ borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.surface0 }, bottomInset(compact)]}>

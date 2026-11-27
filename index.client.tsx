@@ -7,7 +7,6 @@ import { NEW_NAME, OLD_NAMES } from "./shared/new-name";
 import { closeNew, newShowing, openNew, setNewFallback, type NewRequest } from "./client/new";
 import { withButtonVisibility } from "./client/button-visibility";
 import { openExternalUrl, type PluginClientContext, type PluginButtonRegistration, type PluginScreenProps, type PluginSurfaceProps, type PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
-import { Dimensions } from "react-native";
 import { FollowSettings } from "./client/settings";
 import { FollowHome, HOME_SCREEN } from "./client/home";
 import { setOpenStats } from "./client/pr-stats-settings";
@@ -24,7 +23,7 @@ import { createLiveStore, headerIcon, sidebarItem } from "./client/live";
 import { FOLLOW_UP_ICON } from "./client/follow-up-icon";
 import { contributeFollowUpPill } from "./client/pill";
 import { contributeRowBadges } from "./client/row-badges";
-import { FollowLarge, LARGE_SCREEN } from "./client/large";
+import { LargeRedirect, LARGE_SCREEN } from "./client/large";
 import { bindDismissInbox } from "./client/dismiss";
 import { createInboxStore } from "./client/inbox-store";
 import { contributeInboxCommands } from "./client/inbox";
@@ -43,16 +42,20 @@ import { runAction } from "./client/toast-store";
 
 /** Home. The same screen id the Overview had, so the sidebar row, ⌘K and saved links land on Home. */
 const OVERVIEW = HOME_SCREEN;
-/** The workspace panel: this workspace only, with a Home button. One id for the side pane and the phone tab (1.2.0-beta.1 retired "follow-up-tab"). */
+/**
+ * The workspace view (invariant 135): one view, two registrations. `follow-up` is the side panel (the explorer column;
+ * still allowed as a tab for one more release, so saved layouts keep working). `follow-up-view` is the main area's
+ * tab: every new open (the header button, ⌘K, /follow-up, a phone, the side panel's Open in a tab) opens it.
+ */
 const PANEL = "follow-up";
+const VIEW = "follow-up-view";
 /** Old settings screen ids, kept only so saved links and restored routes still open the one settings page. */
 const LEGACY_SETTINGS_SCREENS = [LEGACY_SETTINGS_SCREEN, "project-settings", "display-settings"];
 
 export default function contribute(host: PluginClientContext) {
   const visibility = withButtonVisibility(host);
   const client = visibility.client;
-  const location = () => Dimensions.get("window").width < 768 ? "workspace" as const : "explorer" as const;
-  const openPanel = (workspaceId: string) => client.openPanel(PANEL, { workspaceId, location: location() });
+  const openPanel = (workspaceId: string) => client.openPanel(VIEW, { workspaceId, location: "workspace" });
   // A category (agents, reviewers, following) is saved first, so settings opens on it (drilled in on a phone).
   // An agent's "tonight"/"tomorrow" snooze resolves on the daemon: tell it this device's timezone (docs/needs-you.md).
   // Retried a few times, since the host may not be reachable yet while the app starts.
@@ -70,7 +73,6 @@ export default function contribute(host: PluginClientContext) {
   // PR stats (docs/pr-stats.md#the-page): Home's view `stats`; a phone's person drill-down is its own screen.
   const openStats = (params: StatsParams = {}) => client.openScreen({ screenId: OVERVIEW, params: { view: "stats", ...Object.fromEntries(Object.entries(params).filter(([, v]) => !!v)) as Record<string, string>, n: String(Date.now()) } });
   setOpenStats(() => openStats());
-  const openLarge = (workspaceId: string) => client.openScreen({ screenId: LARGE_SCREEN, params: { workspaceId } });
   // "Set up Follow-up again" (Settings and ⌘K): restart the flow on the server, then open Home, which shows it.
   // `resume`: setup is already in progress, so open it where it was left instead of from the top.
   const openSetup = (resume = false) => { void (resume ? Promise.resolve() : client.rpc(setOnboardingRpc, { action: "restart" }).catch(() => undefined)).then(() => client.openScreen({ screenId: OVERVIEW, params: { setup: String(Date.now()) } })); };
@@ -125,24 +127,26 @@ export default function contribute(host: PluginClientContext) {
   const openItem = (key: string, extra: { question?: string } = {}) => client.openScreen({ screenId: OVERVIEW, params: { item: key, ...(extra.question ? { question: extra.question } : {}) } });
   const homeDeps = { sources, openSettings, openPanel, openLog, openQueue, openCatchUp, openStats, openHome: openOverview, openItem, briefDeps, searchKey, newKey };
   const Overview = (props: PluginScreenProps) => <><FollowHome {...props} deps={homeDeps} />{reportHost(props)}</>;
-  const Panel = (props: PluginWorkspacePanelProps) => <><FollowPanel {...props} openSettings={openSettings} openOverview={openOverview} openLarge={openLarge} inbox={inbox} live={store} briefDeps={briefDeps} sources={sources} />{reportHost(props)}</>;
-  const Large = (props: PluginScreenProps) => <FollowLarge sources={sources} {...props} openSettings={openSettings} openOverview={openOverview} live={store} paseo={paseoWorkspaces} inbox={inbox} />;
+  const Panel = (props: PluginWorkspacePanelProps) => <><FollowPanel {...props} place="panel" openSettings={openSettings} openOverview={openOverview} openView={openPanel} inbox={inbox} live={store} briefDeps={briefDeps} sources={sources} />{reportHost(props)}</>;
+  const ViewTab = (props: PluginWorkspacePanelProps) => <><FollowPanel {...props} place="tab" openSettings={openSettings} openOverview={openOverview} inbox={inbox} live={store} briefDeps={briefDeps} sources={sources} />{reportHost(props)}</>;
+  const Large = (props: PluginScreenProps) => <LargeRedirect {...props} openView={openPanel} />;
   const removers: (() => unknown)[] = [
     client.addScreen({ id: OVERVIEW, title: "Follow-up", Component: Overview }),
     client.addScreen({ id: LARGE_SCREEN, title: params => store.get(params.workspaceId ?? "")?.title ?? "Follow-up", Component: Large }),
     ...LEGACY_SETTINGS_SCREENS.map(id => client.addScreen({ id, title: "Follow-up settings", Component: Settings })),
     settings.remove,
-    client.addWorkspacePanel({ id: PANEL, title: "Follow-up", icon: FOLLOW_UP_ICON, locations: ["workspace", "explorer"], Component: Panel }),
-    client.addCommandCenterItem({ id: "open-follow-up", title: "Follow-up: open for this workspace", icon: FOLLOW_UP_ICON, keywords: ["PR", "stack", "repairs", "done", "archive"], context: "workspace", onSelect({ openPanel }) { openPanel(PANEL, { location: location() }); } }),
-    client.addCommandCenterItem({ id: "open-follow-up-large", title: "Follow-up: open the larger view", icon: "Maximize2", keywords: ["expand", "full screen", "maximize", "PR", "stack"], context: "workspace", onSelect({ workspace, openScreen }) { openScreen({ screenId: LARGE_SCREEN, params: { workspaceId: workspace.id } }); } }),
+    client.addWorkspacePanel({ id: PANEL, title: "Follow-up", icon: FOLLOW_UP_ICON, locations: ["explorer", "workspace"], Component: Panel }),
+    client.addWorkspacePanel({ id: VIEW, title: "Follow-up", icon: FOLLOW_UP_ICON, locations: ["workspace"], Component: ViewTab }),
+    client.addCommandCenterItem({ id: "open-follow-up", title: "Follow-up: open for this workspace", icon: FOLLOW_UP_ICON, keywords: ["PR", "stack", "repairs", "done", "archive", "expand", "full screen", "larger view"], context: "workspace", onSelect({ openPanel }) { openPanel(VIEW, { location: "workspace" }); } }),
+    client.addCommandCenterItem({ id: "open-follow-up-side", title: "Follow-up: open in the side panel", icon: "PanelRight", keywords: ["sidebar", "explorer", "dock", "PR", "stack"], context: "workspace", onSelect({ openPanel }) { openPanel(PANEL, { location: "explorer" }); } }),
     client.addCommandCenterItem({ id: "open-follow-up-spec", title: "Follow-up: open the spec", icon: "FileText", keywords: ["spec", "artifact", "plan", "doc", "design"], context: "workspace", onSelect({ workspace, openPanel }) {
       const url = store.get(workspace.id)?.spec?.url;
       // Without a link yet, open the panel, where the spec link can be added.
-      if (url) void openExternalUrl(url).catch(() => undefined); else openPanel(PANEL, { location: location() });
+      if (url) void openExternalUrl(url).catch(() => undefined); else openPanel(VIEW, { location: "workspace" });
     } }),
     client.addCommandCenterItem({ id: "follow-up-rename", title: "Follow-up: Rename title with AI", icon: "Sparkles", keywords: ["rename", "name", "title", "AI", "suggest"], context: "workspace", onSelect({ workspace, openPanel }) {
       // The dialog lives in Follow-up's surfaces: open the panel, which mounts a host, then ask.
-      openPanel(PANEL, { location: location() }); setTimeout(() => openRename({ workspaceId: workspace.id }), 0); } }),
+      openPanel(VIEW, { location: "workspace" }); setTimeout(() => openRename({ workspaceId: workspace.id }), 0); } }),
     client.addCommandCenterItem({ id: "follow-up-overview", title: "Follow-up: Home", icon: "House", keywords: ["home", "workspaces", "needs you", "inbox", "attention", "brief", "overview"], context: "global", onSelect({ openScreen }) { openScreen({ screenId: OVERVIEW }); } }),
     client.addCommandCenterItem({ id: "follow-up-catch-up", title: MODE.command, icon: "Layers", keywords: ["catch up", "inbox", "needs you", "triage", "answer", "questions", "one by one"], context: "global", onSelect() { openCatchUp(); } }),
     client.addCommandCenterItem({ id: "follow-up-pr-stats", title: "Follow-up: PR stats", icon: "ChartNoAxesColumn", keywords: ["statistics", "stats", "review time", "team", "leaderboard", "who", "PRs opened", "wait"], context: "global", onSelect() { openStats(); } }),
@@ -163,7 +167,7 @@ export default function contribute(host: PluginClientContext) {
       await runAction({ label: "Ask", failure: "Couldn't ask", success: "Asked · the answer lands in Follow-up's Your questions",
         run: async () => { if (!ask) throw new Error("Write the question after /ask."); return rpc(contextAskRpc, { workspaceId: workspace.id, agentId: agent.id, ask, via: "slash" }); } });
     } }),
-    client.addSlashCommand({ name: "follow-up", description: "Open this workspace's PRs and remaining work", argumentHint: "", context: "agent", onSubmit({ openPanel }) { openPanel(PANEL, { location: location() }); } }),
+    client.addSlashCommand({ name: "follow-up", description: "Open this workspace's PRs and remaining work", argumentHint: "", context: "agent", onSubmit({ openPanel }) { openPanel(VIEW, { location: "workspace" }); } }),
     contributeChat(client),
     // Agents and workspaces an agent creates: a card that opens them, relayed through Home (timeline items get no navigation).
     contributeCreated(client, { watchAgent: hasFeeds(client) ? extras.watchAgent : null, openAgent: briefDeps.openAgent, openWorkspace: workspaceId => client.openScreen({ screenId: OVERVIEW, params: { next: String(++nextToken), openWorkspace: workspaceId } }) }),
@@ -208,7 +212,7 @@ export default function contribute(host: PluginClientContext) {
   removers.push(searchKey.subscribe(syncSearch), () => removeSearch?.(), installSearchShortcut(client, searchKey, { screenId: OVERVIEW, focus: extras.searchFocus }, { key: newKey, open: openNewAnywhere }));
   // Phase 2: only on hosts with the sidebar-view API (Paseo main after 2026-11-07).
   const views = sidebarViewHost(host);
-  if (views) removers.push(views.addSidebarView({ id: "needs-you", title: "Follow-up: Needs you", description: "Agents that need you until you sign them off, then your workspaces.", Component: inboxSidebarView(sources, () => client.openScreen({ screenId: OVERVIEW, params: { item: OVERSEER_KEY, at: String(Date.now()) } })) }));
+  if (views) removers.push(views.addSidebarView({ id: "needs-you", title: "Follow-up: Needs you", description: "Agents that need you until you sign them off, then your workspaces.", Component: inboxSidebarView(sources, () => client.openScreen({ screenId: OVERVIEW, params: { item: OVERSEER_KEY, at: String(Date.now()) } }), openPanel) }));
 
   return async () => {
     setReportFallback(null); setReportError(null); setNewFallback(null);

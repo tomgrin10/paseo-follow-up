@@ -15,16 +15,10 @@ import { finishedParts } from "../shared/task-view";
 const src = (f: string) => readFile(join(import.meta.dirname, "..", f), "utf8");
 const summary = { open: 1, due: 0, stale: 0, waiting: 0, finished: 3, finishedThisWeek: 2 };
 
-test("stale is amber in light themes: readable as a 12px word on white, the host's token in dark ones", async () => {
-  const { contrast, staleColor, STALE_LIGHT } = await import("../client/theme");
-  const light = { surface0: "#ffffff", statusWarning: "#7b5d39" } as never;
-  const dark = { surface0: "#181b1a", statusWarning: "#f5a524" } as never;
-  assert.equal(staleColor(light), STALE_LIGHT);
-  assert.equal(staleColor(dark), "#f5a524");
-  assert.ok(contrast(STALE_LIGHT, "#ffffff")! >= 4.5, `the word passes as text: ${contrast(STALE_LIGHT, "#ffffff")}`);
+test("stale is neutral: amber belongs to Needs you alone (invariant 89), so tasks mark stale with weight and size, not hue", async () => {
   const tasks = await src("client/tasks.tsx");
-  assert.equal((tasks.match(/staleColor\(/g) ?? []).length, 4, "the dot, the Stale word, the folded count and a scheduled time that didn't go out");
-  assert.equal((tasks.match(/c\.statusWarning/g) ?? []).length, 1, "only the schedule sheet's \"Register a PR\" warning; stale never uses the brown token");
+  assert.doesNotMatch(tasks, /staleColor|STALE_LIGHT/);
+  assert.equal((tasks.match(/c\.statusWarning/g) ?? []).length, 1, "only the schedule sheet's \"Register a PR\" warning");
 });
 
 test("an option-less question's field says what to write; no line above it says options are missing", async () => {

@@ -137,7 +137,7 @@ function StackRows({ name, prs, theme, open, toggle, onOpen, compact, workspaceR
           <Icon name={showDone ? "ChevronUp" : "GitMerge"} size={10} color={showDone ? c.foregroundMuted : mergedColor(c)} />
         </View>
       </View>
-      <Text style={[t.meta, { paddingTop: 7, fontVariant: ["tabular-nums"] }]}>{showDone ? "Hide merged" : `${done.length} merged below`}</Text>
+      <Text style={[t.meta, { paddingTop: 7, fontVariant: ["tabular-nums"] }]}>{showDone ? "Hide merged" : `${done.length} more merged`}</Text>
     </Pressable>}
     <View style={{ height: 6 }} />
   </View>;

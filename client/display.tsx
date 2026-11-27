@@ -8,7 +8,7 @@ import { isMac, searchShortcutOf, searchShortcutOptions, type SearchShortcut , i
 import { useEffect } from "react";
 import { ActivityIndicator, Platform, View } from "react-native";
 import { Text } from "./text";
-import { displayPreferences, displayRpc, trustCountText } from "../shared/display";
+import { DEFAULT_OPEN_WORKSPACE_ON, displayPreferences, displayRpc, trustCountText, type OpenWorkspaceOn } from "../shared/display";
 import { sidebarVisibility } from "./sidebar-visibility";
 import { appVisible, onVisible } from "./visibility";
 import { NEW_NAME } from "../shared/new-name";
@@ -16,6 +16,10 @@ import { NEW_NAME } from "../shared/new-name";
 type Display = import("zod").infer<typeof displayPreferences.schema>;
 const listeners = new Set<(values: Display) => void>();
 export function subscribeDisplay(listener: (values: Display) => void) { listeners.add(listener); return () => { listeners.delete(listener); }; }
+/** The last Display values this client read (null until the first read): for choices made on a click, like where to open a workspace. */
+let latest: Display | null = null;
+listeners.add(values => { latest = values; });
+export const displayValues = (): Display | null => latest;
 
 /** R2's measurement, where it's cheap to look: how often agents stated what they need on a flagged turn. */
 export function briefShareText(stats: { days: number; total: number; tool: number; structured: number; fallback: number } | undefined): string {
@@ -98,6 +102,13 @@ export function DisplaySections({ theme }: Pick<PluginSurfaceProps, "theme">) {
         <SettingsSwitch label="Composer pill" hint="One pill above the message box, only while that agent or its workspace needs you." value={settings.values.enable_composer_pill} disabled={settings.saving} onValueChange={(enable_composer_pill) => save({ enable_composer_pill })} />
       </SettingsCard>
       {settings.saveError && <Text accessibilityRole="alert" style={{ color: theme.colors.statusDanger }}>{settings.saveError}</Text>}
+    </SettingsSection>
+    <SettingsSection title="Opening a workspace" info="From Follow-up's sidebar list and Home's Open. Cmd or Ctrl-click opens the other one.">
+      <SettingsCard>
+        <SettingsSelect label="Open a workspace on" hint="Its workspace view: PRs, what the agents are doing and a reply box. Or its main agent's chat."
+          value={settings.values.open_workspace_on ?? DEFAULT_OPEN_WORKSPACE_ON} options={[{ value: "view", label: "Workspace view" }, { value: "chat", label: "Main agent's chat" }]} disabled={settings.saving}
+          onValueChange={(open_workspace_on: OpenWorkspaceOn) => save({ open_workspace_on })} />
+      </SettingsCard>
     </SettingsSection>
     {Platform.OS === "web" && <SettingsSection title="Keyboard" info="Follow-up's key never takes one Paseo uses, and inside a code editor the editor keeps it. Pick None to keep it free.">
       <SettingsCard>

@@ -27,6 +27,11 @@
 - **Catch up's queue rail width** is the Display field `catch_up_rail_fraction`: the rail's share of the Catch up
   screen on a desktop, 0.16 to 0.5, absent until first dragged (read as 0.28). It saves the same way as Home's right
   pane; `set_display` sets it with `{ values: { catch_up_rail_fraction: 0.3 } }`.
+- **Opening a workspace** is the Display field `open_workspace_on`: `view` (the default when absent) or `chat`. A row in
+  Follow-up's sidebar list and Home's Open open the workspace's view as a main-area tab (`follow-up-view`) or its
+  main agent's chat; Cmd/Ctrl-click opens the other one (`rowOpens`, `shared/display.ts`). Enter on a Home row still
+  opens the chat (invariant 57). Settings → Inbox & display → Opening a workspace picks it; `set_display` sets it with
+  `{ values: { open_workspace_on: "chat" } }`.
 - **Search from anywhere** is the Display field `search_shortcut`: `mod-shift-k` (⌘⇧K on a Mac, Ctrl+Shift+K elsewhere; the
   default when absent or saved as the retired `mod-slash`), `mod-shift-h` or `none`. Settings → Inbox & display → Keyboard picks it (web
   and desktop only); `set_display` sets it with `{ values: { search_shortcut: "none" } }`. No choice is a key Paseo

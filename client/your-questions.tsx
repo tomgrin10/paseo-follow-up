@@ -351,7 +351,7 @@ export function YourQuestionsCard({ workspaceId, mainAgentId, theme, compact, op
     <Icon name="MessageSquareReply" size={compact ? 16 : 14} color={c.foregroundMuted} />
     <Text accessibilityRole={fold ? undefined : "header"} numberOfLines={fold ? 1 : undefined} style={[t.label, { flex: 1, minWidth: 0 }]}>Your questions</Text>
     {!!counts && <View accessibilityLabel={counts} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-      {!!q.unread.length && <View style={{ paddingHorizontal: 8, paddingVertical: 1, borderRadius: 999, backgroundColor: tint(c.statusWarning, c) }}><Text style={[t.meta, { color: c.statusWarning, fontWeight: "600" }]}>{`${q.unread.length} answer${q.unread.length === 1 ? "" : "s"}`}</Text></View>}
+      {!!q.unread.length && <View style={{ paddingHorizontal: 8, paddingVertical: 1, borderRadius: 999, backgroundColor: c.surface2 }}><Text style={[t.meta, { color: c.foreground, fontWeight: "600" }]}>{`${q.unread.length} answer${q.unread.length === 1 ? "" : "s"}`}</Text></View>}
       {!!q.asking.length && <Text style={t.meta}>{`${q.asking.length} asking`}</Text>}
     </View>}
   </>;
@@ -368,8 +368,9 @@ export function YourQuestionsCard({ workspaceId, mainAgentId, theme, compact, op
     {!compact && <Text numberOfLines={1} style={t.small}>search, kept 30 days</Text>}
   </Pressable>;
   return <View {...({ dataSet: { yourQuestions: workspaceId } } as object)} style={[{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 8, backgroundColor: c.surface0, overflow: "hidden" },
-    // In the panel it is one of the sections, raised like the others; an unread answer keeps its amber border.
-    q.unread.length ? { borderWidth: 1, borderColor: withAlpha(c.statusWarning, 0.45) } : fold ? raised(c) : { borderWidth: 1, borderColor: c.border }, style]}>
+    // In the panel it is one of the sections, raised like the others. Amber is Needs you's alone (invariant 135): an
+    // unread answer says so in its neutral chip, not with an amber border.
+    fold ? raised(c) : { borderWidth: 1, borderColor: c.border }, style]}>
     {header}
     {open && <>
     <AskField workspaceId={workspaceId} theme={theme} compact={compact} folded={foldAsk} />

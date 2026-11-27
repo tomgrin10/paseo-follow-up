@@ -1,7 +1,9 @@
 import * as sdk from "@getpaseo/plugin/client";
 import type { PluginClientContext, PluginHostProps } from "@getpaseo/plugin/client";
 import { useCallback, useMemo, useSyncExternalStore, type ComponentType } from "react";
-import { View } from "react-native";
+import { Platform, View } from "react-native";
+import { displayValues } from "./display";
+import { rowOpens } from "../shared/display";
 import { Text } from "./text";
 import { UndoBar, useInbox, useSidebarViewMounted } from "./inbox";
 import { HomeList, OVERSEER_KEY, type OverseerRowState } from "./home-list";
@@ -40,8 +42,17 @@ export function sidebarViewHost(client: PluginClientContext): SidebarViewHost | 
   return typeof candidate.addSidebarView === "function" && typeof hooks.useAgents === "function" && typeof hooks.useWorkspaces === "function" ? candidate as SidebarViewHost : null;
 }
 
-/** `openOverseerHome`: Follow-up Home with the Overseer selected, where Start and Restart live. */
-export function inboxSidebarView(sources: HomeSources, openOverseerHome: () => void) {
+/**
+ * Cmd/Ctrl on the click that picked a row (web): the list hands its pick over as a key only, so the modifiers of the
+ * last pointer press are read here, within a moment of it.
+ */
+let lastPress = { at: 0, modified: false };
+if (Platform.OS === "web") (globalThis as { document?: { addEventListener(t: string, f: (e: { metaKey?: boolean; ctrlKey?: boolean }) => void, capture?: boolean): void } }).document
+  ?.addEventListener("pointerdown", e => { lastPress = { at: Date.now(), modified: !!(e.metaKey || e.ctrlKey) }; }, true);
+const modifiedPick = () => lastPress.modified && Date.now() - lastPress.at < 1_000;
+
+/** `openOverseerHome`: Follow-up Home with the Overseer selected, where Start and Restart live. `openView`: a workspace's view tab. */
+export function inboxSidebarView(sources: HomeSources, openOverseerHome: () => void, openView: (workspaceId: string) => void) {
   return function NeedsYouSidebar(view: SidebarViewProps) {
     const refs = sdk as unknown as RefSdk;
     useSidebarViewMounted();
@@ -78,7 +89,9 @@ export function inboxSidebarView(sources: HomeSources, openOverseerHome: () => v
       const s = full.byKey.get(key);
       const agent = s?.agentId ? agentRef.get(s.agentId) : undefined;
       const workspace = s?.workspaceId ? workspaceRef.get(s.workspaceId) : undefined;
-      if (agent) view.navigation.openAgent(agent); else if (workspace) view.navigation.openWorkspace(workspace);
+      const opens = s ? rowOpens(s, displayValues()?.open_workspace_on, modifiedPick()) : null;
+      if (opens === "view" && s?.workspaceId) { if (workspace) view.navigation.openWorkspace(workspace); openView(s.workspaceId); }
+      else if (agent) view.navigation.openAgent(agent); else if (workspace) view.navigation.openWorkspace(workspace);
     }, [full, agentRef, workspaceRef, view.navigation, overseer, overseerAgent]);
     // The row menu, as on Home (rename among it). No omnibox here, so no Ask; Open and Answer go to the chat.
     const openKey = (s: Workstream) => onSelect(s.key);

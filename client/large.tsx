@@ -1,62 +1,28 @@
-import type { InboxStore } from "./inbox-store";
 import { useEffect } from "react";
-import { Platform, View } from "react-native";
-import { Text } from "./text";
+import { View } from "react-native";
 import { type PluginScreenProps } from "@getpaseo/plugin/client";
-import { useWorkspace } from "./workspace-data";
-import type { LiveStore } from "./live";
-import type { HomeSources, PaseoWorkspaces } from "./home-data";
-import { Button, Card, CardRow, errorText, text } from "./kit";
-import { Skeleton } from "./motion";
+import { Text } from "./text";
+import { Card, CardRow, text } from "./kit";
 import { FOLLOW_UP_ICON } from "./follow-up-icon";
-import { PanelTop, WorkspaceView, useSessionFolds, type PanelLinks } from "./panel";
-
-export const LARGE_SCREEN = "follow-up-workspace";
 
 /**
- * The panel opened as a Paseo screen: the host supplies the page, header and close button, and the
- * layout switches to two columns. Collapse (or Esc) returns to the workspace, where the panel still is.
+ * The retired larger view's screen id (2.x before the workspace view). The main area's `follow-up-view` tab is the
+ * large view now (invariant 135), so a saved link or restored route to this screen opens the workspace and its tab.
+ * Kept one release, like the `follow-up` panel's two locations.
  */
-export function FollowLarge(props: PluginScreenProps & PanelLinks & { live?: LiveStore; /** Paseo's workspace list: the running state Your questions shows. */ paseo?: PaseoWorkspaces; inbox?: InboxStore; sources?: HomeSources }) {
-  const { theme, layout, params, navigation } = props;
-  const workspaceId = params.workspaceId ?? "";
+export const LARGE_SCREEN = "follow-up-workspace";
+
+export function LargeRedirect({ params, navigation, theme, layout, openView }: PluginScreenProps & { openView: (workspaceId: string) => void }) {
   const c = theme.colors;
-  const query = useWorkspace(props.live, workspaceId);
-  const folds = useSessionFolds(workspaceId);
-  const back = () => navigation?.openWorkspace({ workspaceId });
-
-  // Esc goes back, unless a sheet or menu has focus or the user is typing. Web only: native has its own back.
+  const workspaceId = params.workspaceId ?? "";
   useEffect(() => {
-    type Key = { key: string; defaultPrevented: boolean; metaKey: boolean; ctrlKey: boolean; altKey: boolean; target: { isContentEditable?: boolean; tagName?: string } | null; preventDefault(): void };
-    type Doc = { addEventListener(type: "keydown", fn: (event: Key) => void): void; removeEventListener(type: "keydown", fn: (event: Key) => void): void; querySelector(selector: string): unknown };
-    const doc = (globalThis as { document?: Doc }).document;
-    if (Platform.OS !== "web" || !doc || !navigation) return;
-    const onKey = (event: Key) => {
-      if (event.key !== "Escape" || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
-      if (event.target && (event.target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName ?? ""))) return;
-      if (doc.querySelector('[role="dialog"], [aria-modal="true"]')) return;
-      event.preventDefault();
-      navigation.openWorkspace({ workspaceId });
-    };
-    doc.addEventListener("keydown", onKey);
-    return () => doc.removeEventListener("keydown", onKey);
-  }, [navigation, workspaceId]);
-
-  if (query.pending && workspaceId) return <View accessibilityLabel="Loading Follow-up" style={{ flex: 1, backgroundColor: c.surface0, padding: 24, gap: 12, maxWidth: 1240, width: "100%", alignSelf: "center" }}>
-    <Skeleton width="30%" height={16} color={c.surface2} /><Skeleton width="60%" height={10} color={c.surface2} /><Skeleton width="100%" height={6} color={c.surface2} radius={3} />
+    if (!workspaceId) return;
+    navigation?.openWorkspace({ workspaceId });
+    openView(workspaceId);
+  }, [workspaceId]); // eslint-disable-line react-hooks/exhaustive-deps
+  return <View style={{ flex: 1, backgroundColor: c.surface0, padding: layout.compact ? 16 : 24 }}>
+    {!workspaceId && <Card theme={theme} compact={layout.compact} icon={FOLLOW_UP_ICON} title="Nothing to show here" style={{ marginHorizontal: 0, marginTop: 0, maxWidth: 520 }}>
+      <CardRow theme={theme}><Text style={text(c).meta}>This link names no workspace. Open one from Home or the sidebar.</Text></CardRow>
+    </Card>}
   </View>;
-  const w = query.workspace;
-  if (!w) return <View style={{ flex: 1, backgroundColor: c.surface0, padding: layout.compact ? 16 : 24 }}>
-    <Card theme={theme} compact={layout.compact} icon={FOLLOW_UP_ICON} title="Nothing to show here" style={{ marginHorizontal: 0, marginTop: 0, maxWidth: 520 }}>
-      <CardRow theme={theme}>
-        <Text style={[text(c).meta, { marginBottom: 10 }]}>{query.error ? `Couldn't read Follow-up: ${errorText(query.error)}` : "Follow-up has nothing on this workspace yet, or it no longer exists."}</Text>
-        {navigation && workspaceId ? <Button theme={theme} icon="ArrowLeft" title="Back to the workspace" onPress={back} /> : null}
-      </CardRow>
-    </Card>
-  </View>;
-  return <WorkspaceView theme={theme} layout={layout} host={props.host} navigation={navigation} workspace={w} large inbox={props.inbox} sources={props.sources}
-    loadError={query.error ? "Refresh failed. Showing the last saved state." : query.loadError}
-    openSettings={props.openSettings} openOverview={props.openOverview} folds={folds} paseo={props.paseo}
-    top={<PanelTop theme={theme} compact={layout.compact} openOverview={props.openOverview} openSettings={props.openSettings} />}
-    resize={navigation ? { icon: "Minimize2", label: "Back to the workspace (Esc)", onPress: back } : null} />;
 }
