@@ -1,3 +1,4 @@
+import { finishedTask } from "./finished";
 import { sendItems } from "./send-words";
 import { GITHUB_OFF } from "./github-setup";
 import { z } from "zod";
@@ -317,7 +318,7 @@ export function completionGate(w: ListWorkspace, now = Date.now()): CompletionGa
     if (pr.snapshot.state === "CLOSED") add("agent", `Settle ${ref} with a disposition`);
     else add("developer", `Settle ${ref}`);
   }
-  for (const o of followUpObligations(w).filter(o => !["done", "waived"].includes(o.status))) add(waitsOnDeveloper(o, w.questions ?? []) ? "developer" : "agent", o.title);
+  for (const o of followUpObligations(w).filter(o => !finishedTask(o))) add(waitsOnDeveloper(o, w.questions ?? []) ? "developer" : "agent", o.title);
   for (const o of followUpObligations(w).filter(o => o.status === "done" && o.communication && !replyRecorded(o.communication))) add("agent", `Record the sent reply for ${o.title}`);
   const open = w.batches.filter(b => !recoveryBatch(b) && !completionCheck(b));
   if (open.some(b => ["sending", "sent"].includes(b.state))) add("agent", "Acknowledge the open follow-up batch");
@@ -359,7 +360,7 @@ export function summary(w: ListWorkspace, now = Date.now()): { status: Status; l
   const live = liveWorkingTask(w);
   if (w.runtimeBusy || live) return { status: "handling", label: "Agent handling", reason: live?.title ?? (w.mainBusy === null ? "Agents in this workspace are working" : "The main agent is working") };
   if (w.prs.some(pr => !statusKnown(pr))) return { status: "waiting", label: "Waiting", reason: "PR status unavailable; refresh will retry" };
-  const pending = obligations.find(o => !["done", "waived"].includes(o.status));
+  const pending = obligations.find(o => !finishedTask(o));
   if (pending) return { status: pending.status === "waiting" ? "waiting" : "active", label: pending.status === "waiting" ? "Waiting" : "Active", reason: pending.title };
   if (w.prs.some(pr => !settled(pr))) return { status: "waiting", label: "Waiting", reason: "Waiting for PR review, checks, or merge" };
   return { status: "active", label: "Active", reason: "The main agent has not declared completion" };

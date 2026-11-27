@@ -252,8 +252,12 @@ pages"). One component, `client/paged-list.tsx`: `usePagedList` returns the rows
 - **Data is bounded too.** `follow.get` and `follow.list` carry what is live in full and the newest `HISTORY_KEPT`
   settled questions, batches and PR actions (`boundHistory`, `shared/history.ts`); the Activity card reads its rows a
   page at a time from `follow.activity` (`activityPage`), which searches the whole history on the worker. The panel's
-  own copy draws the first page until the worker answers. An old question opened from Activity draws from the page's
-  copy (`QuestionSheet`'s `fallback`).
+  own copy draws the first page until the worker answers. History lifecycle predicates live in `shared/finished.ts`:
+  withdrawn and dismissed questions are finished even without answers or with old task references. Unsent answers
+  and delivered answers still used by live tasks remain context; signing off ends an unreferenced answer's lifecycle.
+  Completed, cancelled-before-send and superseded batches are history even without a settlement timestamp.
+  Task rows, Activity's finished-task events, the panel's history count and task pruning share `finishedTask`.
+  An old question opened from Activity draws from the page's copy (`QuestionSheet`'s `fallback`).
 - **Every adopter**: Activity (timeline and questions), Agent's tasks, Messages to the agent, Needs you (items and
   question cards), Pull requests (stacks, 10 a page, and each stack's rows), held merges, other agents, Catch up's
   rail, Done while you were away, Settings → Following (projects, workspaces, repositories, PR statistics),

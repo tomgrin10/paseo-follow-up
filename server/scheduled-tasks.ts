@@ -1,3 +1,4 @@
+import { finishedTask } from "../shared/finished";
 import type { MessageQueue, Resolution } from "./message-queue";
 import type { QueueItem } from "../shared/queue";
 import type { State, Workspace } from "../shared/model";
@@ -39,7 +40,7 @@ export class ScheduledTasks {
     const now = this.now();
     for (const w of state.workspaces) {
       if (ids && !ids.has(w.id) || !w.enable_tracking) continue;
-      const due = followUpObligations(w).filter(o => o.enable_follow_up && !["done", "waived"].includes(o.status) && pendingAt(o.trigger) && Date.parse(o.trigger!.at!) <= now);
+      const due = followUpObligations(w).filter(o => o.enable_follow_up && !finishedTask(o) && pendingAt(o.trigger) && Date.parse(o.trigger!.at!) <= now);
       for (const o of due) await this.fire(w, o.id, o.trigger!.at!, now);
     }
   }

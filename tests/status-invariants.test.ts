@@ -1,3 +1,4 @@
+import { closedHistory } from "./support/big-history";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { INVARIANTS, violations } from "../shared/status-invariants";
@@ -249,4 +250,10 @@ test("fixture (2026-11-17, a lost answer): an answer Failed after checks that co
   const of = (reason: string) => violations(workspace({ questions: [answered(reason)] }), clock).filter(v => v.id === "a-queued-message-never-stops-short");
   assert.equal(of("Follow-up couldn't confirm the agent got it.").length, 1);
   assert.deepEqual(of(GONE_REASON), []);
+});
+
+
+test("fixture: finished closed questions never survive as live task context", () => {
+  const check = INVARIANTS.find(i => i.id === "finished-items-are-history")!;
+  assert.equal(check.check(closedHistory(), clock), null);
 });

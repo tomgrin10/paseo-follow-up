@@ -1,3 +1,4 @@
+import { finishedPr } from "../shared/finished";
 import { searchRows } from "../shared/search";
 import { sendingOf } from "../shared/sending";
 import { agentActor, type Actor } from "../shared/actor";
@@ -399,13 +400,12 @@ export class AgentActions {
     const exact = tracked.find(w => w.id === args.workspace);
     const workspaces = exact ? [exact] : searchRows(tracked, w => [{ field: "name", text: w.title }], args.workspace ?? "");
     if (args.workspace && !workspaces.length) throw new Error(`No tracked workspace matches ${args.workspace}.`);
-    const closed = (r: { state: string }) => ["MERGED", "CLOSED"].includes(r.state);
     const rows = workspaces.flatMap(w => w.prs.map(p => ({ p, r: prRow(w, p) })))
-      .filter(({ r }) => args.include_closed || !closed(r))
+      .filter(({ p }) => args.include_closed || !finishedPr(p))
       .filter(({ r }) => !args.needs_reviewers || r.needsReviewers)
       .filter(({ r }) => !args.ready_to_merge || r.mergeable);
     // Open PRs in full; merged and closed ones (include_closed) as the newest few and a count, paged by offset/limit.
-    const bounded = boundDone(rows, ({ r }) => closed(r), { newestFirst: newestFirst(rows, ({ p }) => Date.parse(p.snapshot?.mergedAt ?? p.snapshot?.observedAt ?? "") || 0), hint: "list_prs include_closed offset/limit pages these (newest first)", offset: args.offset, limit: args.limit });
+    const bounded = boundDone(rows, ({ p }) => finishedPr(p), { newestFirst: newestFirst(rows, ({ p }) => Date.parse(p.snapshot?.mergedAt ?? p.snapshot?.observedAt ?? "") || 0), hint: "list_prs include_closed offset/limit pages these (newest first)", offset: args.offset, limit: args.limit });
     return { prs: bounded.items.map(({ r }) => r), ...(args.include_closed ? { closed: bounded.done } : {}), workspaces: workspaces.map(w => ({ id: w.id, title: w.title, mainAgentId: w.mainAgentId, enable_auto_sends: w.enable_auto_sends, hold: w.hold, pendingBatches: w.batches.filter(b => b.state === "pending" && !recoveryBatch(b)).map(b => ({ id: b.id, tasks: b.tasks.length })), retryableBatches: w.batches.filter(b => ["blocked", "uncertain"].includes(b.state)).map(b => ({ id: b.id, state: b.state, result: b.result })) })) };
   }
 

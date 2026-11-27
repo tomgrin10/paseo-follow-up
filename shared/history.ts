@@ -1,13 +1,14 @@
-import { isOpen, answerStatus } from "./questions";
+import { isOpen, type Question } from "./questions";
 import { newestId } from "./sort";
 import { activity, activityQuestions, type Activity } from "./activity";
 import { activityFields, questionFields } from "./section-search";
 import { filterItems, type ItemHit } from "./search";
 import { PAGE, TOOL_BUDGET, boundDone, newestFirst, window, type DoneInfo, type HistoryKind } from "./paged";
 import { z } from "zod";
-import { batchSchema, deploymentSchema, prObjectSchema, settled, snapshotSchema, taskSchema } from "./model";
+import { batchSchema, deploymentSchema, prObjectSchema, snapshotSchema, taskSchema } from "./model";
 import { questionSchema } from "./questions";
-import type { ListWorkspace } from "./list";
+import { finishedPr, finishedTask, finishedQuestion, finishedBatch, finishedPrAction } from "./finished";
+import type { ListPr, ListWorkspace } from "./list";
 
 /**
  * A workspace's history is sent in pages, never whole (invariant pr-scale-lists-batch-not-throw, "every list pages").
@@ -18,34 +19,28 @@ import type { ListWorkspace } from "./list";
  */
 export const HISTORY_KEPT = 30;
 
-type Q = { id: string; askedAt: string; answer: { at: string; delivery: { state: string } } | null; closed: { at: string } | null };
+type Q = Pick<Question, "id" | "askedAt" | "answer" | "closed">;
 type B = { sentAt: string | null; settledAt: string | null; createdAt: string; state: string };
 type Hist = { questions: readonly Q[]; batches: readonly B[]; prActions: readonly { createdAt: string; state: string }[]; obligations: readonly { status: string; coveredBy?: string; id: string }[] };
 
 const at = (s: string | null | undefined) => { const t = Date.parse(s ?? ""); return Number.isFinite(t) ? t : 0; };
 const newest = <T>(items: readonly T[], when: (x: T) => number, keep: number) => new Set([...items].sort((a, b) => when(b) - when(a)).slice(0, keep));
 
-/** Whether a question still matters to a surface outside Activity: open, an answer not yet delivered, or a live task's cover. */
-function liveQuestion(q: Q, covers: ReadonlySet<string>): boolean {
-  return isOpen(q as never) || !answerStatus(q as never)?.delivered || covers.has(q.id);
-}
-const liveBatch = (b: B) => !b.settledAt || !["completed", "blocked", "cancelled"].includes(b.state);
-
 /** The workspace with its settled history cut to the newest `keep` of each kind, in its own order. Unchanged (same object) when nothing is cut. */
 export function boundHistory<W extends Hist>(w: W, keep = HISTORY_KEPT): W {
-  const covers = new Set(w.obligations.filter(o => o.status !== "done" && o.status !== "waived").flatMap(o => [o.coveredBy, ...w.questions.filter(q => (q as { taskId?: string | null }).taskId === o.id).map(q => q.id)]).filter((x): x is string => !!x));
-  const settledQ = w.questions.filter(q => !liveQuestion(q, covers));
-  const settledB = w.batches.filter(b => !liveBatch(b));
-  const settledA = w.prActions.filter(a => a.state !== "sending");
+  const covers = new Set(w.obligations.filter(o => !finishedTask(o)).flatMap(o => [o.coveredBy, ...w.questions.filter(q => (q as { taskId?: string | null }).taskId === o.id).map(q => q.id)]).filter((x): x is string => !!x));
+  const settledQ = w.questions.filter(q => finishedQuestion(q, covers));
+  const settledB = w.batches.filter(finishedBatch);
+  const settledA = w.prActions.filter(finishedPrAction);
   if (settledQ.length <= keep && settledB.length <= keep && settledA.length <= keep) return w;
   const keptQ = newest(settledQ, q => Math.max(at(q.askedAt), at(q.answer?.at), at(q.closed?.at)), keep);
   const keptB = newest(settledB, b => at(b.settledAt ?? b.sentAt ?? b.createdAt), keep);
   const keptA = newest(settledA, a => at(a.createdAt), keep);
   return {
     ...w,
-    questions: w.questions.filter(q => liveQuestion(q, covers) || keptQ.has(q)),
-    batches: w.batches.filter(b => liveBatch(b) || keptB.has(b)),
-    prActions: w.prActions.filter(a => a.state === "sending" || keptA.has(a)),
+    questions: w.questions.filter(q => !finishedQuestion(q, covers) || keptQ.has(q)),
+    batches: w.batches.filter(b => !finishedBatch(b) || keptB.has(b)),
+    prActions: w.prActions.filter(a => !finishedPrAction(a) || keptA.has(a)),
   };
 }
 
@@ -53,7 +48,7 @@ export type AgentHistory = Record<HistoryKind, DoneInfo>;
 /** One short line, in the tool's own words: how an agent gets what was left out. */
 export const HISTORY_HINT = (kind: HistoryKind) => `workspace_status history=${kind} offset/limit pages these (newest first)`;
 
-type AgentW = Hist & { prs: readonly Parameters<typeof settled>[0][]; obligations: readonly { status: string; id: string; coveredBy?: string; finishedAt?: string }[] };
+type AgentW = Hist & { prs: readonly ListPr[]; obligations: readonly { status: string; id: string; coveredBy?: string; finishedAt?: string }[] };
 
 /**
  * workspace_status for an agent (summary and full alike): every live item in full, each finished kind as its newest
@@ -74,12 +69,12 @@ export function agentView<W extends AgentW, X extends object = {}>(w: W, { kind,
 }
 
 function agentViewOf<W extends AgentW>(w: W, { kind, offset, limit, recent }: { kind?: HistoryKind; offset?: number; limit: number; recent: number }): W & { history: AgentHistory } {
-  const covers = new Set(w.obligations.filter(o => o.status !== "done" && o.status !== "waived").flatMap(o => [o.coveredBy, ...w.questions.filter(q => (q as { taskId?: string | null }).taskId === o.id).map(q => q.id)]).filter((x): x is string => !!x));
+  const covers = new Set(w.obligations.filter(o => !finishedTask(o)).flatMap(o => [o.coveredBy, ...w.questions.filter(q => (q as { taskId?: string | null }).taskId === o.id).map(q => q.id)]).filter((x): x is string => !!x));
   // A history page carries that kind's page; the other kinds' finished items are counts only on that call.
   const page = (k: HistoryKind) => k === kind ? { offset: offset ?? 0, limit } : kind ? { recent: 0 } : { recent };
   const done = {
-    prs: settled, tasks: (o: { status: string }) => o.status === "done" || o.status === "waived",
-    questions: (q: Q) => !liveQuestion(q, covers), batches: (b: B) => !liveBatch(b), prActions: (a: { state: string }) => a.state !== "sending",
+    prs: finishedPr, tasks: finishedTask,
+    questions: (q: Q) => finishedQuestion(q, covers), batches: finishedBatch, prActions: finishedPrAction,
   };
   const prs = boundDone(w.prs, done.prs, { newestFirst: newestFirst(w.prs, p => at(p.snapshot?.mergedAt ?? p.snapshot?.observedAt)), hint: HISTORY_HINT("prs"), ...page("prs") });
   const tasks = boundDone(w.obligations, done.tasks, { newestFirst: newestFirst(w.obligations, o => at(o.finishedAt)), hint: HISTORY_HINT("tasks"), ...page("tasks") });
@@ -93,7 +88,7 @@ function agentViewOf<W extends AgentW>(w: W, { kind, offset, limit, recent }: { 
     prs: glance("prs", prs.items, done.prs), obligations: glance("tasks", tasks.items, done.tasks), questions: glance("questions", questions.items, done.questions),
     batches: glance("batches", batches.items, done.batches), prActions: glance("prActions", prActions.items, done.prActions),
     // Every PR key the inventory ever considered grows with the workspace: the live PRs' keys, and how many there were.
-    ...(inventory?.candidates ? { inventory: { ...inventory, candidates: inventory.candidates.filter(k => w.prs.some(p => p.key === k && !settled(p))), candidatesTotal: inventory.candidates.length } } : {}),
+    ...(inventory?.candidates ? { inventory: { ...inventory, candidates: inventory.candidates.filter(k => w.prs.some(p => p.key === k && !finishedPr(p))), candidatesTotal: inventory.candidates.length } } : {}),
     history: { prs: prs.done, tasks: tasks.done, questions: questions.done, batches: batches.done, prActions: prActions.done } };
 }
 

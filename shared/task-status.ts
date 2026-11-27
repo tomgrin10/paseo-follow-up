@@ -1,3 +1,4 @@
+import { finishedTask } from "./finished";
 import { blockedOnDeveloper } from "./model";
 import type { ListObligation as Obligation, ListWorkspace as Workspace } from "./list";
 import { taskSchedule } from "./task-trigger";
@@ -34,7 +35,7 @@ export type TaskStatus = {
 export const IN_NEEDS_YOU = "In Needs you";
 export const ANSWERED_TASK = "Answered · waits on the agent";
 
-export const finishedTask = (o: Obligation) => o.status === "done" || o.status === "waived";
+export { finishedTask } from "./finished";
 
 /**
  * The question a blocked task waits on: the one that covers it (one-decision-one-card: asked once, with ask_question),

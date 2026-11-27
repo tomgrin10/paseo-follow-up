@@ -11,7 +11,7 @@ import { PAGE, boundDone, pageInfo, pageLabel, window } from "../shared/paged";
 import { HISTORY_KEPT, activityPage, boundHistory } from "../shared/history";
 import { listEntry } from "../shared/list";
 import { workspaceSchema } from "../shared/model";
-import { bigHistory } from "./support/big-history";
+import { bigHistory, closedHistory } from "./support/big-history";
 
 const createElement = (type: unknown, props: unknown, ...kids: unknown[]) => ce(type as never, props as never, ...(kids as never[]));
 const big = () => workspaceSchema.parse(bigHistory());
@@ -209,4 +209,16 @@ test("every Card marks its top for the pager, and its icon never shrinks to a sl
   assert.equal(root.length, 1, "the card carries data-paged-top");
   const iconBox = r!.root.findAll(n => n.type === "View" && (n.props.style as { flexShrink?: number } | undefined)?.flexShrink === 0);
   assert.ok(iconBox.length >= 1, "the header icon sits in a box that does not shrink");
+});
+
+
+test("closed unanswered questions are bounded on get and list, even with stale live-task references", () => {
+  const w = closedHistory();
+  assert.equal(boundHistory(w).questions.length, HISTORY_KEPT);
+  assert.equal(boundHistory(w).batches.length, HISTORY_KEPT, "unsent cancelled and superseded batches are history too");
+  const entry = listEntry(w);
+  assert.ok(!entry.archived);
+  assert.equal(entry.questions.length, HISTORY_KEPT);
+  assert.deepEqual(boundHistory(w).questions.map(q => q.id), w.questions.slice(-HISTORY_KEPT).map(q => q.id));
+  assert.equal(activityPage(w, { tab: "questions" }).total, 175, "all history remains pageable");
 });

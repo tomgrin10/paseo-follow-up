@@ -1,4 +1,4 @@
-import { workspace } from "../fixtures";
+import { workspace, pr, snapshot } from "../fixtures";
 import type { Workspace } from "../../shared/model";
 
 /**
@@ -23,4 +23,22 @@ export function bigHistory({ questions = 175, batches = 400, open = 3, needle = 
     result: "Fixed the flaky test and pushed a new head. ".repeat(3), recipientAgentId: "main-agent", contextPath: null, activityAt: null, acknowledgmentError: null, recoveryHandoffs: [],
   }));
   return workspace({ questions: qs as never, batches: bs as never, updatedAt: iso(questions * 10 + 10) });
+}
+
+/** Closed without answers, including stale task references; no private state is used. */
+export function closedHistory(): Workspace {
+  const w = bigHistory({ questions: 175, batches: 100, open: 0 });
+  return { ...w,
+    batches: w.batches.map((b, i) => i % 3 === 0 ? { ...b, state: "cancelled" as const, sentAt: null, settledAt: null }
+      : i % 3 === 1 ? { ...b, state: "blocked" as const, settledAt: null, movedOn: { at: w.updatedAt, why: "gone" as const, reason: "Conditions resolved" } } : b),
+    questions: w.questions.map((q, i) => ({ ...q, answer: null, taskId: i < 2 ? "live-task" : null,
+      closed: { at: q.askedAt, reason: i % 2 ? "No longer needed" : "Removed by the developer", by: null, dismissed: i % 2 === 0 } })),
+    obligations: [
+      { id: "live-task", title: "Finish the retry policy", status: "blocked", coveredBy: "Q1", afterPrs: [], evidence: "Checked retry behavior", enable_follow_up: true, revision: 0 },
+      ...Array.from({ length: 60 }, (_, i) => ({ id: `t${i}`, title: `Verify retry ${i}`, status: "done" as const, afterPrs: [], evidence: "Checked retry behavior", enable_follow_up: true, revision: 0 })),
+    ],
+    prs: Array.from({ length: 60 }, (_, i) => pr({ key: `example/app#${i + 1}`, number: i + 1,
+      snapshot: snapshot({ state: i % 2 ? "CLOSED" : "MERGED", mergedAt: i % 2 ? null : w.updatedAt }), disposition: null })),
+    prActions: Array.from({ length: 60 }, (_, i) => ({ id: `action-${i}`, kind: "request_reviewers" as const, prs: ["example/app#1"], reviewers: ["alice"], heads: {}, state: "submitted" as const, createdAt: w.updatedAt, result: "Requested reviewers" })),
+  };
 }

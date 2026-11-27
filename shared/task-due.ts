@@ -1,3 +1,4 @@
+import { finishedTask } from "./finished";
 import type { Obligation, Workspace } from "./model";
 import type { ListObligation, ListWorkspace } from "./list";
 import { deployState } from "./follow-up";
@@ -54,7 +55,7 @@ type Questions = Pick<ListWorkspace, "questions">["questions"];
  * (waitsOnDeveloper, one-decision-one-card), so it applies.
  */
 export function dueApplies(o: Pick<Obligation, "status" | "ask" | "coveredBy" | "enable_follow_up" | "trigger">, questions: Questions): boolean {
-  if (o.status === "done" || o.status === "waived") return false;
+  if (finishedTask(o)) return false;
   if (waitsOnDeveloper(o, questions)) return false;
   // An at trigger that went out (or couldn't) hands the task back to due by fact: the agent heard, and its re-check stands.
   return !(o.enable_follow_up && o.trigger) || o.trigger.event === "at" && !pendingAt(o.trigger);
@@ -185,13 +186,13 @@ export function maintainTasks(w: Workspace, now: number, receipt: NudgeReceipt |
   let changed = false;
   const stamp = new Date(now).toISOString();
   for (const o of w.obligations) {
-    const finished = o.status === "done" || o.status === "waived";
+    const finished = finishedTask(o);
     if (!finished && !o.afterPrs.length && !o.recheckAt && !blockedOnDeveloper(o)) { changed = true; if (apply) o.recheckAt = new Date(now + RECHECK_DAYS * DAY).toISOString(); }
     if (finished && !o.finishedAt) { changed = true; if (apply) o.finishedAt = stamp; }
     const r = receipt?.[o.id];
     if (r && (o.nudged?.key !== r.key || o.nudged.count !== r.count || o.nudged.at !== r.at || o.nudged.revision !== r.revision)) { changed = true; if (apply) o.nudged = { ...r }; }
   }
-  const prune = w.obligations.filter(o => (o.status === "done" || o.status === "waived") && o.finishedAt && now - Date.parse(o.finishedAt) > PRUNE_FINISHED_DAYS * DAY && !pruneBlocked(w, o.id));
+  const prune = w.obligations.filter(o => finishedTask(o) && o.finishedAt && now - Date.parse(o.finishedAt) > PRUNE_FINISHED_DAYS * DAY && !pruneBlocked(w, o.id));
   if (prune.length) { changed = true; if (apply) { const gone = new Set(prune.map(o => o.id)); w.obligations = w.obligations.filter(o => !gone.has(o.id)); } }
   return changed;
 }
@@ -205,7 +206,7 @@ export function maintainTasks(w: Workspace, now: number, receipt: NudgeReceipt |
  * Batches and Activity keep their own copy of a task's title, so history reads without it.
  */
 export function pruneBlocked(w: Workspace, id: string): boolean {
-  if (!w.completion && !w.declaration && w.obligations.every(o => o.status === "done" || o.status === "waived")) return true;
+  if (!w.completion && !w.declaration && w.obligations.every(o => finishedTask(o))) return true;
   if (w.batches.some(b => !b.settledAt && b.tasks.some(t => t.target === id))) return true;
   return (w.questions ?? []).some(q => q.taskId === id && !q.answer && !q.closed);
 }

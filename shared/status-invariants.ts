@@ -1,3 +1,5 @@
+import { boundHistory } from "./history";
+import { finishedBatch, finishedPrAction } from "./finished";
 import { recoveryBatch } from "./follow-up";
 import { oneReading } from "./status";
 import type { Actor } from "./actor";
@@ -40,6 +42,17 @@ const inFlight = (w: Workspace) => w.batches.some(b => ["sending", "sent"].inclu
 const lines = (w: Workspace, now: number) => [liveLine(w, now).text, agentCard(w, now)?.line ?? "", batchView(w, now)?.line ?? "", ...needsYou(w, now).flatMap(i => [i.title, "blocker" in i ? i.blocker ?? "" : ""])];
 
 export const INVARIANTS: Invariant[] = [
+  {
+    id: "finished-items-are-history",
+    why: "Closed unanswered questions were treated as undelivered answers, exhausting the live budget and hiding every recent-history glance. A terminal record stays in history even when a task still references it.",
+    check(w) {
+      const live = boundHistory(w, 0);
+      if (live.questions.some(q => q.closed)) return "a closed question is still live";
+      if (live.batches.some(finishedBatch)) return "a finished batch is still live";
+      if (live.prActions.some(finishedPrAction)) return "a finished PR action is still live";
+      return null;
+    },
+  },
   {
     id: "a-person-part-is-a-person-item",
     why: "2026-11-23 (batch-churn renders): the agent answered that one review thread needed the reviewer's call, then the review changed and the update asked the agent to fix every thread again, with nothing in Needs you about the person's part. A part the agent's latest answer says only a person can move (Batch.waitingOn) is a person item while its PR is open.",

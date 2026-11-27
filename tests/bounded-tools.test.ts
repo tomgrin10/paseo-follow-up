@@ -10,8 +10,10 @@ import { agentView } from "../shared/history";
 import { compact } from "../server/mcp.mjs";
 import { AgentActions } from "../server/agent-actions";
 import type { InboxRow } from "../shared/inbox";
-import type { Obligation, State, Workspace } from "../shared/model";
-import { bigHistory } from "./support/big-history";
+import { completionGate, settled, workspaceSchema, type Obligation, type State, type Workspace } from "../shared/model";
+import { agentStatusRpc } from "../shared/contracts";
+import { finishedPr, finishedTask, finishedQuestion, finishedBatch, finishedPrAction } from "../shared/finished";
+import { bigHistory, closedHistory } from "./support/big-history";
 import { clock, pr, snapshot } from "./fixtures";
 
 const iso = (m: number) => new Date(clock + m * 60_000).toISOString();
@@ -167,4 +169,58 @@ test("workspace_status at the scale seed's size fits the budget with what the ha
     }
     assert.ok(view.prs.some((p: any) => p.glance) && view.questions.some((q: any) => q.glance) && view.batches.some((b: any) => b.glance), "the summary's finished items are glances, marked");
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+
+test("closed unanswered questions and closed PRs cannot crowd out any kind of recent history", () => {
+  const w = workspaceSchema.parse(closedHistory());
+  const view = agentView(w);
+  assert.ok(agentStatusRpc.output.safeParse(view).success, "the closed glances satisfy the RPC schema");
+  for (const kind of ["prs", "tasks", "questions", "batches", "prActions"] as const) {
+    assert.equal(view.history[kind].shown, PAGE.recentDone, `${kind}: the recent glance survives`);
+    assert.equal(view.history[kind].total, kind === "questions" ? 175 : kind === "batches" ? 100 : 60);
+  }
+  assert.ok(size(view) <= TOOL_BUDGET, `${size(view)} characters`);
+  assert.equal(view.questions.length, PAGE.recentDone, "closed questions, even referenced ones, are never live");
+  const page = agentView(w, { kind: "tasks", limit: 5 });
+  assert.equal(page.history.tasks.shown, 5, "a task history page does not shrink because of closed questions");
+  assert.ok(size(page) <= TOOL_BUDGET);
+});
+
+
+test("finished lifecycle preserves every pending answer and live dependency, but closed always wins", () => {
+  const q = bigHistory({ questions: 1, open: 0 }).questions[0];
+  for (const state of ["copied", "in-chat", "queued", "sending", "retrying", "failed", "cancelled", "unconfirmed"] as const) {
+    assert.equal(finishedQuestion({ ...q, answer: { ...q.answer!, delivery: { ...q.answer!.delivery, state } } }), false, state);
+  }
+  assert.equal(finishedQuestion({ ...q, answer: null }), false, "open question");
+  assert.equal(finishedQuestion(q), true, "sent answer");
+  assert.equal(finishedQuestion(q, new Set([q.id])), false, "a live task still reads its delivered answer");
+  assert.equal(finishedQuestion({ ...q, answer: null, closed: { at: iso(1), reason: "No longer needed", by: null } }, new Set([q.id])), true);
+  assert.equal(finishedQuestion({ ...q, answer: { ...q.answer!, delivery: { ...q.answer!.delivery, state: "signed-off" } } }), true);
+  for (const state of ["completed", "cancelled"]) assert.equal(finishedBatch({ state, settledAt: null }), true, "terminal without a settlement timestamp");
+  for (const state of ["blocked", "uncertain", "sent"]) assert.equal(finishedBatch({ state, settledAt: null, movedOn: { why: "gone" } }), true, "superseded work is history");
+  for (const state of ["completed", "blocked", "cancelled"]) {
+    assert.equal(finishedBatch({ state, settledAt: iso(1) }), true);
+    if (state === "blocked") assert.equal(finishedBatch({ state, settledAt: null }), false, "a blocked batch without settlement still needs action");
+  }
+  for (const state of ["pending", "sending", "sent", "uncertain"]) assert.equal(finishedBatch({ state, settledAt: null }), false);
+  for (const state of ["submitted", "failed", "uncertain"]) assert.equal(finishedPrAction({ state }), true);
+  assert.equal(finishedPrAction({ state: "sending" }), false);
+  for (const status of ["done", "waived"]) assert.equal(finishedTask({ status }), true);
+  for (const status of ["pending", "waiting", "working", "blocked"]) assert.equal(finishedTask({ status }), false);
+});
+
+test("closed PR history agrees with list_prs while completion still requires its disposition", async () => {
+  const w = workspaceSchema.parse(closedHistory());
+  const p = w.prs.find(p => p.snapshot?.state === "CLOSED")!;
+  assert.equal(finishedPr(p), true);
+  assert.equal(settled(p), false, "closed without a disposition is not completed work");
+  assert.equal(finishedPr({ snapshot: null }), false, "an unknown PR is live");
+  assert.equal(finishedPr(pr()), false, "an open PR is live");
+  assert.ok(completionGate(w, clock).blockers.some(b => b.text === `Settle ${p.repo}#${p.number} with a disposition`));
+  const a = agent({ version: 1, workspaces: [w] } as State);
+  const out = await a.run("orchestrator", "list_prs", { include_closed: true }) as any;
+  assert.equal(out.closed.total, w.prs.length);
+  assert.equal(out.closed.shown, PAGE.recentDone);
 });

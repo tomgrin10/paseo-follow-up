@@ -1,3 +1,4 @@
+import { finishedTask } from "../shared/finished";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { PagedRows } from "./paged-list";
 import type { SettingsCategory } from "../shared/settings-nav";
@@ -332,7 +333,7 @@ function OtherRootAgent({ agentId, mainAgentId, workspace: w, theme, compact, op
 
 function historyLabel(w: Workspace): string {
   const stacks = new Set(w.prs.map(p => p.stack)).size;
-  const tasks = followUpObligations(w).filter(o => ["done", "waived"].includes(o.status)).length;
+  const tasks = followUpObligations(w).filter(o => finishedTask(o)).length;
   return [`${w.prs.length} PR${w.prs.length === 1 ? "" : "s"} in ${stacks} stack${stacks === 1 ? "" : "s"}`, tasks ? `${tasks} task${tasks === 1 ? "" : "s"} done` : null].filter(Boolean).join(" · ");
 }
 

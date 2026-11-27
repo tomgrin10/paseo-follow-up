@@ -1,3 +1,4 @@
+import { finishedTask } from "./finished";
 import type { ArchiveFacts } from "./row-menu";
 import { sendingOf, type Sending } from "./sending";
 import { liveLine, needsYou, prTone, stackOrder, workspaceSnoozed, type NeedItem, type PrTone } from "./attention";
@@ -383,7 +384,7 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
     const p = s.workspaceId && owner.get(s.workspaceId) === s.key ? fresh.byWorkspace.get(s.workspaceId) : undefined;
     const activityAt = [s.at, lastActivity.get(s.key) ?? null, s.workspaceId ? lastActivity.get(s.workspaceId) ?? null : null].filter((x): x is string => !!x).sort().at(-1) ?? null;
     const urgent = !!w?.questions.some(q => questionOpen(q) && !!q.big);
-    const due = w ? followUpObligations(w).filter(o => !["done", "waived"].includes(o.status)).map(o => taskSchedule(o, w, now).dueAt).filter((x): x is string => !!x).sort()[0] ?? null : null;
+    const due = w ? followUpObligations(w).filter(o => !finishedTask(o)).map(o => taskSchedule(o, w, now).dueAt).filter((x): x is string => !!x).sort()[0] ?? null : null;
     const priority = p ? { score: p.score, reason: p.reason, source: p.sources[0] ? { kind: p.sources[0].kind, label: p.sources[0].label } : null } : null;
     // Rule 5 of main-agent claims: a quiet badge for a day after an agent or Follow-up changed the main agent.
     // Last in line, so it never pushes out a badge that asks for something.

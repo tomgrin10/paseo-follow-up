@@ -1,3 +1,4 @@
+import { finishedTask } from "../shared/finished";
 import { BATCH_PREFIX, RECOVERY_TITLE } from "../shared/legacy";
 import { createHash } from "node:crypto";
 import type { Task, Workspace, Batch } from "../shared/model";
@@ -41,7 +42,7 @@ export function tasksFor(w: Workspace, now = Date.now(), wording: TaskWording = 
   if ((w.prs.length || followUpObligations(w).length || w.inventory && w.inventory.syncedRevision >= w.inventory.revision) && !w.completion && !w.declaration && !w.runtimeBusy &&
       // Merged is permanent and a deploy is latched, so a status or probe hiccup never flips this (no create/cancel churn).
       w.prs.every(pr => pr.snapshot?.complete && settled(pr) && deployState(pr, now) !== "not-deployed") &&
-      followUpObligations(w).every(o => ["done", "waived"].includes(o.status)))
+      followUpObligations(w).every(o => finishedTask(o)))
     add("completion", w.id, "Verify the workspace is finished and declare Done", [w.prs.map(pr => [pr.key, pr.snapshot?.head, pr.disposition]), w.obligations.map(o => [o.id, o.revision, o.status])]);
   return tasks;
 }

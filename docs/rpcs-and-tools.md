@@ -152,6 +152,13 @@ Exempt in `PARITY`, with the reason recorded there:
 
 ### Bounded answers
 
+History uses `shared/finished.ts` for each kind. A withdrawn or dismissed question is finished without needing an
+answer or delivery; a stale task reference cannot make it live again. A closed PR is finished history even without
+a disposition, consistently in `workspace_status` and `list_prs`. The workspace completion gate still asks for that
+disposition (`settled` in `shared/model.ts`), so paging a PR never declares its work complete. Completed, cancelled
+and superseded batches are finished even without settlement timestamps; a blocked batch without settlement or
+supersession remains live.
+
 Every list-returning agent tool answers within `TOOL_BUDGET` (`shared/paged.ts`), however big a workspace's history:
 what is live comes whole, what is finished comes as the newest `PAGE.recentDone` plus a count (`boundDone`), and
 `offset`/`limit` page the rest, newest first, `PAGE.toolPage` a page by default. 2026-11-26: `workspace_status`
