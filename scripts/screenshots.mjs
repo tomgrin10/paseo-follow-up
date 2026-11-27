@@ -6157,6 +6157,9 @@ async function menuBoundsShots({ shoot }) {
       await menu.waitFor(); // Escape backs out of confirmation, rather than dismissing the entire menu.
       await page.keyboard.press("Escape");
       await menu.waitFor({ state: "hidden" });
+      await page.clock.setFixedTime(BASE + VIEW + 1000);
+      await row.click({ button: "right", position: { x: 40, y: 12 } });
+      await bounded(page, menu, "resized menu capture");
     });
     await shoot("menus-sort-light", { width: 1280, height: 720 }, "light", async page => {
       await openHome(page);
@@ -6174,7 +6177,10 @@ async function menuBoundsShots({ shoot }) {
       await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
       await page.getByRole("button", { name: "More actions for this workspace" }).filter({ visible: true }).first().click();
       await bounded(page, page.getByRole("menu", { name: "Actions for Billing retries" }), "main tab More");
-
+      await page.keyboard.press("Escape");
+      await openHome(page);
+      await page.getByRole("button", { name: /^Sort:/ }).first().click();
+      await bounded(page, page.getByRole("menu", { name: "Sort workspaces" }), "Home sort capture");
     });
     await shoot("menus-catch-up-dark", DESKTOP, "dark", async page => {
       await openHome(page);
@@ -6191,6 +6197,9 @@ async function menuBoundsShots({ shoot }) {
       await page.keyboard.press("Escape");
       await page.getByRole("button", { name: "Show the keys (S)", exact: true }).click();
       await bounded(page, page.getByRole("dialog", { name: "Catch up keys", exact: true }), "Catch up keys");
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: "More context", exact: true }).filter({ visible: true }).first().click();
+      await bounded(page, page.getByRole("dialog", { name: "More context", exact: true }), "Catch up More context capture");
     });
     await shoot("menus-review-light", DESKTOP, "light", async page => {
       await openSettingsAt(page, "following", DESKTOP);
