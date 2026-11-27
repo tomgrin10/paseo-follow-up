@@ -66,16 +66,6 @@ export function chooseDetectedSpec(w: Workspace, now = Date.now()): boolean {
   return true;
 }
 
-/** set_spec from the main agent. A link the developer set or removed stays theirs. */
-export function agentSetSpec(w: Workspace, agentId: string, url: string, title: string | undefined, now: number): { applied: boolean; message: string } {
-  if (w.mainAgentId !== agentId) throw new Error("Only this workspace's main agent can set the spec link.");
-  const valid = validSpecUrl(url);
-  if (!valid) throw new Error("Use the spec's full https:// link, such as the Claude artifact URL from your publish result.");
-  if (w.spec?.source === "developer") return { applied: false, message: w.spec.url ? "The developer chose this workspace's spec link in Follow-up, so it stays. Nothing to do." : "The developer removed the spec link in Follow-up, so it stays off. Nothing to do." };
-  w.spec = { url: valid, title: title?.trim().slice(0, 120) || w.artifacts.find(a => a.url === valid)?.title || null, source: "agent", by: agentId, at: new Date(now).toISOString() };
-  return { applied: true, message: "Spec link saved. It shows in Follow-up's header. Keep republishing to the same URL; call set_spec again only if the link changes." };
-}
-
 /** The developer sets, removes, or hands the link back to agents and detection. */
 export function developerSetSpec(w: Workspace, input: { action: "set"; url: string; title?: string | null } | { action: "remove" } | { action: "reset" }, now: number, actor: Actor = DEVELOPER): void {
   // set_workspace_spec by another agent is that agent's choice, not "Set by you".

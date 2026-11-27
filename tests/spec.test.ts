@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { publishedArtifacts, mergeArtifacts, agentSetSpec, developerSetSpec } from "../server/spec";
+import { publishedArtifacts, mergeArtifacts, developerSetSpec } from "../server/spec";
 import { applyDiscovery } from "../server/discovery";
 import { stateSchema } from "../shared/model";
 import { specLabel } from "../shared/spec";
@@ -46,26 +46,21 @@ test("detection picks the main agent's most republished artifact and keeps the r
   assert.equal(mergeArtifacts(w, [{ url: SPEC, title: "Invoice retry spec", by: "main-agent", firstAt: "2026-11-04T08:00:00Z", lastAt: "2026-11-04T09:00:00Z", publishes: 3 }], clock), false, "a repeated scan changes nothing");
 });
 
-test("precedence: the developer's link beats the agent's, which beats detection; reset hands it back", () => {
+// set_spec retired in 2.6 (agents keep a spec as a show_card card, id "spec"); an agent link saved before stays until moved.
+test("precedence: the developer's link beats detection; reset hands it back", () => {
   const w = workspace({ contributorAgentIds: ["helper"] });
   mergeArtifacts(w, [{ url: PAGE, title: "Rollout deck", by: "main-agent", firstAt: null, lastAt: "2026-11-04T10:00:00Z", publishes: 1 }], clock);
   assert.equal(w.spec?.source, "detected");
-  assert.throws(() => agentSetSpec(w, "helper", SPEC, undefined, clock), /main agent/);
-  assert.throws(() => agentSetSpec(w, "main-agent", "http://claude.ai/artifact/x", undefined, clock), /https/);
-  assert.equal(agentSetSpec(w, "main-agent", SPEC, "Retry spec", clock).applied, true);
-  assert.deepEqual({ url: w.spec?.url, source: w.spec?.source, title: w.spec?.title }, { url: SPEC, source: "agent", title: "Retry spec" });
+  w.spec = { url: SPEC, title: "Retry spec", source: "agent", by: "main-agent", at: "2026-11-04T10:00:00Z" };
   mergeArtifacts(w, [{ url: PAGE, title: "Rollout deck", by: "main-agent", firstAt: null, lastAt: "2026-11-05T10:00:00Z", publishes: 5 }], clock);
   assert.equal(w.spec?.url, SPEC, "detection never replaces an explicit link");
   developerSetSpec(w, { action: "set", url: "https://www.notion.so/team/Retry-spec-1a2b", title: "" }, clock);
   assert.deepEqual({ url: w.spec?.url, source: w.spec?.source, title: w.spec?.title }, { url: "https://www.notion.so/team/Retry-spec-1a2b", source: "developer", title: null });
   assert.equal(specLabel(w.spec!), "notion.so");
-  const kept = agentSetSpec(w, "main-agent", SPEC, undefined, clock);
-  assert.equal(kept.applied, false); assert.match(kept.message, /developer chose/); assert.equal(w.spec?.source, "developer");
   developerSetSpec(w, { action: "remove" }, clock);
   assert.deepEqual({ url: w.spec?.url, source: w.spec?.source }, { url: null, source: "developer" });
   mergeArtifacts(w, [{ url: SPEC, title: null, by: "main-agent", firstAt: null, lastAt: "2026-11-06T10:00:00Z", publishes: 7 }], clock);
   assert.equal(w.spec?.url, null, "a removed link stays removed");
-  assert.match(agentSetSpec(w, "main-agent", SPEC, undefined, clock).message, /removed/);
   developerSetSpec(w, { action: "reset" }, clock);
   const reset = workspaceSpec(w);
   assert.deepEqual({ url: reset?.url, source: reset?.source }, { url: SPEC, source: "detected" });

@@ -10,7 +10,7 @@ const normalChoice = (choice: string) => [OTHER, OTHER_LABEL.toLowerCase()].incl
 
 export type AskInput = {
   title: string; question: string; options?: { letter: string; label: string; consequence?: string }[]; recommend?: string;
-  big?: string; background?: string; links?: { url?: string; path?: string; label?: string }[]; pr?: string; task?: string;
+  big?: string; background?: string; links?: { url?: string; path?: string; card?: string; label?: string }[]; pr?: string; task?: string;
 };
 
 function resolvePr(w: Workspace, ref: string): string {
@@ -50,7 +50,7 @@ export function askQuestion(w: Workspace, agentId: string, input: AskInput, mode
   if (options.length && !recommend) throw new Error("Recommend one option with recommend=<letter>.");
   if (options.length && recommend && !letters.includes(recommend)) throw new Error(`recommend must be one of ${letters.join(", ")}.`);
   if (input.task && !w.obligations.some(o => o.id === input.task)) throw new Error("No task with that id in this workspace. Read workspace_status for task ids.");
-  for (const link of input.links ?? []) if (!!link.url === !!link.path) throw new Error("Each link needs a url or a path, not both.");
+  for (const link of input.links ?? []) if ([link.url, link.path, link.card].filter(Boolean).length !== 1) throw new Error("Each link needs a url or a path or a card (a show_card id), just one.");
   const shape = { title: input.title.trim(), question: input.question.trim(), options };
   let replace: Question | null = null;
   if (opts.supersedes) {
