@@ -95,7 +95,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | PR workflow (Graphite or GitHub), PR actions, reviewers, deployments, Send to Paseo | `server/pr-workflow.ts`, `server/github.ts`, `server/github-api.ts`, `shared/poll.ts`, `server/graphite.ts`, `server/pr-actions.ts`, `server/browser-bridge.ts`, `server/reviewer-config.ts`, `server/deployments.ts`, `server/deployment-anchor.ts`, `shared/pr-workflow.ts`, `shared/pr-actions.ts`, `shared/reviewers.ts`, `shared/reviewers-click.ts`, `shared/keep-in-place.ts`, `client/reviewers-button.tsx`, `server/github-setup.ts`, `shared/github-setup.ts` | [prs](docs/prs.md) |
 | PR statistics (records, store, sync, the GitHub budget gate, metrics, settings, tools and the page) | `shared/pr-stats-records.ts`, `shared/pr-stats.ts`, `shared/pr-stats-settings.ts`, `shared/pr-stats-page.ts`, `shared/workweek.ts`, `server/pr-stats.ts`, `client/pr-stats-settings.tsx`, `client/pr-stats.tsx`, `server/pr-stats-gate.ts`, `server/pr-stats-store.ts`, `server/pr-stats-sync.ts` | [pr-stats](docs/pr-stats.md) |
 | Agent tools and agent parity | `server/mcp.mjs`, `server/native-tools.ts`, `server/session-mcp.ts`, `server/agent-mcp.ts`, `server/mcp-registrations.ts`, `server/scopes.ts`, `server/agent-actions.ts`, `server/agent-parity.ts`, `shared/actor.ts`, `shared/chat.ts` | [rpcs-and-tools](docs/rpcs-and-tools.md) |
-| Provider hooks, static text in the system prompt, what each provider gets, turn-end checks without a hook | `server/agent-hooks.ts`, `server/agent-hook.mjs`, `server/session-prompt.ts`, `shared/provider-support.ts`, `server/turn-end.ts` | [hooks](docs/hooks.md) |
+| Provider hooks, static text in the system prompt, what each provider gets, turn-end checks without a hook, another plugin's ask | `server/agent-hooks.ts`, `server/agent-hook.mjs`, `server/session-prompt.ts`, `shared/provider-support.ts`, `server/turn-end.ts`, `shared/ask-shape.ts` | [hooks](docs/hooks.md) |
 | Wait for checks (one message when a PR's checks finish; the polling nudge) | `shared/check-watch.ts`, `server/check-watches.ts`, `server/wait-for-checks.ts` | [wait-for-checks](docs/wait-for-checks.md) |
 | Wait for background jobs | `server/wait.ts`, `server/host-features.ts`, `server/wait-jobs.ts`, `server/wait-runner.sh`, `shared/wait.ts` | [wait](docs/wait.md) |
 | Onboarding, release notes and What's new, display settings, trust bypass | `server/onboarding.ts`, `server/release-notes.ts`, `server/trust-bypass.ts`, `shared/onboarding.ts`, `shared/setup-popup.ts`, `shared/changelog.ts`, `shared/version.ts`, `shared/display.ts`, `shared/settings-nav.ts` | [settings](docs/settings.md) |
@@ -1033,6 +1033,12 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    `task`, then `update_obligation` blocked with `question`. 2026-11-22, Tom: "a lot of the time, 2 questions are
    created for the same thing"; 33 of 96 task-made questions on the live host repeated an `ask_question` question.
    Guarded by `tests/one-decision-one-card.test.ts` and `INVARIANTS` ([docs/workspaces.md](docs/workspaces.md)).
+   **Another tool's ask counts as asked** (`other-ask-tool-counts-as-asked`): a turn whose ask already reached the
+   developer through another tool (another plugin's question tool, Claude Code's AskUserQuestion) gets no turn-end
+   `needs_you` nudge, from the Stop hook or the turn-end event, so the agent never restates it as a second card. An ask
+   is told by its input's shape (a question with choices, `isAskInput`, `shared/ask-shape.ts`), never by a list of tool
+   names; a bare `question` with no choices is a lookup. 2026-11-27, harness with a question-board plugin: 10 turn-end
+   checks over 26 prompts on turns whose only ask went through that plugin. Guarded by `tests/other-ask.test.ts`.
 74. **PR statistics measure from the ask** (`stats-measure-from-the-ask`). Every review clock (time to first review,
    waiting now, review turnaround, time to merge) starts at the PR's ask (`k`: its first review request, counted
    from ready when made on a draft, else ready itself), never at its creation, so drafts and "opened early, asked
