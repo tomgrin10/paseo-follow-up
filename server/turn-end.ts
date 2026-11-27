@@ -3,6 +3,7 @@ import { pickNudges, type DueEntry, type NudgeReceipt } from "../shared/task-due
 import { providerCaps } from "../shared/provider-support";
 import { messageSender } from "../shared/message-sender";
 import { startsTurn } from "./turn-timeline";
+import { askedElsewhere, FOLLOW_UP_TOOL } from "../shared/ask-shape";
 import { compactionOnly } from "./inbox-classifier";
 
 /**
@@ -60,7 +61,8 @@ function changedSomething(items: readonly unknown[] | null): boolean {
   return (items ?? []).some(i => {
     const item = i as { type?: string; name?: unknown };
     if (item?.type !== "tool_call" || typeof item.name !== "string") return false;
-    return !/(^|[._/])follow_[a-z_]+$|^wait_|^(?:mcp__)?follow-up(?:__|[.:/])/.test(item.name);
+    // An ask to the developer through another tool changes nothing in the work (other-ask-tool-counts-as-asked).
+    return !FOLLOW_UP_TOOL.test(item.name) && !askedElsewhere([i]);
   });
 }
 
@@ -82,7 +84,8 @@ export function turnEndCheck(i: TurnEndInput): { text: string | null; receipt: N
   if (prompt === "turn-end") return { text: null, receipt: null };
   const since = i.startedAt ?? i.now;
   const sync = changedSomething(i.items) && !(i.syncedAt !== null && i.syncedAt >= since);
-  const nudge = i.entry.role === "main" && i.nudge && prompt === "developer" && !(i.needsYouAt !== null && i.needsYouAt >= since);
+  // One decision, one card: a turn that already asked the developer through another tool gets no needs_you nudge.
+  const nudge = i.entry.role === "main" && i.nudge && prompt === "developer" && !(i.needsYouAt !== null && i.needsYouAt >= since) && !askedElsewhere(i.items);
   const picked = i.entry.due?.length ? pickNudges(i.entry.due, i.receipt, i.now) : { lines: [], receipt: i.receipt };
   if (!sync && !nudge && !picked.lines.length) return { text: null, receipt: null };
   const parts = [

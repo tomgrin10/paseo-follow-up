@@ -75,6 +75,10 @@ the card says Sending until it has the answer, and offers Send again if it could
 
 <img alt="A question card: three lettered options, A recommended, with a note for the agent" src="screenshots/follow-up-questions.png">
 
+Using another plugin that also asks you questions? Both work side by side. When an agent asks you through the other
+plugin's tool, Follow-up doesn't nudge it to ask again at the end of that turn, so one decision makes one card. Still,
+pick one place for questions so you answer in one place.
+
 ### Catch up
 
 **Catch up** on Home goes through everything that needs you one card at a time: answer, merge or sign off, and the

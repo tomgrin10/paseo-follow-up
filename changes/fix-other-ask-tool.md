@@ -1,0 +1,1 @@
+- With another plugin that asks you questions, an agent no longer asks the same decision again as a Follow-up card at the end of its turn.

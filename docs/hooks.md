@@ -33,7 +33,7 @@ agents and anything without `PASEO_AGENT_ID`.
 | SessionStart | Adds Follow-up's instructions for tracked agents (worded for the agent's PR workflow, contributor or main; in a workspace whose repositories are all No review, `workflow.noReview` in `scopes.json`, the agent merges its own PR once CI is green, see `mergeLine`; one team repository keeps the team wording), the native tools' guidance (`nativeExtras`, since native tools carry no MCP instructions), and Wait's guidance (`waitExtras`: `waitInstruction` when `FOLLOW_UP_WAIT=1`, or on Paseo 0.16 `backgroundWorkInstruction` when `FOLLOW_UP_BACKGROUND_WORK=1`). Root agents, tracked or not, also get one line on waiting for CI without polling (`checksLine`). Untracked Claude sessions with Wait get only Wait's guidance. On Paseo 0.17 the static parts go in the system prompt instead and the hook leaves them out (see [Static text in the system prompt](#static-text-in-the-system-prompt-paseo-017)). |
 | UserPromptSubmit | Starts a turn marker. Repeats the context when it changed (Codex always repeats). Tells a demoted agent once that it lost the main role. For the Overseer, injects the digest. |
 | PostToolUse | Marks the turn dirty after shell or edit tools. Says once per session that native tools are detached after a reload. When a shell command polls GitHub for CI (`pollsGithub`), adds once per turn, never blocking, that the agent should call `wait_for_checks` and end its turn ([wait-for-checks.md](wait-for-checks.md)); tracked and untracked root agents. |
-| Stop | Blocks the stop once if a dirty turn didn't `sync_workspace` (read from `hook-state/sync-<agent>.json`, written by the RPC handler, so any tool spelling counts), or if a root Claude session didn't call `needs_you` (`shouldNudge`). Also blocks to name the agent's due tasks (`pickNudges` over `scopes.json`'s `due`: at most 3, each at most twice and once a day; nothing when none is due; [due by fact](workspaces.md)). Never blocks twice in one turn, or while background tasks run. |
+| Stop | Blocks the stop once if a dirty turn didn't `sync_workspace` (read from `hook-state/sync-<agent>.json`, written by the RPC handler, so any tool spelling counts), or if a root Claude session didn't call `needs_you` (`shouldNudge`), unless the turn already asked the developer through another tool (PostToolUse records `askedAt` when a call's input is an ask, `isAskInput`; [one decision, one card](#another-plugins-ask)). Also blocks to name the agent's due tasks (`pickNudges` over `scopes.json`'s `due`: at most 3, each at most twice and once a day; nothing when none is due; [due by fact](workspaces.md)). Never blocks twice in one turn, or while background tasks run. |
 
 ## Static text in the system prompt (Paseo 0.17)
 
@@ -80,7 +80,8 @@ provider id of its own.
   whose turn just ended (it is loaded). The `needs_you` nudge, free in-turn on a hook but a whole turn here, follows
   only a turn the developer started (their message or a card answer), never a repair, a recovery or another agent's
   message. Due tasks share the hook's receipt. A turn that only compacted is never checked (`compactionOnly`,
-  invariant 130).
+  invariant 130). A turn that asked the developer through another tool gets no `needs_you` nudge, and that call
+  counts as no change for the sync check (`askedElsewhere`).
 - **Wait** (`wait`): every provider with a shell tool. Outside Claude Code the prepared command detaches itself
   (`nohup … &`, its output in the job's `output.log`), so any shell tool can start it; see [wait.md](wait.md).
 - **Not there**: the per-turn context (the Overseer's digest, the demoted and detached notices, which the Overseer and
@@ -107,3 +108,14 @@ The worker sets these at `agent.session_open`:
 
 Tests: `tests/agent-hooks.test.ts` and `tests/hook-native.test.ts` (the hook is imported with
 `FOLLOW_UP_HOOK_IMPORT=1`, so `main()` doesn't run), plus `tests/session-mcp.test.ts`.
+
+## Another plugin's ask
+
+Another plugin can have its own ask-the-developer tool (a question board's `*_question_ask`, Claude Code's
+AskUserQuestion). A turn whose ask went through one already put its decision in front of the developer, so neither
+the Stop hook nor the turn-end event nudges `needs_you` for it: the agent would restate it as a second card
+(`one-decision-one-card`, invariant 73). An ask is told by its input's shape, never by tool name: a question with
+choices, `{question, options[]}` or `{questions: [{question, options[]}, …]}`, from a tool that isn't Follow-up's, that
+finished without an error. A bare `question` with no choices is a lookup (a docs or code search), not an ask.
+`shared/ask-shape.ts` (`isAskInput`, `askedElsewhere`) is the rule; the hook keeps a copy (it imports nothing), and
+`tests/other-ask.test.ts` checks both agree. The sync check and due tasks are unchanged.
