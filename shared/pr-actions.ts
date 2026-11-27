@@ -1,3 +1,4 @@
+import { checksState } from "./pr-status";
 import { z } from "zod";
 import { idSchema, textSchema } from "./model";
 import type { ListPr as Pr, ListSnapshot as Snapshot, ListWorkspace as Workspace } from "./list";
@@ -134,7 +135,7 @@ export function mergeBlockers(pr: Pr): string[] {
   if (github ? !githubApproved(s) : s.reviewDecision !== "APPROVED") blockers.push(github && s.reviewDecision === "CHANGES_REQUESTED" ? "Changes requested" : "Awaiting approval");
   if (s.conflict) blockers.push("Merge conflicts");
   if (s.failedChecks?.length) blockers.push("Required checks failed");
-  if (s.checksPending) blockers.push("Required checks pending");
+  if (s.checksPending) blockers.push(checksState(s) === "not-started" ? "Required checks not started" : "Required checks pending");
   if (github) { if (s.inMergeQueue) blockers.push("Already in the merge queue"); const g = githubBlocker(s); if (g) blockers.push(g); }
   else if (!graphiteReady(s.graphiteMergeStatus)) blockers.push(graphiteBlocker(s.graphiteMergeStatus));
   return blockers;

@@ -324,3 +324,9 @@ in review and checks running, desktop and phone, light and dark. Its git project
 
 Add `--pr-now-revision` to capture the checks-running panels for both repositories and themes, Home desktop
 in both themes, and Home phone dark (the gallery pair). The capture also checks the actual PR row agrees with the agent line.
+
+`node scripts/screenshots.mjs --only question-links` renders the chat's card for a needs_you that points at three
+questions with their notes and links, a card a newer one replaced opened with Show original
+(`one-answer-flow-for-every-question`), and the panel for a fork PR whose required checks never ran
+(`checks-say-what-they-are-doing`), desktop light and dark and phone dark. It fails when the card drops a link or the
+panel calls the checks running.

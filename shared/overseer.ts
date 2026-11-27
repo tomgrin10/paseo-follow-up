@@ -1,3 +1,4 @@
+import { checksState } from "./pr-status";
 import { searchRows } from "./search";
 import { sendingOf, type Sending } from "./sending";
 import { ANSWER_PREFIX, OTHER_LABEL, parseAnswerMessage, parseAnswersMessage } from "./questions";
@@ -48,7 +49,7 @@ export const isOverseerAgent = (labels: Readonly<Record<string, string>> | null 
 
 // ---------- workstreams: what the Overseer knows about every workspace ----------
 
-export type WorkstreamPr = { key: string; number: number; state: string; checks: "passed" | "failed" | "pending" | "unknown"; threads: number; url: string | null };
+export type WorkstreamPr = { key: string; number: number; state: string; checks: "passed" | "failed" | "pending" | "not_started" | "unknown"; threads: number; url: string | null };
 export type WorkstreamRow = {
   workspaceId: string;
   /** The Home row this is (`agent:<id>` or `ws:<id>`): a ranked reason is shown on this row only. */
@@ -86,7 +87,7 @@ export const linearKeys = (...texts: (string | null | undefined)[]): string[] =>
 const prChecks = (p: Workspace["prs"][number]): WorkstreamPr["checks"] => {
   const s = p.snapshot;
   if (!s?.complete) return "unknown";
-  return s.failedChecks?.length ? "failed" : s.checksPending ? "pending" : "passed";
+  return ({ failed: "failed", running: "pending", "not-started": "not_started", passed: "passed" } as const)[checksState(s)];
 };
 
 /**
@@ -145,7 +146,7 @@ function rowOf(s: Workstream, w: Workspace | undefined, p: PaseoWorkspaceLite | 
 }
 
 const clip = (text: string, max: number) => { const one = text.replace(/\s+/g, " ").trim(); return one.length > max ? `${one.slice(0, max - 1)}…` : one; };
-const CHECK: Record<WorkstreamPr["checks"], string> = { passed: "✓", failed: "✗", pending: "…", unknown: "?" };
+const CHECK: Record<WorkstreamPr["checks"], string> = { passed: "✓", failed: "✗", pending: "…", not_started: "○", unknown: "?" };
 
 /** One compact digest line for a workstream (≈ 25–40 tokens). */
 export function digestLine(r: WorkstreamRow): string {

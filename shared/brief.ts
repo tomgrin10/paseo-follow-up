@@ -1,3 +1,4 @@
+import { CHECKS_NOT_STARTED, checksState } from "./pr-status";
 import { prLink } from "./presentation";
 import { z } from "zod";
 import type { ListPr as Pr, ListWorkspace as Workspace } from "./list";
@@ -358,7 +359,8 @@ function prFactsOf(pr: Pr, event: string | null): PrState {
   const s = pr.snapshot!;
   const facts: BriefFact[] = [];
   if (s.failedChecks?.length) facts.push({ icon: "CircleX", label: `Checks failed · ${s.failedChecks.slice(0, 2).join(", ")}`, tone: "bad" });
-  else if (s.checksPending) facts.push({ icon: "Clock", label: "Checks running", tone: "muted" });
+  else if (checksState(s) === "running") facts.push({ icon: "Clock", label: "Checks running", tone: "muted" });
+  else if (s.checksPending) facts.push({ icon: "Clock", label: CHECKS_NOT_STARTED, tone: "muted" });
   else facts.push({ icon: "CircleCheck", label: "Required checks pass", tone: "ok" });
   const approved = s.reviewDecision === "APPROVED";
   facts.push(s.conflict ? { icon: "TriangleAlert", label: "Conflicts with its base", tone: "warn" }
@@ -704,4 +706,14 @@ export const reviewersBriefWithdrawn = (b: { kind: string; state: string; moves?
  */
 export function liveBrief<B extends { kind: string; state: string }>(brief: B | null | undefined): B | null {
   return brief?.state === "open" && !reviewersBriefWithdrawn(brief as Parameters<typeof reviewersBriefWithdrawn>[0]) ? brief : null;
+}
+
+/**
+ * The tracked question a brief's decision is (one-answer-flow-for-every-question): a decision whose id the brief points
+ * at and the workspace holds. The card draws that question's own context (its note, links, PR, task, More context)
+ * under the decision, as QuestionBody does, so a question reads the same in the chat as on the panel.
+ */
+export function decisionQuestion<Q extends { id: string }>(b: Pick<Brief, "questionIds">, decisionId: string, questions: readonly Q[] | undefined): Q | null {
+  if (!questions || !b.questionIds.includes(decisionId)) return null;
+  return questions.find(q => q.id === decisionId) ?? null;
 }

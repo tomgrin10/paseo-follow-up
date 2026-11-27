@@ -1,3 +1,4 @@
+import { checksState } from "../shared/pr-status";
 import { View } from "react-native";
 import { Text } from "./text";
 import { openExternalUrl } from "@getpaseo/plugin/client";
@@ -45,7 +46,8 @@ export function PrSheet({ workspace: w, prKey, intent, theme, compact, browserRe
           {s?.conflict && <Fact theme={theme} icon="TriangleAlert" color={c.statusDanger}>Conflicts with its base branch</Fact>}
           {!!s?.failedChecks.length && <Fact theme={theme} icon="CircleX" color={c.statusDanger}>Required checks failed: {s.failedChecks.join(", ")}</Fact>}
           {!!s?.otherFailedChecks?.length && <Fact theme={theme} icon="CircleX" color={c.statusWarning}>Optional checks failed (not required to merge): {s.otherFailedChecks.join(", ")}</Fact>}
-          {s?.state === "OPEN" && s.checksPending && <Fact theme={theme} icon="LoaderCircle">Required checks are still running</Fact>}
+          {s?.state === "OPEN" && checksState(s) === "running" && <Fact theme={theme} icon="LoaderCircle">Required checks are still running</Fact>}
+          {s?.state === "OPEN" && checksState(s) === "not-started" && <Fact theme={theme} icon="CircleDashed">Required checks haven't started on this PR</Fact>}
           {!!s?.threads.length && <Fact theme={theme} icon="MessageSquare" color={c.statusWarning}>{s.threads.length} unresolved review thread{s.threads.length === 1 ? "" : "s"}</Fact>}
           {s?.reviewDecision === "CHANGES_REQUESTED" && <Fact theme={theme} icon="MessageSquareWarning" color={c.statusWarning}>Changes requested</Fact>}
           {reviewers.length > 0 && <Fact theme={theme} icon="Users">Reviewers: {reviewers.join(", ")}</Fact>}

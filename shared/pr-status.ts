@@ -2,6 +2,22 @@ import type { ListPr as Pr } from "./list";
 import { deployed } from "./follow-up";
 
 /**
+ * What a PR's checks are doing, the one reading every surface uses (checks-say-what-they-are-doing): failed (a required
+ * check failed), running (a check is in progress), not-started (a required check hasn't reported and nothing runs:
+ * an upstream fork PR whose required checks never start), passed. `checksPending` stays the merge gate (a missing
+ * required check still blocks a merge), but it is never read as "running": only `checksRunning` says that. A snapshot
+ * from before `checksRunning` was stored reads `checksPending` as running until its next read.
+ */
+export type ChecksState = "failed" | "running" | "not-started" | "passed";
+export function checksState(s: { failedChecks?: readonly string[]; checksPending?: boolean; checksRunning?: boolean }): ChecksState {
+  if (s.failedChecks?.length) return "failed";
+  if (s.checksRunning ?? s.checksPending) return "running";
+  return s.checksPending ? "not-started" : "passed";
+}
+/** The not-started case in plain words, on the PR row, the chip and the PR sheet. */
+export const CHECKS_NOT_STARTED = "Checks not started";
+
+/**
  * A complete snapshot always shows its own status; a failed read after it (`pr.error`) adds at most a quiet "last
  * checked" hint (staleHint). "Status unavailable" means no complete read ever (a-github-limit-never-blanks-a-known-pr).
  */
@@ -16,7 +32,9 @@ export function prPresentation(pr: Pr): { label: string; tone: "merged" | "appro
   if (s.otherFailedChecks?.length) return { label: s.otherFailedChecks.length === 1 ? "Optional check failed" : "Optional checks failed", tone: "warning" };
   if (s.draft) return { label: "Draft", tone: "neutral" };
   if (s.reviewDecision === "CHANGES_REQUESTED") return { label: "Changes requested", tone: "warning" };
-  if (s.checksPending) return { label: "Checks running", tone: "neutral" };
+  const checks = checksState(s);
+  if (checks === "running") return { label: "Checks running", tone: "neutral" };
+  if (checks === "not-started") return { label: CHECKS_NOT_STARTED, tone: "neutral" };
   return s.reviewDecision === "APPROVED" ? { label: "Approved", tone: "approved" } : { label: "In review", tone: "neutral" };
 }
 

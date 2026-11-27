@@ -1,3 +1,4 @@
+import { checksState } from "../shared/pr-status";
 import { finishedPr } from "../shared/finished";
 import { searchRows } from "../shared/search";
 import { sendingOf } from "../shared/sending";
@@ -213,7 +214,7 @@ export function prRow(w: Workspace, p: Pr) {
   return {
     key: p.key, workspaceId: w.id, workspace: w.title, stack: p.stack, parent: p.parent, title: s?.title ?? null, url: s?.url ?? null,
     state: p.error ? "unknown" : s?.state ?? "unknown", draft: !!s?.draft, error: p.error,
-    checks: !s ? "unknown" : s.failedChecks.length ? "failed" : s.checksPending ? "pending" : "passed", failedChecks: s?.failedChecks ?? [],
+    checks: !s ? "unknown" : ({ failed: "failed", running: "pending", "not-started": "not_started", passed: "passed" } as const)[checksState(s)], failedChecks: s?.failedChecks ?? [],
     openThreads: s?.threads.length ?? 0, reviewDecision: s?.reviewDecision ?? null,
     reviewers: s?.reviewers ? { requested: s.reviewers.requested, teams: s.reviewers.teams, reviewed: s.reviewers.reviewed } : null,
     // Read-only: who Add reviewers would ask here and where that list comes from (Settings → Reviewers).

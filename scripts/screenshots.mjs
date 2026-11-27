@@ -47,7 +47,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as the CHANGELOG's newest stable, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["menu-bounds", "tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "pr-now", "panel-folds", "gallery", "frames", "onboarding", "setup-popup", "advanced"];
+const REVIEW_SHOTS = ["menu-bounds", "tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "pr-now", "panel-folds", "question-links", "gallery", "frames", "onboarding", "setup-popup", "advanced"];
 /** Pasted images and their Add image button share one harness setup (an Overseer and the fixture provider taking images). */
 const PASTE_LIKE = only => only.includes("paste-images") || only.includes("attach-images");
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
@@ -176,6 +176,8 @@ function pulls() {
     // gets a conflict (#271). `replies`: a thread's last comment time, by index (default 08:30).
     270: { title: "Sign outgoing webhook payloads", state: "OPEN", author: "dana", changes: ["sam"], threads: 2, checks: [ok("test"), ok("lint")] },
     271: { title: "Document webhook signature checks", state: "OPEN", author: "dana", reviewers: ["sam"], checks: [ok("test"), ok("lint")] },
+    // question-links only (checks-say-what-they-are-doing): an upstream fork PR whose required checks never start.
+    ...(only.includes("question-links") ? { 8811: { title: "Cap retries for forked builds", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [] } } : {}),
     ...(only.includes("pr-now") ? Object.fromEntries([8801, 8802, 8803, 8804].map(number => [number, { repo: number > 8802 ? "acme/widgets" : "example/app", title: number % 2 ? "Review the retry cap" : "Check the retry cap", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [number % 2 ? ok("test") : running("test"), ok("lint")] }])) : {}),
   };
 }
@@ -644,6 +646,32 @@ const PR_NOW_STATES = [8801, 8802, 8803, 8804].map((number, i) => ({
     rpc("follow.register-pr", { repo: number > 8802 ? "acme/widgets" : "example/app", number, stack: "Retry cap" }), think("Following the open PR while its checks and review proceed."), bash("git status --short", "clean"), { hold: true }],
 }));
 
+/**
+ * question-links only (one-answer-flow-for-every-question, checks-say-what-they-are-doing): a needs_you that points at
+ * three questions with the agent's note and links (the timeline card shows them as the panel does), one whose card a
+ * newer card replaced ("Show original"), and an upstream fork PR whose required checks never started.
+ */
+const QL_PAGE = { label: "Sidebar design page", url: "https://claude.ai/artifact/acme-sidebar-design" };
+const qlAsk = (title, question, background, links, options) => rpc("follow.ask-question", { title, question, background, links, options: options.map((label, i) => ({ letter: "ABC"[i], label })), recommend: "A" });
+const QL_STATES = [
+  { key: "ql-sidebar", title: "Sidebar redesign", minute: 190, prompt: "WEB-61: redesign the workspace sidebar.",
+    steps: [rpc("follow.enroll", { goal: "WEB-61 Sidebar redesign" }),
+      qlAsk("Sidebar density", "Which density should the sidebar ship with? Both are on the design page (page below).", "My review adds: the compact rows fit 14 workspaces on a laptop; the roomy ones fit 9.", [QL_PAGE], ["Compact", "Roomy"]),
+      qlAsk("Badge placement", "Where should the Needs you badge sit on a row?", "My review adds: the right edge lines up with the time column.", [QL_PAGE, { label: "Badge spec", url: "https://example.com/acme/badge-spec" }], ["Right edge", "Before the title"]),
+      qlAsk("Archived rows", "Should archived workspaces stay in the sidebar, folded at the bottom?", "My review adds: folding keeps search working on them.", [QL_PAGE], ["Fold them", "Hide them"]),
+      msg("The sidebar redesign is drafted. Three calls decide how it ships."),
+      rpc("follow.needs-you", { kind: "decision", ask: "Three calls on the sidebar redesign", questions: ["Q1", "Q2", "Q3"] })] },
+  { key: "ql-replaced", title: "Sidebar copy", minute: 192, prompt: "WEB-62: rewrite the sidebar's empty states.",
+    steps: [rpc("follow.enroll", { goal: "WEB-62 Sidebar copy" }),
+      qlAsk("Empty state tone", "Which tone should the empty sidebar use? The drafts are on the design page (page below).", "My review adds: the plain draft tested better with new users.", [QL_PAGE], ["Plain", "Playful"]),
+      msg("Two drafts of the empty state are up."),
+      rpc("follow.needs-you", { kind: "decision", ask: "Pick the empty state's tone", questions: ["Q1"] })] },
+  { key: "ql-fork", title: "Forked build retries", minute: 194, flag: false, prompt: "Upstream the retry cap for forked builds.",
+    steps: [rpc("follow.enroll", { goal: "Upstream the retry cap" }),
+      rpc("follow.register-pr", { repo: "example/app", number: 8811, stack: "Retry cap" }),
+      msg("Opened #8811 upstream from the fork.")] },
+];
+
 /** pick-notes only (task 32deeb27): decision cards with no tracked question, one decision and two. */
 const PICK_NOTES = [
   { key: "pn-one", title: "Export encoding", minute: 176, prompt: "APP-190: export invoices as a spreadsheet finance can open.",
@@ -748,7 +776,7 @@ async function seed({ call, home }) {
   if (only.includes("review-mode") || only.includes("pr-link")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }] });
   // reviewers-click: Ravi and Mina review example/app, so each PR's row reads "Add reviewers to #N: Ravi and Mina".
   if (only.includes("reviewers-click")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }, { login: "mina", name: "Mina" }] });
-  const specs = [...WORKSPACES.filter(w => !only.includes("pr-now") || ["audit", "billing"].includes(w.key)).filter(w => !(argv.includes("--rename-fixup-review") || only.includes("local-titles")) || ["audit", "billing"].includes(w.key)), ...(only.includes("needs-you-states") || only.includes("panel-folds") || only.includes("tasks-view") || only.includes("own-answer") || only.includes("more-context") || only.includes("dismiss") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") || PASTE_LIKE(only) ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") || only.includes("dismiss") ? MERGE_CLICK_STATES : []), ...(only.includes("reviewers-click") ? REVIEWERS_CLICK_STATES : []), ...(only.includes("pr-scale") ? PR_SCALE_STATES : []), ...(only.includes("batch-churn") ? BATCH_CHURN_STATES : []), ...(only.includes("scheduled-tasks") ? SCHEDULED_STATES : []), ...(only.includes("paged-lists") ? PAGED_STATES : []), ...(only.includes("now-line") ? NOW_LINE_STATES : []), ...(only.includes("pr-now") ? PR_NOW_STATES : [])];
+  const specs = [...WORKSPACES.filter(w => !only.includes("pr-now") || ["audit", "billing"].includes(w.key)).filter(w => !(argv.includes("--rename-fixup-review") || only.includes("local-titles")) || ["audit", "billing"].includes(w.key)), ...(only.includes("needs-you-states") || only.includes("panel-folds") || only.includes("tasks-view") || only.includes("own-answer") || only.includes("more-context") || only.includes("dismiss") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") || PASTE_LIKE(only) ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") || only.includes("dismiss") ? MERGE_CLICK_STATES : []), ...(only.includes("reviewers-click") ? REVIEWERS_CLICK_STATES : []), ...(only.includes("pr-scale") ? PR_SCALE_STATES : []), ...(only.includes("batch-churn") ? BATCH_CHURN_STATES : []), ...(only.includes("scheduled-tasks") ? SCHEDULED_STATES : []), ...(only.includes("paged-lists") ? PAGED_STATES : []), ...(only.includes("now-line") ? NOW_LINE_STATES : []), ...(only.includes("pr-now") ? PR_NOW_STATES : []), ...(only.includes("question-links") ? QL_STATES : [])];
   // Geometry checks need one question, one repair and one permission row, not the full README inventory.
   if (only.includes("menu-bounds")) specs.splice(0, specs.length, ...specs.filter(w => ["billing", "email", "search"].includes(w.key)));
   if (only.includes("layout-search")) {
@@ -2285,6 +2313,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   if (only.includes("now-line")) await nowLineShots({ shoot });
   if (only.includes("pr-now")) await prNowShots({ shoot, call, seeded });
   if (only.includes("panel-folds")) await panelFoldShots({ shoot });
+  if (only.includes("question-links")) await questionLinksShots({ shoot, call, seeded, home });
   if (only.includes("own-answer")) await ownAnswerShots({ shoot });
   if (only.includes("more-context")) await moreContextShots({ shoot, call });
   if (only.includes("your-questions")) await yourQuestionsShots({ shoot, call, seeded, home, cli });
@@ -4472,6 +4501,86 @@ async function prNowShots({ shoot, call, seeded }) {
         if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error("Home overflows");
       });
     }
+  }
+}
+
+/**
+ * question-links (one-answer-flow-for-every-question, checks-say-what-they-are-doing): the chat's card for a needs_you
+ * that points at three questions, with each question's note and links; a card a newer one replaced, opened with Show
+ * original; and the panel's agent line and PR row for a fork PR whose required checks never ran. Desktop light and
+ * dark, phone dark. Fails when the card drops a link or the line says the checks are running.
+ */
+async function questionLinksShots({ shoot, call, seeded, home }) {
+  const ws = key => seeded.workspaces.find(w => w.key === key);
+  const spec = key => QL_STATES.find(s => s.key === key);
+  // A newer card for Sidebar copy: its next turn asks again, so the first card reads "Replaced by a newer card".
+  const scripts = JSON.parse(await fs.readFile(join(home, "fixture-scripts.json"), "utf8"));
+  scripts[`agent:${ws("ql-replaced").agentId}`] = [msg("Both drafts are merged into one."), rpc("follow.needs-you", { kind: "action", ask: "Approve the merged empty-state copy on the design page" })];
+  await fs.writeFile(join(home, "fixture-scripts.json"), JSON.stringify(scripts));
+  await client.sendMessage(ws("ql-replaced").agentId, "Merge the two drafts into one.", { messageId: `shots-ql-replaced-2` });
+  await until("ql-replaced second card", async () => (await call("follow.inbox-list", {})).rows.some(r => r.agentId === ws("ql-replaced").agentId && /merged empty-state/.test(r.brief?.ask ?? "")), { tries: 120, every: 500 });
+  const TALL = { width: DESKTOP.width, height: 1100 };
+  const frames = [["desktop-light", "light", TALL], ["desktop-dark", "dark", TALL], ["phone-dark", "dark", PHONE]];
+  const visible = (page, text) => page.getByText(text).filter({ visible: true });
+  for (const [name, theme, frame] of frames) {
+    await shoot(`ql-timeline-${name}`, frame, theme, async page => {
+      await page.setViewportSize(TALL); await openChat(page, spec("ql-sidebar").title, spec("ql-sidebar").prompt);
+      if (frame === PHONE) await page.setViewportSize(PHONE);
+      await visible(page, "3. Should archived workspaces stay in the sidebar, folded at the bottom?").first().waitFor({ timeout: 60_000 });
+      const links = await visible(page, QL_PAGE.label).count();
+      if (links < 3) throw new Error(`the timeline card shows ${links} of 3 design page links`);
+      if (!await visible(page, "Badge spec").count()) throw new Error("the timeline card drops Q2's own link");
+      await visible(page, "3. Should archived workspaces stay in the sidebar, folded at the bottom?").first().scrollIntoViewIfNeeded();
+      if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error("the card overflows");
+    });
+    // Phones: the header's ⓘ shows where the card's facts come from right under the header, in the first screen.
+    if (frame === PHONE) for (const on of [false, true]) await shoot(`ql-info-${on ? "on" : "off"}-${name}`, frame, theme, async page => {
+      await page.setViewportSize(TALL); await openChat(page, spec("ql-sidebar").title, spec("ql-sidebar").prompt);
+      await page.setViewportSize(PHONE);
+      const info = page.getByRole("button", { name: "Where this comes from", exact: true }).filter({ visible: true }).last();
+      await info.waitFor({ timeout: 60_000 });
+      // Scrolled up to the card's header, as the developer is when they tap ⓘ.
+      // A real scroll upward (the chat keeps itself pinned to the bottom otherwise) until the ⓘ sits in the upper screen.
+      await page.mouse.move(PHONE.width / 2, PHONE.height / 2);
+      for (let i = 0; i < 20; i++) {
+        const box = await info.boundingBox();
+        if (box && box.y > 140 && box.y < PHONE.height / 3) break;
+        await page.mouse.wheel(0, box && box.y > PHONE.height / 3 ? 120 : -120); await page.waitForTimeout(150);
+      }
+      await page.waitForTimeout(500);
+      const before = await info.boundingBox();
+      if (!before || before.y < 0 || before.y > PHONE.height) throw new Error(`the ⓘ isn't on screen (${JSON.stringify(before)})`);
+      if (on) {
+        await info.click(); await page.waitForTimeout(500);
+        const line = page.getByText("Stated by the agent.").filter({ visible: true }).last();
+        await line.waitFor();
+        const box = await line.boundingBox();
+        if (!box || box.y < 0 || box.y + box.height > PHONE.height) throw new Error(`the ⓘ's line is off screen (${JSON.stringify(box)})`);
+      }
+    });
+    await shoot(`ql-original-${name}`, frame, theme, async page => {
+      await page.setViewportSize(TALL); await openChat(page, spec("ql-replaced").title, spec("ql-replaced").prompt);
+      if (frame === PHONE) await page.setViewportSize(PHONE);
+      // The developer's next message reads as the reply, so the past card offers Show full question; Show original (a card
+      // replaced while open) opens the same read-only body.
+      const reveal = page.getByRole("button", { name: /^Show (original|full question)$/ }).filter({ visible: true }).first();
+      await reveal.waitFor({ timeout: 60_000 }); await reveal.click(); await page.mouse.move(DESKTOP.width - 20, 300);
+      await visible(page, "My review adds: the plain draft tested better with new users.").first().waitFor();
+      if (!await visible(page, QL_PAGE.label).count()) throw new Error("the original card drops its link");
+      await visible(page, "My review adds: the plain draft tested better with new users.").first().scrollIntoViewIfNeeded();
+    });
+    await shoot(`ql-ci-${name}`, frame, theme, async page => {
+      // Phones: Home's detail pane, which draws the same agent line and PR rows as the panel.
+      if (frame === PHONE) { await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, spec("ql-fork").title)).click(); }
+      else {
+        await page.setViewportSize(TALL); await openChat(page, spec("ql-fork").title, spec("ql-fork").prompt);
+        await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+        await page.getByRole("button", { name: /^Pull request 8811: / }).filter({ visible: true }).first().waitFor({ timeout: 60_000 });
+      }
+      await visible(page, "Checks not started").first().waitFor({ timeout: 60_000 });
+      if (await visible(page, /Waiting on CI|Checks running|Checking/).count()) throw new Error("a never-run check reads as running");
+      if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error("the panel overflows");
+    });
   }
 }
 
