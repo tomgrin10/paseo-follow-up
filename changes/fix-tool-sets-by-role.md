@@ -1,0 +1,1 @@
+- Agents load far fewer of Follow-up's tools: each gets what its role uses and looks up the rest, so a main agent's tool list is about a quarter of its old size.

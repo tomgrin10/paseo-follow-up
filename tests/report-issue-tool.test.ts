@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { actionTools, toolList } from "../server/mcp.mjs";
+import { actionTools, callableTools } from "../server/mcp.mjs";
 import { nativeTools } from "../server/native-tools";
 import { MAX_DESCRIPTION, reportToolDescription, reportToolProperties } from "../server/report-issue";
 import { reportPrompt } from "../server/report-issue-adapter";
@@ -37,9 +37,10 @@ test("report-issue-costs-no-standing-context: no hook, instruction or prompt tex
 
 test("report_issue reaches root agents and contributors, never recovery sessions", () => {
   const names = (list: unknown[][]) => list.map(t => t[0]);
-  assert.ok(names(toolList(false, false, false, false, true)).includes("report_issue"));
-  assert.ok(names(toolList(false, true, false, false, true)).includes("report_issue"));
-  assert.ok(!names(toolList(true, false, false, false, true)).includes("report_issue"));
+  // Reached by name (the bridge, the CLI) or through run_action (agent-tools-by-role).
+  assert.ok(names(callableTools(false, false, false, false, true)).includes("report_issue"));
+  assert.ok(names(callableTools(false, true, false, false, true)).includes("report_issue"));
+  assert.ok(!names(callableTools(true, false, false, false, true)).includes("report_issue"));
   void nativeTools;
 });
 
