@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { AgentToolDefinition, AgentToolContext, PluginSessionOpenRequest } from "@getpaseo/plugin/server";
-import { actionTools, callInput, compact, overseerTools, schemas, toolList, validate, type ToolTuple } from "./mcp.mjs";
+import { callableTools, compact, overseerTools, runTool, schemas, toolList, validate, type ToolTuple } from "./mcp.mjs";
 import type { Role } from "./scopes";
 
 /**
@@ -19,20 +19,26 @@ export const PREFIX = "follow_";
 export type SessionFlags = { recovery: boolean; brief: boolean; root: boolean; overseer: boolean };
 export type Live = { role: Role | null; inbox: boolean };
 
-/** The same rule as the stdio bridge's per-request `available` list. */
+/** The same rule as the stdio bridge's per-request list: what the agent's current role may call (ROLE_TOOLS). */
 export function availableTools(flags: SessionFlags, live: Live): ToolTuple[] {
   const brief = flags.brief && live.inbox && !flags.recovery;
   const acting = flags.root && !flags.recovery;
   const role = live.role === "main" && flags.recovery ? "recovery" : live.role;
-  const base = role ? toolList(role === "recovery", role === "contributor", brief, false, acting) : toolList(false, false, brief, true, acting);
+  const base = role ? callableTools(role === "recovery", role === "contributor", brief, false, acting) : callableTools(false, false, brief, true, acting);
   return [...base, ...(flags.overseer && !flags.recovery ? overseerTools : [])];
 }
 
-/** Everything this session could be offered, so a role that changes mid-session needs no reopen; calls re-check. */
+/**
+ * What this session lists: every tool its role could list for its lifetime (a role that changes mid-session needs no
+ * reopen; calls re-check), which is the main agent's, a contributor's and an untracked root agent's lists together.
+ * The long tail of actions stays behind find_action/run_action (agent-tools-by-role).
+ */
 export function attachableTools(flags: SessionFlags): ToolTuple[] {
   if (flags.recovery) return toolList(true, false, false, false, false);
-  const all = toolList(false, false, flags.brief, false, flags.root);
-  return [...all, ...(flags.root ? actionTools.filter(t => !all.some(a => a[0] === t[0])) : []), ...(flags.overseer ? overseerTools : [])];
+  const all: ToolTuple[] = [];
+  for (const list of [toolList(false, false, flags.brief, false, flags.root), toolList(false, true, flags.brief, false, flags.root), toolList(false, false, flags.brief, true, flags.root)])
+    for (const t of list) if (!all.some(a => a[0] === t[0])) all.push(t);
+  return [...all, ...(flags.overseer ? overseerTools : [])];
 }
 
 type PaseoConfig = { daemon?: { mcp?: { enabled?: boolean; injectIntoAgents?: boolean } }; agents?: { providers?: Record<string, { paseoTools?: { enabled?: boolean; disabledTools?: string[] } }> } };
@@ -57,12 +63,13 @@ export function nativeTools(flags: SessionFlags, live: (agentId: string) => Prom
     input: (z as unknown as { fromJSONSchema: (schema: unknown) => z.ZodType }).fromJSONSchema(shapes[i].inputSchema),
     async execute(input: unknown, context: AgentToolContext) {
       try {
-        const current = availableTools(flags, await live(context.agent.id)).find(t => t[0] === tool[0]);
+        const callable = availableTools(flags, await live(context.agent.id));
+        const current = callable.find(t => t[0] === tool[0]);
         if (!current) throw new Error("This tool is unavailable for the current agent. Tracking must be active; recovery authority ends after acknowledgment.");
         const args = (input ?? {}) as Record<string, unknown>;
         validate(args, shapes[i].inputSchema);
-        const value = await invoke(current[2], { ...callInput(current, args), agentId: context.agent.id }, context);
-        return { text: JSON.stringify(args.detail === "full" ? value : compact(current[0], args, value)) };
+        const { name, args: used, value } = await runTool(current, args, callable, (method: string, body: Record<string, unknown>) => invoke(method, { ...body, agentId: context.agent.id }, context), workflows);
+        return { text: JSON.stringify(used.detail === "full" ? value : compact(name, used, value)) };
       } catch (error) { return { isError: true, text: (error as Error).message }; }
     },
   }));

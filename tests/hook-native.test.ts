@@ -4,15 +4,17 @@ import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { tools, actionTools, overseerTools } from "../server/mcp.mjs";
+import { overseerTools, toolList } from "../server/mcp.mjs";
 import { NEEDS_YOU_NUDGE } from "../shared/brief";
 
 process.env.FOLLOW_UP_HOOK_IMPORT = "1";
 // @ts-expect-error plain JS hook, generated into hook-source.ts
 const hook = await import("../server/agent-hook.mjs") as { TOOL_NAMES: string[]; named: (text: string, native?: boolean) => string; isFollowTool: (tool: string) => boolean; isBridgeCall: (args: string, path: string) => boolean; toolsDetached: (native: boolean, current: unknown, mine: unknown) => boolean; shouldRepeat: (provider: string | undefined, turn: unknown, hash: string) => boolean };
 
-test("the hook's tool-name list is every underscore tool the bridge serves", () => {
-  const bridge = [...tools, ...actionTools, ...overseerTools].map(t => t[0]).filter(name => name.includes("_"));
+test("the hook's tool-name list is every underscore tool a session can list (agent-tools-by-role)", () => {
+  // Action names stay bare in prose: they run through run_action, so naming one follow_<name> would name no tool.
+  const roles = [[false, false, true, false, true], [false, true, true, false, true], [false, false, true, true, true], [true, false, false, false, false]] as const;
+  const bridge = [...roles.flatMap(r => toolList(...r)), ...overseerTools].map(t => t[0]).filter(name => name.includes("_"));
   assert.deepEqual([...hook.TOOL_NAMES].sort(), [...new Set(bridge)].sort());
 });
 
@@ -59,7 +61,8 @@ test("native Claude sessions: role text once per session with follow_ names, the
   const start = context(await fire({ hook_event_name: "SessionStart" }, env));
   assert.match(start, /follow_workspace_status/); assert.doesNotMatch(start, /(?<!follow_)\bworkspace_status/);
   assert.match(start, /follow_needs_you/, "needs_you instruction, formerly the MCP initialize reply");
-  assert.match(start, /follow_list_prs/, "action-tool instruction for a root agent");
+  assert.match(start, /follow_find_action/, "action instruction for a root agent");
+  assert.match(start, /follow_run_action/); assert.doesNotMatch(start, /follow_list_prs/, "actions are named bare: they run through run_action");
   assert.doesNotMatch(start, /mcp\.mjs/, "no bridge fallback line");
   assert.equal(context(await fire({ hook_event_name: "UserPromptSubmit", prompt: "a" }, env)), "", "already in context this session");
   assert.equal(context(await fire({ hook_event_name: "UserPromptSubmit", prompt: "b" }, env)), "");

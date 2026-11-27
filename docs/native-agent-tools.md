@@ -41,7 +41,8 @@ token code of your own.
    throws and takes down the agent's whole Paseo tool list.
 2. **The list is fixed per session open.** There's no `notifications/tools/list_changed`. Attach everything the
    session could need for its lifetime and re-check permissions inside `execute` on every call
-   (`server/native-tools.ts`: `attachableTools` vs `availableTools`).
+   (`server/native-tools.ts`: `attachableTools` vs `availableTools`). Keep that list small: a long tail of rarely used
+   tools goes behind a lookup pair (Follow-up's `find_action`/`run_action`), so ~100 schemas don't ride every turn.
 3. **No MCP `instructions`.** Put role text in your agent hooks (`SessionStart`, which Claude also fires after
    compaction) and keep tool descriptions short: the Paseo tool list is shared by every plugin. Claude keeps hook
    context for the session, so send it once per session instead of on every prompt (`agent-hook.mjs`:

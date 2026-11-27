@@ -20,16 +20,20 @@ is missing from AGENTS.md or docs/, so add a line here when you add one.
   - There is never a global MCP registration. `server/mcp-registrations.ts` removes the old user-scope one, with a
     `.follow-up-unregister.bak`.
   - `server/agent-mcp.ts` builds the stdio definition.
-- **Which tools a session gets** is decided by `toolList()` in `server/mcp.mjs` and `availableTools()` in
-  `server/native-tools.ts`:
+- **Which tools a session gets** is one table, `ROLE_TOOLS` in `server/mcp.mjs` (agent-tools-by-role, invariant 139).
+  `toolList()` is what a role lists, `callableTools()` what it may call (its list plus the actions its role may run
+  by name), and `availableTools()` in `server/native-tools.ts` re-checks it on every native call. A native session
+  lists everything a root agent's role could list for its lifetime (`attachableTools`: the main agent's, a
+  contributor's and an untracked agent's lists together, about 22 tools), since the list is fixed at session open.
+  The ~100 actions are not listed: [the action lookup](#the-action-lookup-find_action-run_action) reaches them.
 
-| Session | Tools |
-| --- | --- |
-| Tracked main agent | Core tools (below), the action tools, and `needs_you` while the inbox is on. |
-| Contributor (another root agent of a tracked workspace) | `workspace_status`, `workspace_now`, `register_pr`, `sync_workspace`, `link_item`, `unlink_item`, `wait_for_checks`, and `make_main_agent` (its claim rules apply). |
-| Recovery agent | Core tools except `declare_done`, `sync_workspace`, the question tools, `set_spec`, `link_item` and `unlink_item`. No action tools. |
-| Untracked root agent | The action tools, `wait_for_checks` (it names where else to wait), and `needs_you` while the inbox is on. |
-| Overseer | `needs_you`, the action tools and the Overseer tools. |
+| Session | Lists | May also run (through `run_action`) |
+| --- | --- | --- |
+| Tracked main agent | Core tools (below), `needs_you` while the inbox is on, `make_main_agent`, `find_action`, `run_action`. About 5.8k tokens of schema. | Every action. |
+| Contributor (another root agent of a tracked workspace) | `workspace_status`, `workspace_now`, `register_pr`, `sync_workspace`, `link_item`, `unlink_item`, `context_reply`, `wait_for_checks`, `make_main_agent` (its claim rules apply), `find_action`, `run_action`. | `report_issue`. |
+| Recovery agent | Core tools except `declare_done`, `sync_workspace`, the question tools, `set_spec`, `link_item`, `unlink_item`, `context_reply` and `wait_for_checks`. | Nothing. |
+| Untracked root agent | `wait_for_checks` (it names where else to wait), `make_main_agent`, `find_action`, `run_action`, and `needs_you` while the inbox is on. | Every action. |
+| Overseer | The untracked root agent's list and the Overseer tools. | Every action. |
 | Subagents | None (Wait still applies: [wait.md](wait.md)). |
 | Any interactive Claude session | `wait_prepare_job`, `wait_for_job`, `wait_get_job` while Wait is on. |
 
@@ -57,6 +61,22 @@ is missing from AGENTS.md or docs/, so add a line here when you add one.
 | `declare_done` | `follow.done` | Declares the goal fulfilled and returns any blockers. |
 | `wait_for_checks` | `follow.wait-for-checks` | Waits for a PR's checks without polling: answers at once from the caller's own workspace read, then sends one message after the turn when the checks on the current head finish (or it merges, closes or conflicts). Every root agent (main, contributors, untracked); not recovery. PRs Follow-up can't see get the way on (Paseo's `subscribe_change_request` on 0.17+) ([wait-for-checks.md](wait-for-checks.md)). |
 | `context_reply` | `follow.context-reply` | Answers the developer's question (Your questions, More context) with the `requestId` the ask carried; only the agent it was asked of may answer ([needs-you.md](needs-you.md#your-questions)). Main agents and contributors get it (`/ask` can ask a contributor); recovery sessions don't. |
+
+## The action lookup (find_action, run_action)
+
+Until 2.6.0-beta.3 every root agent listed all of the action tools below: 117 tools, about 22k tokens of schema for a
+main agent, loaded every turn on Codex and ACP agents (Claude Code defers them, so it paid for the names). Now a role
+lists what it uses every turn and reaches the rest through two tools:
+
+| Tool | RPC | Use |
+| --- | --- | --- |
+| `find_action` | none (answered in `server/mcp.mjs`, `findActions`) | read. `query`: a few words, the best six actions with their input schemas; `names`: those actions' schemas; no arguments: every action the caller may run, a line each. |
+| `run_action` | `follow.agent-act` | `{ action, args }`: runs that action exactly as its own tool would (`runTool`): its input is checked against its schema first, then it goes through `follow.agent-act` with the same plan/confirm step, `agent:<id>` audit and per-call role check. Errors name the action and say how to find it (`resolveAction`). |
+
+The bridge and the CLI still call an action by its own name (`node "$FOLLOW_UP_CLI" call list_prs '{}'`), and
+`list` prints every tool. Action names in Follow-up's text stay bare (`TOOL_NAMES` in `server/agent-hook.mjs` holds only
+names a session can list), and `tests/tool-budget.test.ts` scans each role's session text: every tool it names is one
+that role lists, or an action it can run through `run_action`.
 
 ## Action tools (agent parity)
 

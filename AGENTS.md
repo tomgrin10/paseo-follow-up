@@ -63,7 +63,8 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
   handler), subscribes to lifecycle events, and attaches tools to sessions at `agent.session_open`.
 - **RPC contracts** (`shared/contracts.ts`): every client↔server and agent↔server call, as `defineRpc` contracts
   named `follow.<name>`. All of them are listed in [docs/rpcs-and-tools.md](docs/rpcs-and-tools.md).
-- **Agent tools**: tool tuples live in `server/mcp.mjs` (`tools`, `actionTools`, `overseerTools`). At
+- **Agent tools**: tool tuples live in `server/mcp.mjs` (`tools`, `actionTools`, `overseerTools`, `lookupTools`);
+  which role lists which is one table, `ROLE_TOOLS` (invariant 139). At
   `agent.session_open`, `withTools` in `index.server.ts` attaches them natively (`server/native-tools.ts`), or
   falls back to the per-launch stdio bridge (`server/session-mcp.ts`). Which session gets which tools:
   [docs/rpcs-and-tools.md](docs/rpcs-and-tools.md). How native serving works: [docs/native-agent-tools.md](docs/native-agent-tools.md).
@@ -292,6 +293,8 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    - There are no human-only actions. Follow-up has no button for untracking a workspace or putting one on hold, so
      there's no tool for those either. The row menu's Archive workspace… sends Paseo's own archive request, which
      agents already make with Paseo's `archive_workspace` tool, so its `ROW_ACTIONS` entry is an exemption naming it.
+   - An action reached through `find_action`/`run_action` counts as an agent tool, with the same plan/confirm, audit
+     and role check (invariant 139).
 4. **Agents act on others, not themselves.** An agent can't sign itself off, answer its own question through
    `answer_question`, or act on its own brief. Goal, tasks, questions and Done belong to the main agent.
    Contributors get `workspace_status`, `workspace_now`, `register_pr`, `sync_workspace`, `link_item`, `unlink_item`, `wait_for_checks`,
@@ -1698,6 +1701,18 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    scroll remeasure it only while open. No menu relies on a plugin's local z-index or its fixed overlay's rectangle.
    On the sidebar, that rectangle could include the host footer while the host clipped and painted over the menu.
    Guarded by `tests/floating-surface.test.ts` and `scripts/screenshots.mjs --only menu-bounds`.
+139. **Each agent gets its role's tools** (`agent-tools-by-role`). Which tools a session lists is one table,
+   `ROLE_TOOLS` in `server/mcp.mjs`, read by the native attach (`attachableTools`, `availableTools`), the stdio bridge
+   and the CLI: a role lists what it uses every turn, and every other action stays reachable through `find_action`
+   (find it, with its input) and `run_action` (run it on its own path), so agent parity (invariant 3) holds without
+   listing ~100 schemas. A tool Follow-up's own text tells a role to use (system prompt, hook text, the Stop and
+   turn-end texts, batch instructions, the Overseer's prompt) is one that role lists, or an action it can run through
+   `run_action`; action names in that text stay bare, never `follow_<action>`. `run_action`'s errors name the action and
+   say how to find it. 2026-11-27, isolated harness (Paseo 0.17.6, Follow-up 2.6.0-beta.2): one agent was offered all
+   121 `follow_*` and 3 `wait_*` tools, ~23k tokens of schema; a main agent listed 117 (≈22.1k tokens), an untracked
+   one 101 (≈17.7k), the Overseer 107 (≈18.6k). Now 21 (≈5.8k), 5 (≈1.4k) and 11 (≈2.3k); a native root session lists
+   22. Guarded by `tests/tool-budget.test.ts` (each role's token budget, the lookup, run_action's errors, and a scan of
+   each role's session text for tools it doesn't list).
 
 136. **Checks say what they are doing** (`checks-say-what-they-are-doing`). One helper, `checksState`
    (`shared/pr-status.ts`), says what a PR's checks are doing: failed, running (a check in progress, `checksRunning`),
@@ -1833,7 +1848,8 @@ Guarded by `npm run check:notes` and `release:notes` (`scripts/release-notes.mjs
 - **Forgetting `npm run prepare`.** Editing `server/mcp.mjs`, `server/agent-hook.mjs`, `server/overseer-prompt.md`
   or `server/wait-runner.sh` without regenerating means the packed plugin ships the old copy.
 - **Adding a tool in one place.** A new agent tool needs:
-  - its tuple in `server/mcp.mjs`;
+  - its tuple in `server/mcp.mjs`, and its place in `ROLE_TOOLS`: an action is reached through `run_action` unless a
+    role uses it every turn (invariant 139; `tests/tool-budget.test.ts` holds each role to its token budget);
   - its handler in `server/agent-actions.ts` (or an `RPC_TOOLS` entry in `server/agent-parity.ts`);
   - a `PARITY` entry, if it mirrors a client RPC;
   - the tool count in `tests/mcp-usage.test.ts`;
