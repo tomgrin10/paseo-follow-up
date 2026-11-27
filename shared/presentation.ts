@@ -34,7 +34,7 @@ export function settledForDisplay(pr: Pr): boolean {
 }
 /** The quiet line a known PR gets when its latest read failed: when its status was last read. Null otherwise. */
 export function staleHint(pr: Pr, ago: (iso: string) => string): string | null {
-  return pr.error && statusKnown(pr) ? `Last checked ${ago(pr.snapshot!.observedAt)}` : null;
+  return pr.error && statusKnown(pr) && pr.snapshot!.observedAt ? `Last checked ${ago(pr.snapshot!.observedAt)}` : null;
 }
 export function orderedStacks<P extends Pr>(prs: P[]): { name: string; prs: P[] }[] {
   const groups = new Map<string, P[]>();

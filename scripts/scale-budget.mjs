@@ -224,3 +224,28 @@ export function pagedReplyVerdict(replies, budgets = PAGED_REPLY_BUDGET_BYTES) {
   const over = replies.filter(r => budgets[r.method] !== undefined && r.bytes > budgets[r.method]).map(r => `${r.method} ${r.label}: ${r.bytes} bytes, over ${budgets[r.method]}`);
   return { replies, over };
 }
+
+/**
+ * Read stamps never count (invariant 140, read-stamps-never-count): while nothing a reader sees changes, the
+ * workspaces feed sends an open client only read stamps, at most once per READS_PUSH_MS. Before the fix every GitHub
+ * probe moved `observedAt` and the feed resent whole workspaces: 2026-11-27, live-sized seed, 342 KB every ~15 s and
+ * 2 MB about once a minute (~3.4 MB a minute). A stamps-only push of the live-sized seed is ~40 KB (140 workspaces'
+ * PRs), so the budget passes one a minute with room and fails at any whole-workspace churn. Enforced even with
+ * --budgets-report-only: a byte count isn't noise. `events`: the feed's pushes in the idle window after its first
+ * (full) answer, as { bytes, full }.
+ */
+export const FEED_IDLE_BUDGET_KB = 120;
+/**
+ * One answer of the client's follow.list poll (Paseo 0.15, no plugin subscriptions), as a feedIdleVerdict event: judged
+ * on the entries it resends and the ids it removes; its stamps ride every poll by design, so they're counted apart.
+ */
+export function listPollEvent(out) {
+  return { bytes: JSON.stringify([out?.workspaces ?? [], out?.removed ?? []]).length, readsBytes: JSON.stringify(out?.reads ?? {}).length, full: out?.full !== false };
+}
+/** `events`: every answer in the window, the first (full) one included; full answers count as answered, not as churn. */
+export function feedIdleVerdict(events, windowMs, budgetKb = FEED_IDLE_BUDGET_KB) {
+  const diffs = events.filter(e => !e.full);
+  const kb = diffs.reduce((a, e) => a + e.bytes, 0) / 1024;
+  const kbPerMin = Math.round(kb / Math.max(windowMs, 1) * 60_000 * 10) / 10;
+  return { pushes: diffs.length, fullPushes: events.length - diffs.length, kbPerMin, maxPushKb: Math.round(Math.max(0, ...diffs.map(e => e.bytes)) / 1024), budgetKb, over: kbPerMin > budgetKb };
+}

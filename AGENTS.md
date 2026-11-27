@@ -1723,6 +1723,21 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    one 101 (≈17.7k), the Overseer 107 (≈18.6k). Now 21 (≈5.8k), 5 (≈1.4k) and 11 (≈2.3k); a native root session lists
    22. Guarded by `tests/tool-budget.test.ts` (each role's token budget, the lookup, run_action's errors, and a scan of
    each role's session text for tools it doesn't list).
+140. **Read stamps never count** (`read-stamps-never-count`). A time that only says when Follow-up last read something
+   (a PR snapshot's `observedAt`, its deployment's `observedAt`) is not a change: the workspaces feed and `follow.list`
+   send a workspace only when something a reader sees changed. `ListCache` diffs and sends each list entry without its
+   read stamps (`splitReadStamps`, `shared/list.ts`), the stamps ride beside it in `reads` (a full answer carries all,
+   a diff those that moved and those of every workspace it sends), and a push that would carry stamps alone goes to a
+   subscriber at most once per `READS_PUSH_MS` (60 s, inside the 2-minute freshness windows that read them,
+   `WorkspacesFeed`); a held one keeps the subscriber's revision, so nothing is lost. The client store fills them back
+   in (`withReadStamps`, `client/live.tsx`) before any reader sees the entry, giving a new object only to the workspace
+   whose stamps moved; a reader that finds none treats the PR as not fresh. A new stamp-like field (a time that moves
+   on every read) goes in the same split, never in the entry. 2026-11-27 (live-sized seed, the broad perf check): every
+   GitHub probe moved `observedAt`, so the feed resent whole workspaces for nothing on screen, 342 KB every ~15 s (the
+   153-PR workspace's entry alone 317 KB) and 2 MB about once a minute; an open panel spent 1.6-2.4 s of script a
+   minute on a phone (6x CPU) re-rendering it, and a tap that landed on a push took twice as long. Guarded by
+   `tests/read-stamps.test.ts` and `test:scale`'s idle feed bytes (`feedIdleVerdict`, `FEED_IDLE_BUDGET_KB`: the
+   workspaces feed on a host with plugin subscriptions, else the entries the client's 15 s `follow.list` poll resends).
 
 135. **One workspace view** (`one-workspace-view`). Home's detail pane, the right side panel (`follow-up`) and the
    main-area tab (`follow-up-view`) draw one `WorkspaceView` (`client/panel.tsx`), its layout from its own width only

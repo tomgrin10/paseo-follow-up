@@ -365,7 +365,7 @@ backing off to 30 s. A resubscribe's events apply as soon as it is acknowledged,
 (`FEED_STEADY_MS`) the poll stops and the retry count starts over. So a host that accepts each subscription and drops
 it at once costs what a refusing one does (the store's own poll, retries every 30 s), not a read a second. A websocket reconnect is the host's: it replays open subscriptions. `tests/feed-recovery.test.ts` and
 `npm run test:feeds` (the harness, end to end) prove a push lands, and that a restart or a refused feed recovers. A store's `refresh()`
-after an action is a no-op with a feed, since the worker pushes the change. Opening reads only what a feed leaves
+after an action is a no-op with a feed, since the worker pushes the change. The live store keeps each workspace's read stamps (`reads`, invariant 140) apart from its entries and fills them into each entry it holds, so an entry the feed sends bare still says when its PRs were read, and a stamps-only push makes a new object only for the workspaces whose stamps moved. Opening reads only what a feed leaves
 out: the Home order once (it migrates this device's old choice) and `follow.usage` once (the worker's resources).
 Browser status (`follow.browser-status`) is read on open only, never polled: when the pill's popover opens, when the
 panel opens and again when its PR sheet opens, and when Home's or a brief's PR sheet opens. Each read is fresh

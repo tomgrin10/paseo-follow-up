@@ -5,7 +5,7 @@ import type { PluginButtonIconProps, PluginClientContext, PluginSidebarItemProps
 import { Icon, SidebarRow } from "@getpaseo/plugin/client/ui";
 import { listRpc, workspacesFeed } from "../shared/contracts";
 import { openFeed, type Feed } from "./feeds";
-import { isArchivedEntry, listEntry, type ArchivedListWorkspace, type ListEntry, type ListWorkspace } from "../shared/list";
+import { isArchivedEntry, listEntry, splitReadStamps, withReadStamps, type ArchivedListWorkspace, type ListEntry, type ListWorkspace, type ReadStamps } from "../shared/list";
 import type { Workspace } from "../shared/model";
 import { activeNeeds, needsYou } from "../shared/attention";
 import { useSidebarViewActive } from "./inbox";
@@ -40,12 +40,20 @@ export function createLiveStore(client: PluginClientContext) {
   const emit = () => { version++; for (const l of listeners) l(); };
   let feed: Feed | null = null;
   const pushed = () => feed?.live === true;
-  const apply = (result: { full?: boolean; workspaces: ListEntry[]; removed?: string[]; revision?: number }) => {
+  /** Each workspace's read stamps (read-stamps-never-count): they arrive apart from its entry and are filled back in here. */
+  let stamps = new Map<string, ReadStamps>();
+  const apply = (result: { full?: boolean; workspaces: ListEntry[]; removed?: string[]; revision?: number; reads?: Record<string, ReadStamps> }) => {
       const diff = result.full === false;
-      if (diff && !result.workspaces.length && !result.removed?.length) return;
+      const reads = result.reads ?? {};
+      if (diff && !result.workspaces.length && !result.removed?.length && !Object.keys(reads).length) return;
       const next = diff ? new Map(all) : new Map<string, ListEntry>();
-      for (const id of result.removed ?? []) next.delete(id);
-      for (const w of result.workspaces) next.set(w.id, diff ? newer(all.get(w.id), w) : w);
+      if (!diff) stamps = new Map();
+      for (const [id, s] of Object.entries(reads)) stamps.set(id, s);
+      for (const id of result.removed ?? []) { next.delete(id); stamps.delete(id); }
+      for (const w of result.workspaces) { const filled = withReadStamps(w, stamps.get(w.id)); next.set(w.id, diff ? newer(all.get(w.id), filled) : filled); }
+      // Stamps alone: the held entry with its new stamps (a new object only for those workspaces).
+      const sent = new Set(result.workspaces.map(w => w.id));
+      for (const id of Object.keys(reads)) { const held = next.get(id); if (held && !sent.has(id)) next.set(id, withReadStamps(held, stamps.get(id))); }
       all = next; revision = result.revision;
       workspaces = new Map([...all.values()].filter((w): w is ListWorkspace => !isArchivedEntry(w)).map(w => [w.id, w]));
       archived = [...all.values()].filter(isArchivedEntry);
@@ -67,6 +75,8 @@ export function createLiveStore(client: PluginClientContext) {
     const held = all.get(w.id);
     if (!held || Date.parse(w.updatedAt) < Date.parse(held.updatedAt)) return;
     const entry = listEntry(w);
+    // A whole read carries fresh stamps: keep them for the entries the feed sends bare after it.
+    const read = splitReadStamps(entry).stamps; if (read) stamps.set(w.id, read);
     all = new Map(all).set(w.id, entry);
     workspaces = new Map([...all.values()].filter((x): x is ListWorkspace => !isArchivedEntry(x)).map(x => [x.id, x]));
     archived = [...all.values()].filter(isArchivedEntry);

@@ -101,6 +101,12 @@ Answers that the client polls are kept small:
   the newer of the two copies (`openRowCopy`); a sheet waiting on the read shows the error toast if it fails
   (`useDetailGate`). A read's copy reaches every live store as its list form (`acceptWorkspace`), and a
   list change newer than a surface's read makes it read again. Agent tools read the stored workspace on the worker.
+- Read stamps never count (invariant 140, `read-stamps-never-count`): a list entry is diffed and sent without its
+  read-time stamps (a PR snapshot's and its deployment's `observedAt`, `splitReadStamps` in `shared/list.ts`), which
+  every GitHub probe moves. They travel in the answer's `reads` (workspace id → PR key → `[observed, deployment?]`):
+  a full answer carries all of them, a diff those that moved since and those of every workspace it sends, and the
+  workspaces feed holds a stamps-only push until `READS_PUSH_MS` (60 s) after the subscriber's last stamps, keeping
+  its revision so the next push carries them. The client's live store fills them back in (`withReadStamps`).
   `tests/list-reply-budget.test.ts` keeps a full reply on the live-sized seed under `LIST_REPLY_BUDGET_KB` (1904 KB
   of whole workspaces, 1168 KB of list forms, 2026-11-13).
 - `follow.inbox-list` takes an `etag` and returns `{ unchanged: true }` when nothing changed (`server/etag.ts`).

@@ -24,7 +24,7 @@ import { actionChangeSchema, dispatchActionSchema, dispatchInputSchema, dispatch
 import { inboxRowSchema } from "./inbox";
 import { briefSchema } from "./brief";
 import { batchSchema, idSchema, prSchema, textSchema, workspaceSchema } from "./model";
-import { listEntrySchema } from "./list";
+import { listEntrySchema, readStampsSchema } from "./list";
 import { communicationSchema } from "./communication";
 import { taskTriggerInputSchema } from "./task-trigger";
 import { QUESTION_MODES, questionSchema } from "./questions";
@@ -49,7 +49,7 @@ const agentCommunicationSchema = z.strictObject({
  * Tracked workspaces. 1.3.0-beta.4: pass the `revision` you hold as `since` to get only what changed (`full` false,
  * plus `removed` ids). Without it, or when it's too old, the answer is the full list.
  */
-export const listRpc = defineRpc({ name: "follow.list", input: z.object({ since: z.number().optional() }), output: z.object({ workspaces: z.array(listEntrySchema), error: z.string().nullable(), revision: z.number().optional(), full: z.boolean().optional(), removed: z.array(z.string()).optional() }) });
+export const listRpc = defineRpc({ name: "follow.list", input: z.object({ since: z.number().optional() }), output: z.object({ workspaces: z.array(listEntrySchema), error: z.string().nullable(), revision: z.number().optional(), full: z.boolean().optional(), removed: z.array(z.string()).optional(), reads: readStampsSchema.optional() }) });
 export const getRpc = defineRpc({ name: "follow.get", input: z.object({ workspaceId: idSchema }), output: z.object({ workspace: workspaceSchema.nullable(), error: z.string().nullable() }) });
 const hitSchema = z.object({ ranges: z.array(z.array(z.tuple([z.number(), z.number()]))), via: z.object({ label: z.string(), text: z.string(), ranges: z.array(z.tuple([z.number(), z.number()])) }).nullable() }).nullable();
 const activityRowSchema = z.object({ key: z.string(), at: z.string(), icon: z.string(), tone: z.enum(["merged", "success", "warning", "danger", "muted"]), text: z.string(), detail: z.string().nullable(), took: z.string().nullable() });
@@ -456,7 +456,7 @@ export const createdItemsRpc = defineRpc({ name: "follow.created-items",
  */
 const subscription = <I extends z.ZodType, E extends z.ZodType>(name: string, input: I, event: E): PluginSubscriptionContract<I, E> => ({ name, input, event });
 export const workspacesFeed = subscription("follow.workspaces-feed", z.object({ since: z.number().optional() }),
-  z.object({ revision: z.number(), full: z.boolean(), workspaces: z.array(listEntrySchema), removed: z.array(z.string()), error: z.string().nullable() }));
+  z.object({ revision: z.number(), full: z.boolean(), workspaces: z.array(listEntrySchema), removed: z.array(z.string()), reads: readStampsSchema.optional(), error: z.string().nullable() }));
 export const inboxFeed = subscription("follow.inbox-feed", z.object({}), inboxListRpc.output);
 /** Home's extras: priorities, the ranker, the Overseer and the usage meters (without the worker's live resources). */
 export const homeFeed = subscription("follow.home-feed", z.object({}), z.object({

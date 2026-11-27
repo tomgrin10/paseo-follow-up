@@ -31,7 +31,7 @@ import { harness, spawnDaemon } from "./harness.mjs";
 import { harnessEnv, harnessConfig } from "./harness-env.mjs";
 import { fakeGithub } from "./fake-github.mjs";
 import { scaleGh } from "./scale-github.mjs";
-import { ACK_READ_MS, BUSY_GROWTH_BUDGET_MB, BUSY_ITEM_BYTES, BUSY_TURN_ITEMS, BUSY_TURNS_PER_MIN, BURST_RETURN_BUDGET_MB, burstReturnVerdict, busyVerdict, pagedReplyVerdict, DRAIN_BOUND_MS, DRAIN_QUIET_MS, drainPlan, drainState, idleBudgetMb, idleVerdict, peakBudgetMb, LIVE_MALLOC_ENV, REALISTIC_PEAK_BUDGET_MB, SEND_SETTLE_MS, settleBoundMs, settleState } from "./scale-budget.mjs";
+import { ACK_READ_MS, BUSY_GROWTH_BUDGET_MB, BUSY_ITEM_BYTES, BUSY_TURN_ITEMS, BUSY_TURNS_PER_MIN, BURST_RETURN_BUDGET_MB, burstReturnVerdict, busyVerdict, feedIdleVerdict, listPollEvent, pagedReplyVerdict, DRAIN_BOUND_MS, DRAIN_QUIET_MS, drainPlan, drainState, idleBudgetMb, idleVerdict, peakBudgetMb, LIVE_MALLOC_ENV, REALISTIC_PEAK_BUDGET_MB, SEND_SETTLE_MS, settleBoundMs, settleState } from "./scale-budget.mjs";
 
 const exec = promisify(execFile);
 // The check drives a real Paseo daemon, so it needs the paseo CLI (CI installs @getpaseo/cli). Without it, local
@@ -337,6 +337,19 @@ try {
       }
     }
     const t0 = await ticks(); const started = Date.now(); const requestsBefore = counter.snapshot();
+    // An open client's list through the idle window (feedIdleVerdict, read-stamps-never-count): with nothing on screen
+    // changing, it carries read stamps alone. On a host with plugin subscriptions (Paseo 0.16+) it's the workspaces
+    // feed, judged whole (its first answer is the full list); on 0.15 (CI's floor) it's the client's poll, follow.list
+    // with its revision every 15 s, judged on the entries it resends (stamps ride every poll there, by design).
+    const feedEvents = []; const feedAbort = new AbortController(); let feedMode = "feed"; let offFeed = null; let listSince; let nextListPoll = Date.now();
+    const toPoll = () => { feedMode = "poll"; nextListPoll = Date.now(); if (typeof offFeed === "function") offFeed(); offFeed = null; };
+    try {
+      if (client.lastServerInfoMessage?.features?.pluginSubscriptions !== true) throw new Error("no plugin subscriptions");
+      offFeed = client.subscribeRawMessages(m => { const e = m?.type === "plugin.rpc.event" ? m.payload?.event : null; if (e && Array.isArray(e.workspaces) && "revision" in e) feedEvents.push({ at: Date.now(), bytes: JSON.stringify(e).length, full: e.full === true }); });
+      client.observePluginRpc("follow-up", "follow.workspaces-feed", {}, { signal: feedAbort.signal }).ready?.catch?.(() => { if (!feedAbort.signal.aborted) toPoll(); });
+    } catch { toPoll(); }
+    const pollList = () => { if (feedMode !== "poll" || Date.now() < nextListPoll) return; nextListPoll += 15_000;
+      void client.invokePluginRpc("follow-up", "follow.list", listSince === undefined ? {} : { since: listSince }).then(out => { if (out?.revision !== undefined) listSince = out.revision; feedEvents.push({ at: Date.now(), ...listPollEvent(out) }); }, () => undefined); };
     const idleSamples = [await rss()];
     // --live-mix <turns/min>,<rpcs/min>: the idle window carries live's load instead of none: awake agents end turns
     // with live-sized timelines (turn hooks read their tails) and an app reads the usual RPCs. Compare with a plain run.
@@ -352,6 +365,7 @@ try {
     const appBurst = burst ? { perSecond: burst[0], seconds: burst[1], startSample: 0, endSample: 0, calls: 0, failed: 0, bytes: {} } : null;
     while (Date.now() - started < IDLE_MS) {
       await sleep(500); idleSamples.push(await rss());
+      pollList();
       if (appBurst && Date.now() >= nextBurst && Date.now() < burstAt + burst[1] * 1000) {
         if (!appBurst.startSample) appBurst.startSample = idleSamples.length;
         appBurst.endSample = idleSamples.length;
@@ -363,6 +377,9 @@ try {
       if (mix && mix[0] && Date.now() >= nextTurn) { nextTurn += 60_000 / mix[0]; const a = created[turnN++ % Math.max(1, AWAKE)].agentId; void client.sendMessage(a, "Fixture: busy turn 30 8000", { messageId: `mix-${turnN}` }).catch(() => undefined); }
       if (mix && mix[1] && Date.now() >= nextRpc) { nextRpc += 60_000 / mix[1]; const [m, input] = MIX_RPCS[rpcN++ % MIX_RPCS.length]; void client.invokePluginRpc("follow-up", m, input).catch(() => undefined); } const m = statSync(statePath).mtimeMs; if (m !== mtime) { writes++; mtime = m; } }
     const requests = ratePerMinute(requestsBefore, counter.snapshot(), "follow-up-worker", Date.now() - started);
+    feedAbort.abort(); if (typeof offFeed === "function") offFeed();
+    // Live load (--live-mix, --app-burst) changes workspaces on purpose: then the feed is reported, not judged.
+    const feed = { mode: feedMode, ...feedIdleVerdict(feedEvents, Date.now() - started), readsKb: Math.round(feedEvents.reduce((a, e) => a + (e.readsBytes ?? 0), 0) / 1024), judged: !mix && !burst };
     const cpuPct = Math.round(((await ticks()) - t0) / hz / ((Date.now() - started) / 1000) * 1000) / 10;
     // The worker's own breakdown (heap vs native), from the governor's sample in follow.usage.
     const memory = async () => { try { return (await client.invokePluginRpc("follow-up", "follow.usage", {}))?.resources?.worker ?? null; } catch { return null; } };
@@ -377,7 +394,7 @@ try {
     for (let grew = true; grew;) { grew = false; for (const r of rows) if (!tree.has(r.pid) && tree.has(r.ppid)) { tree.add(r.pid); grew = true; } }
     const hostRss = rows.filter(r => tree.has(r.pid) && r.pid !== pid && /plugin-process/.test(r.args)).map(r => r.rssMb);
     if (cycleDiag) { await cycleDiag.readBeat(); console.log(`scale-burst-diag ${JSON.stringify({ edges: cycleDiag.edges, idleS: Math.round((started - cycleDiag.from) / 1000), gapsMb: cycles.map(c => c.gapSamplesMb), settles: [...cycleDiag.settles.values()], beats: [...cycleDiag.beats.values()] })}`); }
-    worker = { pid, idleWindow: { from: started, to: Date.now() }, memory: memoryIdle, memoryAfterGc, hostPluginBaselineMb: hostRss.length ? Math.min(...hostRss) : null, rssMb: Math.round(await rss()), idleMedianRssMb: idleVerdict(idleSamples, 0).medianMb, idlePeakRssMb: idleVerdict(idleSamples, 0).peakMb, idleSamplesMb: idleSamples.map(Math.round), lifetimePeakRssMb: Math.round(await rss("VmHWM")), cpuPct, idleSeconds: IDLE_MS / 1000, ...(BUSY_MS > 0 ? { busy: { seconds: BUSY_MS / 1000, turns: busyTurns, ...busyVerdict(busySamples, 0), samplesMb: busySamples.map(Math.round) } } : {}), drain, ...(appBurst ? { appBurst: { ...appBurst, beforeMedianMb: idleVerdict(idleSamples.slice(0, appBurst.startSample), 0).medianMb, afterMedianMb: idleVerdict(idleSamples.slice(appBurst.endSample + 60), 0).medianMb } } : {}), ...(cycles ? { cycles: { spec: arg("cycles"), each: cycles.map(c => ({ k: c.k, turns: c.turns, rpcs: c.rpcs, rpcFailed: c.rpcFailed, asked: c.asked, answered: c.answered, burstPeakMb: Math.max(...c.burstSamplesMb), gapMedianMb: idleVerdict(c.gapSamplesMb, 0).medianMb, burstCpuS: c.burstCpuS, gapCpuS: c.gapCpuS, burstSamplesMb: c.burstSamplesMb, gapSamplesMb: c.gapSamplesMb })), ...burstReturnVerdict(cycles.map(c => c.gapSamplesMb), budget.burstReturnMb) } } : {}), stateWrites: writes, stateBytesBefore, stateBytesAfter: statSync(statePath).size, daemonRequestsPerMin: requests };
+    worker = { pid, idleWindow: { from: started, to: Date.now() }, memory: memoryIdle, memoryAfterGc, hostPluginBaselineMb: hostRss.length ? Math.min(...hostRss) : null, rssMb: Math.round(await rss()), idleMedianRssMb: idleVerdict(idleSamples, 0).medianMb, idlePeakRssMb: idleVerdict(idleSamples, 0).peakMb, idleSamplesMb: idleSamples.map(Math.round), lifetimePeakRssMb: Math.round(await rss("VmHWM")), cpuPct, idleSeconds: IDLE_MS / 1000, ...(BUSY_MS > 0 ? { busy: { seconds: BUSY_MS / 1000, turns: busyTurns, ...busyVerdict(busySamples, 0), samplesMb: busySamples.map(Math.round) } } : {}), drain, ...(appBurst ? { appBurst: { ...appBurst, beforeMedianMb: idleVerdict(idleSamples.slice(0, appBurst.startSample), 0).medianMb, afterMedianMb: idleVerdict(idleSamples.slice(appBurst.endSample + 60), 0).medianMb } } : {}), ...(cycles ? { cycles: { spec: arg("cycles"), each: cycles.map(c => ({ k: c.k, turns: c.turns, rpcs: c.rpcs, rpcFailed: c.rpcFailed, asked: c.asked, answered: c.answered, burstPeakMb: Math.max(...c.burstSamplesMb), gapMedianMb: idleVerdict(c.gapSamplesMb, 0).medianMb, burstCpuS: c.burstCpuS, gapCpuS: c.gapCpuS, burstSamplesMb: c.burstSamplesMb, gapSamplesMb: c.gapSamplesMb })), ...burstReturnVerdict(cycles.map(c => c.gapSamplesMb), budget.burstReturnMb) } } : {}), feed, stateWrites: writes, stateBytesBefore, stateBytesAfter: statSync(statePath).size, daemonRequestsPerMin: requests };
     // --live-sized: the big workspace's panel reads stay one page, however long its history (pagedReplyVerdict).
     if (LIVE_SIZED) {
       const ws = created[0].workspaceId; const replies = [];
@@ -411,6 +428,9 @@ try {
   // Every list pages: enforced even with --budgets-report-only (scripts/scale-budget.mjs PAGED_REPLY_BUDGET_BYTES).
   if (worker?.pagedReplies?.over.length) { console.error(`A paged read outgrew its page: ${worker.pagedReplies.over.join("; ")}`); process.exitCode = 1; }
   if (worker?.pagedReplies?.replies.some(r => r.error)) { console.error(`A paged read failed: ${worker.pagedReplies.replies.filter(r => r.error).map(r => `${r.method} ${r.label}: ${r.error}`).join("; ")}`); process.exitCode = 1; }
+  // Read stamps never count: enforced even with --budgets-report-only (scripts/scale-budget.mjs FEED_IDLE_BUDGET_KB).
+  if (worker?.feed?.judged && worker.feed.over) { console.error(`The ${worker.feed.mode === "poll" ? "list poll (follow.list)" : "workspaces feed"} sent ${worker.feed.kbPerMin} KB a minute while nothing changed (${worker.feed.pushes} pushes, largest ${worker.feed.maxPushKb} KB), over ${worker.feed.budgetKb} KB: something that moves on every read is in the list form (read-stamps-never-count)`); process.exitCode = 1; }
+  if (worker?.feed && !worker.feed.fullPushes) { console.error(`The ${worker.feed.mode === "poll" ? "list poll" : "workspaces feed"} never answered in the idle window`); process.exitCode = 1; }
   // Derived and enforced even with --budgets-report-only (scripts/scale-budget.mjs BURST_RETURN_BUDGET_MB).
   if (worker?.cycles?.over) { console.error(`Worker RSS stayed at ${worker.cycles.lastMb} MB (median) in the gap after the last burst, over ${budget.burstReturnMb} MB: memory a burst grows didn't come back (gaps: ${worker.cycles.gapMediansMb.join(", ")} MB)`); process.exitCode = 1; }
   if (budget.rssMb && worker && worker.lifetimePeakRssMb > budget.rssMb) { over(`Worker RSS peaked at ${worker.lifetimePeakRssMb} MB (idle peak ${worker.idlePeakRssMb}), over ${budget.rssMb} MB`); }
