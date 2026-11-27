@@ -131,7 +131,7 @@ import { sourceDirectory } from "./server/source-tools";
 import { AboutService, AboutStore, liveSources, rootHistory, type AboutContext } from "./server/about";
 import { LinkedService, LinkedStore, liveLinkedSources, type LinkResult } from "./server/linked";
 import { workspaceRefs } from "./shared/linked-extract";
-import { readTranscript } from "./server/transcript";
+import { readTranscript, transcriptTurn } from "./server/transcript";
 import { AgentSettingsStore, ProviderCatalog, type CatalogSource } from "./server/agent-settings";
 import { labelsFor, providerName, resolveRole, roleSummary, type AgentSettingsView } from "./shared/agent-settings";
 import type { LoadSignals } from "./shared/agent-load";
@@ -774,6 +774,8 @@ export default function contribute(server: PluginServerContext) {
     void engine.nudge(workspace?.workspaceId);
     return followSettings();
   });
+  // The peek of an agent that isn't loaded (shared/turn.ts): its transcript on disk, never the daemon (invariant 1).
+  handle(rpc.agentTurnRpc, async ({ agentId }) => { const read = await transcriptTurn(paseoHome, agentId); return { turn: read?.turn ?? null, at: read?.at ?? null }; });
   handle(rpc.prOwnerRpc, async ({ repo, number }, { paseo }) => {
     await requireReady();
     const owner = prOwner(await store.snapshot(), repo, number);

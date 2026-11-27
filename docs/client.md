@@ -430,7 +430,34 @@ Run it when Paseo ships, then review and refresh the snapshot union in `shared/s
 unreadable bundle fails the check rather than claiming compatibility. There is no schedule or CI network check.
 Home’s search chip sets its hover title on its DOM node because React Native Web drops the Text title prop.
 
-### Floating menus and popovers
+## Agent peek
+
+Invariant 137 (`a-peek-is-bounded-and-never-wakes`). Resting the pointer on an agent's line for 350 ms, or focusing it,
+shows that agent's current turn beside it: the panel's agent lines (under the line), Home's desktop rows and the
+larger view (beside the row). On a phone, a tap on a panel line opens the same turn in a sheet with one Open chat
+button. A click still opens the chat.
+
+- **One fold, one component.** `shared/turn.ts` `foldTurn` turns timeline or transcript items into the chat's rows
+  (your message, a run of steps folded like Chat Polish's merged row, the reply, tasks, notices, errors), bounded to
+  `TURN_ROWS` rows; `fitTurn` cuts it further for narrow surfaces. `client/turn-view.tsx` `TurnView` draws only the
+  rows, so the peek and the workspace view's Recent steps share them; `useTurn` reads it (live when loaded, the saved
+  transcript through `follow.agent-turn` when not) and `turnSource` writes "Saved transcript · last active 3h ago".
+- **Timeline already on screen.** `shared/peek.ts` `timelineOnScreen` is the one predicate: an agent marked by a
+  surface (`useMarkTimelineOnScreen` in `client/on-screen.tsx`: Home's detail pane for its selected row, the
+  workspace view for its selected agent) or the chat beside the caller. Such a line has no peek.
+- **Timing.** `peekStep` is a pure state machine: 350 ms intent to open (a line crossed on the way to the open peek only
+  arms a takeover, which needs the same rest), 150 ms grace to close, and a peek showing a permission stays once the
+  pointer entered it. Esc, a click outside or a scroll that moves the line closes it. From a focused line, → (or
+  Alt+↓) moves focus into its open peek; Esc there closes it and returns focus to the line. Timers use
+  `performance.now()`: wall time can jump, and the screenshot harness freezes `Date`.
+- **Where it draws.** `PeekHost` draws it with `FloatingSurface`'s nonmodal mode inside the host's own box, not the
+  modal portal: React Native Web's Modal traps focus (it focuses itself on open and pulls outside focus back), which a
+  hover-opened peek must never do. So the panel's peek opens under the line (wholly above it when it doesn't fit
+  below), within the panel; beside-the-row falls back to that when the row leaves no 440 px beside it.
+- **Live data.** A loaded agent's timeline is read client-direct (tail 60, re-read at most every 400 ms on its
+  updates; on Paseo 0.15, with no timeline subscription, re-read every 2 s while open). One subscription per open
+  peek, closed with it.
+
 
 Invariant 134 (`menus-stay-visible`): `client/floating-surface.tsx` is the shared overlay for row menus (including
 panel More), sort, repository review choices, Catch up's keys, Later and More context. `shared/floating.ts` places

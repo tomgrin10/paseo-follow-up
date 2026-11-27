@@ -1,4 +1,5 @@
 import { queueViewSchema } from "./queue";
+import type { Turn } from "./turn";
 import { briefPlanInputSchema, compassSetSchema, planChangeSchema, queueChangeSchema } from "./morning-brief";
 import { sourcesChangeSchema } from "./brief-sources";
 import { noteActionSchema } from "./compass";
@@ -68,6 +69,13 @@ export const agentStatusRpc = defineRpc({ name: "follow.agent-status", input: z.
     /** Each finished kind: how many, which were shown, how to page the rest (shared/history.ts agentView). */ history: z.record(z.string(), z.object({ total: z.number(), offset: z.number(), shown: z.number(), more: z.number(), hint: z.string().nullable() })).optional(), /** The caller's own ask the developer dismissed (still standing): don't raise it again. */ dismissedAsk: z.object({ ask: z.string(), kind: z.string(), at: z.string() }).nullable().optional(), prWorkflow: z.object({ mode: z.enum(["graphite", "github"]), reviewFix: z.string().nullable() }).optional(), /** The next message: recipient, tasks, exact text, and when and why it goes (Preview's agent form). */ nextMessageInfo: z.object({ to: z.string(), tasks: z.array(z.string()), text: z.string(), reason: z.string(), eta: z.string().nullable() }).nullable().optional(),
   /** Home's Sending row for this workspace (shared/sending.ts): queued or sent, when and why, and whether Send now (send_repairs) would go through. */
   sending: sendingSchema.nullable().optional() }) });
+/**
+ * The peek's turn for an agent that isn't loaded: its last turn read from the transcript on disk (shared/turn.ts), never
+ * through the daemon, so it never wakes the agent (invariant 1). A loaded agent's peek reads its live timeline itself.
+ * `at`: when the transcript was last written. Null turn: no readable transcript.
+ */
+export const agentTurnRpc = defineRpc({ name: "follow.agent-turn", input: z.strictObject({ agentId: idSchema }),
+  output: z.object({ turn: z.custom<Turn>(v => !!v && typeof v === "object" && Array.isArray((v as Turn).rows)).nullable(), at: z.string().nullable() }) });
 export const syncWorkspaceRpc = defineRpc({ name: "follow.sync", input: z.strictObject({ agentId: idSchema, summary: z.string().trim().min(1).max(1000),
   /** What the caller is working on toward the goal (shared/now.ts). Omitted keeps the last one; null clears it. */
   milestone: milestoneInputSchema.optional() }), output: z.object({ workspaceId: idSchema, synced: z.literal(true) }) });

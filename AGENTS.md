@@ -83,6 +83,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | Discovery, ownership, main agent | `server/discovery.ts`, `server/turn-events.ts`, `server/workspace-agent.ts`, `server/background-agents.ts`, `server/submissions.ts`, `server/pr-owner.ts`, `server/exclusions.ts`, `server/history-cache.ts`, `server/recovery-handoff.ts`, `server/recovery-config.ts`, `shared/settings.ts` | [workspaces](docs/workspaces.md) |
 | Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/send-decision.ts`, `shared/task-rows.ts`, `shared/send-words.ts`, `shared/task-status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/message-queue.ts`, `shared/queue.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/put-in-chat.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `server/scheduled-tasks.ts`, `shared/task-due.ts`, `shared/task-view.ts`, `shared/task-dup.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
 | What each agent is working on now (the agent line on the panel and Home rows; sync_workspace `milestone`, `workspace_now`); what a PR's checks are doing (`checksState`) | `shared/now.ts`, `shared/pr-status.ts`, `client/now-lines.tsx` | [workspaces](docs/workspaces.md#what-each-agent-is-working-on) |
+| Agent peek: an agent's current turn on hover (panel lines, Home rows) or a phone sheet; `TurnView` rows, "timeline already on screen" | `shared/turn.ts`, `shared/peek.ts`, `client/turn-view.tsx`, `client/on-screen.tsx`, `server/transcript.ts` | [client](docs/client.md#agent-peek) |
 | Needs-you inbox, brief, Home | `server/inbox.ts`, `server/brief-timeline.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `server/turn-timeline.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/sending.ts`, `shared/needs-block.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts`, `server/dismiss.ts`, `client/dismiss.tsx`, `shared/catch-up.ts`, `client/catch-up.tsx`, `client/more-context.tsx`, `client/question-context.tsx`, `shared/dictation.ts`, `client/dictation.tsx`, `server/context-requests.ts`, `shared/your-questions.ts` | [needs-you](docs/needs-you.md) |
 | Summary (internal id `about`), Rename title with AI | `server/about.ts`, `server/transcript.ts`, `shared/about.ts`, `server/rename.ts`, `shared/rename.ts` | [ai-roles](docs/ai-roles.md) |
 | Dispatch (New before 2.4): start work from an issue, PR, link or words | `shared/dispatch.ts`, `shared/issue-workspace.ts`, `shared/linear-issues.ts`, `shared/new-view.ts`, `server/dispatch.ts`, `server/linear-issues.ts`, `client/new.tsx`, `client/action-row.tsx`, `client/new-entry.tsx`, `shared/new-name.ts`, `shared/new-settings.ts`, `client/new-settings.tsx` | [dispatch](docs/dispatch.md) |
@@ -1730,6 +1731,15 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    merge; `mergeBlockers` names it "Required checks not started"). A snapshot stored before `checksRunning` reads as
    before until its next read. 2026-11-27: the panel's agent line read "Waiting on CI for #9602", an upstream fork PR
    whose required checks never start. Guarded by `tests/checks-state.test.ts` and `INVARIANTS`.
+
+137. **A peek is bounded and never wakes** (`a-peek-is-bounded-and-never-wakes`). Hovering (or focusing) an agent's
+   line shows that agent's current turn, drawn like its chat (`client/turn-view.tsx`, one fold in `shared/turn.ts`).
+   It reads a loaded agent's live timeline (one tail read and one subscription per open peek, gone when it closes,
+   re-reads coalesced) and an unloaded agent's saved transcript through `follow.agent-turn`, never the daemon's
+   timeline, so a peek never loads an agent. Nothing is read until the line's 350 ms intent fires, and the turn is cut
+   to `TURN_ROWS` rows and `TURN_STEPS` steps per run, whatever its length. No peek where that agent's turn is already
+   on screen (`timelineOnScreen`: Home's selected row, a surface's mark, the chat beside it). Guarded by
+   `tests/agent-peek.test.ts`.
 
 ## Bugs
 
