@@ -1,0 +1,1 @@
+- Answering a question is instant everywhere: the moment you send, copy or put an answer in chat, the question leaves Needs you and every count drops. If the send fails, the question comes back with your pick, words and images, says what went wrong, and offers Retry.

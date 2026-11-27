@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { openExternalUrl, useRpc, type PluginClientContext, type PluginTimelineItemProps } from "@getpaseo/plugin/client";
 import { deliveryStatus } from "../shared/queue";
 import { Icon, TextInput, copyText, useToast } from "@getpaseo/plugin/client/ui";
-import { BRIEF_KIND, briefCardAsk, BRIEF_VERSION, askedDecisions, cardPicks, decisionQuestion, notedCount, pickedCount, briefSchema, collapsedLine, outcomeLabel, extrasFit, hasOriginal, nothingNeededLine, isTight, pastRows, pastTone, selectsFirst, sendBar, shownBrief, pastAsk, liveBrief, newAnswerId, type Brief, type BriefDecision, type BriefMove } from "../shared/brief";
+import { BRIEF_KIND, briefCardAsk, BRIEF_VERSION, askedDecisions, cardPicks, decisionQuestion, notedCount, pickedCount, briefSchema, collapsedLine, outcomeLabel, extrasFit, hasOriginal, nothingNeededLine, isTight, pastRows, pastTone, selectsFirst, sendBar, shownBrief, pastAsk, liveBrief, newAnswerId, answeredOutcome, type Brief, type BriefDecision, type BriefMove } from "../shared/brief";
 import { needsYou } from "../shared/attention";
 import { age, briefOutlived } from "../shared/inbox";
 import { noReviewReposVersion, onNoReviewRepos } from "../shared/pr-workflow";
@@ -31,6 +31,7 @@ import { PrSheet } from "./pr-sheet";
 import { isLight, withAlpha, type Colors } from "./theme";
 import { dismissToast, notice, runAction, runUndoable } from "./toasts";
 import { DismissX, RevealScope, useDismiss } from "./dismiss";
+import { confirmPendingAnswer, failPendingAnswer, markSentHere, setPendingAnswer } from "./pending-answers";
 
 /**
  * The brief card (design §2): the ask in one line, decisions as option rows, only the context needed, and the one
@@ -49,6 +50,8 @@ export type BriefDeps = {
   /** Done's Undo window, so the composer pill says Done (and its Undo cancels the same toast) until it ends. */
   noteDone?(agentId: string, cancel: () => void): void;
   endDone?(agentId: string): void;
+  /** answering-is-optimistic: the agent's inbox row reads as answered while the card's answer is on its way; returns the rollback. */
+  holdAnswered?(agentId: string): () => void;
 };
 
 const mono = () => (Platform.OS === "ios" ? "Menlo" : "ui-monospace, SFMono-Regular, Menlo, monospace");
@@ -430,6 +433,8 @@ function BriefCardBody({ item, theme, layout, agentId, deps, embedded = false, s
   const [marked, setMarked] = useState<string | null>(null);
   // The send landed: green at once, before the server's answered brief replaces the card.
   const [sent, setSent] = useState(false);
+  // A brief-only decision answered from this card: drawn answered at once, until the server's answered brief replaces it.
+  const [answering, setAnswering] = useState<Brief | null>(null);
   const dismiss = useDismiss();
   const picks = usePicks(b.id);
   const words = useWords(b.id);
@@ -452,6 +457,7 @@ function BriefCardBody({ item, theme, layout, agentId, deps, embedded = false, s
   if (shown.brief.state !== "open") return <Past b={shown.brief} c={c} now={now} compact={compact} height={height} onResend={b.answerId ? resend : undefined} resending={sending === "resend"} questions={workspace?.questions} workspace={workspace} />;
   // Muted until the send lands: the server's answered brief then replaces this, green.
   if (marked) return <Past b={{ ...b, state: "answered", outcome: "Done", outcomeAt: marked }} pending={!sent} c={c} now={now} compact={compact} height={height} />;
+  if (answering) return <Past b={answering} c={c} now={now} compact={compact} height={height} questions={workspace?.questions} />;
 
   const attention = c.statusWarning;
   const flaggedAct = b.flagged && ACTS.includes(b.kind);
@@ -555,15 +561,38 @@ function BriefCardBody({ item, theme, layout, agentId, deps, embedded = false, s
   // (briefQuestionsEvent). Only a decision with no tracked question goes through the brief's own action.
   type DecisionPick = { decisionId: string; choice: string; words?: string };
   const asQuestions = (list: DecisionPick[]) => !!workspace && list.length > 0 && list.every(x => b.questionIds.includes(x.decisionId) && workspace.questions.some(q => q.id === x.decisionId && !q.answer && !q.closed));
+  /**
+   * answering-is-optimistic: the card reads as answered the moment Send is pressed, and so does every other surface. A
+   * decision backed by a question goes in flight like any question answer (pending-answers: the overlaid workspace
+   * answers it, so this card's shownBrief resolves too); a brief-only decision is answered here (`answering`) and its
+   * inbox row is held as answered (`holdAnswered`). A failure lets both go: the card is back with its picks, words and
+   * images (cleared only once the server has them), the reason under it, and the toast's Retry.
+   */
   const answer = async (list: DecisionPick[], answerId: string) => {
     // The field already says why (before Send); a key or a bar's Send can't get past it either.
     if (img.blocked) throw new Error(img.blocked);
     const images = withImages();
-    if (!asQuestions(list)) { const out = await act({ agentId, briefId: b.id, answerId, ...(list.length === 1 ? list[0] : { choices: list }), ...images }); img.clear(); return out; }
-    // The images ride the first answer's message: one message to the agent carries them once.
-    for (const [i, x] of list.entries()) await answerQuestion({ workspaceId: workspace!.id, questionId: x.decisionId, choice: x.choice, ...(x.words ? { words: x.words } : {}), ...(i === 0 ? images : {}), action: "send" });
+    if (!asQuestions(list)) {
+      const chosen = new Map(list.map(x => [x.decisionId, x]));
+      const decisions = b.decisions.map(d => chosen.has(d.id) ? { ...d, chosen: chosen.get(d.id)!.choice, words: chosen.get(d.id)!.words ?? null } : d);
+      setAnswering({ ...b, state: "answered", decisions, outcome: answeredOutcome(decisions), outcomeAt: new Date().toISOString(), delivery: { state: "sending", error: null } });
+      const release = deps.holdAnswered?.(agentId);
+      try { const out = await act({ agentId, briefId: b.id, answerId, ...(list.length === 1 ? list[0] : { choices: list }), ...images }); img.clear(); return out; }
+      catch (e) { setAnswering(null); release?.(); throw e; }
+    }
+    const wid = workspace!.id;
+    for (const x of list) { setPendingAnswer(wid, x.decisionId, { choice: x.choice, words: x.words }); markSentHere(wid, x.decisionId); }
+    try {
+      // The images ride the first answer's message: one message to the agent carries them once.
+      for (const [i, x] of list.entries()) { await answerQuestion({ workspaceId: wid, questionId: x.decisionId, choice: x.choice, ...(x.words ? { words: x.words } : {}), ...(i === 0 ? images : {}), action: "send" }); confirmPendingAnswer(wid, x.decisionId); }
+    } catch (e) {
+      // The questions are open again on every surface, each with what was picked and "Not sent · Retry"; this card
+      // carries the reason too, with its picks and words (cleared only on success).
+      for (const x of list) failPendingAnswer(wid, x.decisionId, errorText(e));
+      throw e;
+    }
     img.clear();
-    void cache.invalidateQueries({ queryKey: liveBriefKey(agentId) }); void cache.invalidateQueries({ queryKey: workspaceKey(workspace!.id) });
+    void cache.invalidateQueries({ queryKey: liveBriefKey(agentId) }); void cache.invalidateQueries({ queryKey: workspaceKey(wid) });
   };
   // A tap sends the letter, with the note when one is typed; a sent answer clears the card (clearCard).
   const sendOne = (key: string) => { const [decisionId, choice] = key.split(":"); void run(key, async answerId => { await answer(cardPicks({ [decisionId]: choice }, {}, notesOpen[decisionId] ? notes : {}), answerId); clearCard(b.id); }); };

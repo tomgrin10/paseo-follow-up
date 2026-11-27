@@ -34,7 +34,7 @@ import { putInChatOrCopy } from "../shared/put-in-chat";
 import { useChatComposer } from "./put-in-chat";
 import { Marked, NoMatchRow, useSectionSearch } from "./section-search";
 import { questionStatus } from "../shared/section-search";
-import { answerImagesKey, clearPendingAnswer, failPendingAnswer, pendingKey, setPendingAnswer, usePendingAnswer, usePendingAnswers, type PendingAnswer } from "./pending-answers";
+import { answerImagesKey, clearPendingAnswer, confirmPendingAnswer, failPendingAnswer, markSentHere, retryPendingAnswer, setPendingAnswer, usePendingAnswer, type PendingAnswer } from "./pending-answers";
 
 const who = (w: Pick<ListWorkspace, "mainAgentId">, agentId: string | null) => !agentId || agentId === w.mainAgentId ? "the main agent" : "a root session";
 
@@ -151,17 +151,18 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   // Pasted images (every-agent-field-takes-images) ride the answer's message to the asking agent, on Send only.
   // A failed send keeps them under the answer's key (pending-answers), so the card's Retry sends them again.
   const img = useImageAttachments({ target: asker ? { kind: "agent", agentId: asker } : { kind: "workspace", workspaceId: w.id }, keep: answerImagesKey(w.id, q.id) });
-  const [choice, setChoice] = useState<string | null>(q.answer?.choice ?? null);
-  const [words, setWords] = useState(q.answer?.words ?? "");
+  // An answer that didn't reach the server comes back filled in ("Not sent · Retry"), so nothing typed is lost: the pick,
+  // the words (a lettered pick's words open as its note, answerDraft) and, through the kept key above, the images.
+  // Answered or withdrawn elsewhere meanwhile, the stores settle the entry from the server's copy (settlePendingAnswers):
+  // this card reads the overlaid question (answering-is-optimistic), so it can't tell an in-flight answer from a landed one.
+  const pending = usePendingAnswer(w.id, q.id);
+  const unsent = open && pending?.error ? pending : undefined;
+  const [choice, setChoice] = useState<string | null>(unsent?.choice ?? q.answer?.choice ?? null);
+  const [words, setWords] = useState(unsent?.words ?? q.answer?.words ?? "");
   const [noteOpen, setNoteOpen] = useState(false);
   // The pill's scrolling body: track whether more sits below the fold, so it can say so.
   const [scroll, setScroll] = useState({ content: 0, view: 0, offset: 0 });
   const more = scroll.content - scroll.view - scroll.offset > 4;
-  // An answer that didn't reach the server comes back filled in ("Not sent · Retry"), so nothing typed is lost.
-  const pending = usePendingAnswer(w.id, q.id);
-  const unsent = open && pending?.error ? pending : undefined;
-  // Answered or withdrawn elsewhere since: the unsent copy has nothing left to do.
-  useEffect(() => { if (pending && !open) clearPendingAnswer(w.id, q.id); }, [open, !!pending]);
   useEffect(() => { setChoice(unsent?.choice ?? q.answer?.choice ?? null); setWords(unsent?.words ?? q.answer?.words ?? ""); }, [q.id, !!unsent]);
   const refresh = () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); };
   const free = !q.options.length;
@@ -217,11 +218,16 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
     const images = action === "send" ? img.uploads() : undefined;
     const input = { workspaceId: w.id, questionId: q.id, choice: chosen, words: said, action, ...(images ? { images } : {}) };
     if (action === "copy") void copyText(answerMessage(q, chosen, said)).catch(() => undefined);
-    // The unsent copy keeps exactly what was sent, so Retry (which rebuilds the draft from it) sends it again.
-    setPendingAnswer(w.id, q.id, { choice: chosen, words: said, images });
+    // answering-is-optimistic: from this line the question reads as answered on every surface (the stores overlay the
+    // entry, shared/optimistic-answers.ts), so it leaves Needs you and every count before the server replies. The entry
+    // keeps exactly what was sent, so a failure brings the card back as it was and Retry sends it again.
+    setPendingAnswer(w.id, q.id, { choice: chosen, words: said, images, action });
+    markSentHere(w.id, q.id);
     const agent = who(w, q.askedBy);
     void runAction({
-      label: `Answer to ${q.id}`, toast, run: () => answerRpc(input),
+      label: `Answer to ${q.id}`, toast,
+      // The toast's Retry runs this again: the answer is in flight (hidden) again until the server replies.
+      run: () => { retryPendingAnswer(w.id, q.id); markSentHere(w.id, q.id); return answerRpc(input); },
       success: result => {
         const d = result.question.answer?.delivery;
         if (action === "copy") return { message: `Copied the ${q.id} answer. Paste it into the agent's chat.` };
@@ -231,7 +237,8 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
         // Recorded and queued: Follow-up sends it within seconds and retries on its own.
         return { message: `Sending to ${agent}` };
       },
-      onSuccess: () => { clearPendingAnswer(w.id, q.id); img.clear(); refresh(); },
+      // Confirmed: kept overlaid until this client's copy shows the recorded answer, so the card never flickers back.
+      onSuccess: () => { confirmPendingAnswer(w.id, q.id); img.clear(); refresh(); },
       onError: error => { failPendingAnswer(w.id, q.id, errorText(error)); refresh(); },
       // Answered or withdrawn elsewhere first: nothing to retry. Drop the unsent copy; the card shows the recorded answer.
       reconcile: e => { clearPendingAnswer(w.id, q.id); refresh(); notice(mootNote(e, free || isOther(answer)), toast); },
@@ -407,9 +414,9 @@ export function QuestionSheet({ workspace: w, questionId, theme, compact, onClos
 /** The pill steps through open questions ("1 of 3") and answers them without leaving the chat. */
 export function QuestionStepper({ workspace: w, theme, compact, openAgent, onAnswered, onDetails, bodyMaxHeight }: { workspace: ListWorkspace; theme: Theme; compact: boolean; openAgent?: (agentId: string) => void; onAnswered?: () => void; onDetails?: (id: string) => void; bodyMaxHeight?: number }) {
   const c = theme.colors; const t = text(c);
-  const pending = usePendingAnswers();
-  // An answer on its way (sent, no reply yet) steps the pill on at once; one that failed comes back as Not sent.
-  const open = w.questions.filter(q => isOpen(q) && !(pending[pendingKey(w.id, q.id)] && !pending[pendingKey(w.id, q.id)].error)).sort((a, b) => Number(questionState(b) === "stopped") - Number(questionState(a) === "stopped"));
+  // An answer on its way reads as answered (the overlaid workspace, answering-is-optimistic), so the pill steps on at
+  // once; one that failed is open again and comes back as Not sent.
+  const open = w.questions.filter(q => isOpen(q)).sort((a, b) => Number(questionState(b) === "stopped") - Number(questionState(a) === "stopped"));
   const [index, setIndex] = useState(0);
   const dismiss = useDismiss();
   if (!open.length) return null;

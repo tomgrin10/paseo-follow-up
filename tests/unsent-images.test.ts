@@ -22,6 +22,7 @@ const { QuestionBody } = await import("../client/questions");
 const { ReplyBox } = await import("../client/home") as { ReplyBox?: unknown };
 const { BriefBody } = await import("../client/brief") as { BriefBody?: unknown };
 const { ImageField, useImageAttachments } = await import("../client/image-attach");
+const { unsentImages } = await import("../client/unsent-images");
 const pending = await import("../client/pending-answers") as typeof import("../client/pending-answers") & { restore?: (p: Record<string, unknown>, now: number) => Record<string, { error?: string; images?: number }> };
 const { rpcCalls, rpc } = await import("./support/native/plugin-client.mjs" as string) as { rpcCalls: { name: string; input: Record<string, unknown> }[]; rpc: { reply: (name: string, input: unknown) => unknown } };
 
@@ -79,17 +80,22 @@ test("a question's Retry after a failed send sends its images again, after the c
     const retry = answers().at(-1)!;
     assert.equal(retry.words, "Like this screenshot from staging");
     assert.equal((retry.images as { name: string }[] | undefined)?.map(i => i.name).join(), "staging.png", "Retry sends the image again");
-    assert.equal(pending.pendingAnswer(w.id, question.id), undefined, "confirmed: nothing is kept");
+    // Confirmed: the images are dropped; the entry stays overlaid only until this client's copy shows the answer
+    // (answering-is-optimistic), so the card never flickers back open.
+    assert.equal(pending.pendingAnswer(w.id, question.id)?.confirmed, true, "confirmed");
+    assert.equal(unsentImages(pending.answerImagesKey(w.id, question.id)).length, 0, "confirmed: its images aren't kept");
     await again.unmount();
   } finally { rpc.reply = sentReply; pending.clearPendingAnswer(w.id, question.id); }
 });
 
 test("after a reload an unsent answer says its images weren't kept, never sends without a word", () => {
   assert.equal(typeof pending.restore, "function", "pending-answers reads entries back through restore()");
-  const out = pending.restore!({ "w/Q6": { choice: OTHER, words: "Like this", at: clock, images: 2 } }, clock + 1000);
+  // Past the reload grace (answering-is-optimistic keeps a younger one in flight, hidden, until then).
+  const late = clock + pending.RELOAD_GRACE_MS + 1000;
+  const out = pending.restore!({ "w/Q6": { choice: OTHER, words: "Like this", at: clock, images: 2 } }, late);
   assert.match(out["w/Q6"]!.error ?? "", /Its 2 images weren't kept; paste them again\./);
   assert.equal(out["w/Q6"]!.images, undefined);
-  const plain = pending.restore!({ "w/Q6": { choice: OTHER, words: "Like this", at: clock } }, clock + 1000);
+  const plain = pending.restore!({ "w/Q6": { choice: OTHER, words: "Like this", at: clock } }, late);
   assert.equal(plain["w/Q6"]!.error, "Follow-up was reloaded before Paseo confirmed it");
 });
 

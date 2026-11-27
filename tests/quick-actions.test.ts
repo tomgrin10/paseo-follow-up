@@ -219,7 +219,7 @@ test("a sent answer is kept until the server has it; a failure keeps the words a
   assert.equal(pendingAnswer("w1", "Q24"), undefined);
 });
 
-test("pending answers survive a reload where localStorage exists, and an unconfirmed one comes back as not sent", async () => {
+test("pending answers survive a reload where localStorage exists: in flight while young, then not sent", async () => {
   const data = new Map<string, string>();
   const g = globalThis as { localStorage?: unknown };
   const before = g.localStorage;
@@ -230,7 +230,12 @@ test("pending answers survive a reload where localStorage exists, and an unconfi
     const reloaded = await import(`../client/pending-answers.ts?reload=${Date.now()}`) as typeof import("../client/pending-answers");
     const back = reloaded.pendingAnswer("w1", "Q7");
     assert.equal(back?.choice, "B");
-    assert.match(back?.error ?? "", /reloaded before Paseo confirmed/);
+    assert.equal(back?.error, undefined, "a reload mid-send keeps it in flight (hidden) for the grace");
+    reloaded.expireReloaded(Date.now() + reloaded.RELOAD_GRACE_MS);
+    assert.match(reloaded.pendingAnswer("w1", "Q7")?.error ?? "", /reloaded before Paseo confirmed/, "never seen in the server's copy: back as not sent");
+    const old = reloaded.restore({ "w1/Q8": { choice: "A", at: Date.now() - reloaded.RELOAD_GRACE_MS - 1 } }, Date.now());
+    assert.match(old["w1/Q8"]?.error ?? "", /reloaded before Paseo confirmed/, "older than the grace: not sent at once");
+    assert.deepEqual(reloaded.restore({ "w1/Q9": { choice: "A", at: Date.now(), confirmed: true } }, Date.now()), {}, "a confirmed answer is the server's");
   } finally { g.localStorage = before; }
 });
 
@@ -246,11 +251,12 @@ test("every surface that describes a question says when its answer wasn't sent",
   }
 });
 
-test("the question card shows Not sent · Retry and the pill skips an answer on its way", async () => {
+test("the question card shows Not sent · Retry and the pill steps past an answer on its way", async () => {
   const source = await readFile(join(import.meta.dirname, "..", "client", "questions.tsx"), "utf8");
   assert.match(source, /Not sent · \{unsent\.error\}/);
   assert.match(source, /accessibilityLabel=\{`Retry sending your \$\{q\.id\} answer`\}/);
-  assert.match(source, /isOpen\(q\) && !\(pending\[pendingKey\(w\.id, q\.id\)\] && !pending\[pendingKey\(w\.id, q\.id\)\]\.error\)/);
+  // The pill reads the overlaid workspace (answering-is-optimistic): an answer on its way is not open, a failed one is.
+  assert.match(source, /const open = w\.questions\.filter\(q => isOpen\(q\)\)/);
 });
 
 // Harness (2026-11-10): the Needs-you row read "No question Q999 in this workspace.. Open it to retry". Reasons arrive as

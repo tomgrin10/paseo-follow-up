@@ -18,6 +18,8 @@ import { SetupGate } from "./setup-gate";
 import { ViewSync } from "./view-store";
 import { ToastHost } from "./toasts";
 import { newer, opened } from "./live-copies";
+import { pendingAnswers, pendingKey, settlePendingAnswers, subscribePendingAnswers } from "./pending-answers";
+import { settledAnswers, withPendingAnswers } from "../shared/optimistic-answers";
 export { acceptWorkspace } from "./live-copies";
 
 /** The backstop poll; agent changes `nudge` it sooner (1.4.0). Nothing while the app is hidden. */
@@ -38,6 +40,25 @@ export function createLiveStore(client: PluginClientContext) {
   let revision: number | undefined;
   let all = new Map<string, ListEntry>();
   const emit = () => { version++; for (const l of listeners) l(); };
+  /**
+   * answering-is-optimistic: what every surface reads is the worker's copy with the developer's answers in flight
+   * overlaid (shared/optimistic-answers.ts). Cached per workspace object and per pending set, so selectors stay stable.
+   */
+  let shown = new Map<string, { from: ListWorkspace; pending: object; w: ListWorkspace }>();
+  const view = (w: ListWorkspace): ListWorkspace => {
+    const pending = pendingAnswers(); const hit = shown.get(w.id);
+    if (hit && hit.from === w && hit.pending === pending) return hit.w;
+    const out = withPendingAnswers(w, pending, pendingKey);
+    shown.set(w.id, { from: w, pending, w: out });
+    return out;
+  };
+  /** The worker's copy settled these answers (recorded, or answered or withdrawn elsewhere): drop what was kept. */
+  const settle = (list: Iterable<ListEntry>) => {
+    const pending = pendingAnswers(); if (!Object.keys(pending).length) return;
+    const keys = [...list].flatMap(w => isArchivedEntry(w) ? [] : settledAnswers(w, pending, pendingKey));
+    if (keys.length) settlePendingAnswers(keys);
+  };
+  const offPending = subscribePendingAnswers(emit);
   let feed: Feed | null = null;
   const pushed = () => feed?.live === true;
   /** Each workspace's read stamps (read-stamps-never-count): they arrive apart from its entry and are filled back in here. */
@@ -57,6 +78,7 @@ export function createLiveStore(client: PluginClientContext) {
       all = next; revision = result.revision;
       workspaces = new Map([...all.values()].filter((w): w is ListWorkspace => !isArchivedEntry(w)).map(w => [w.id, w]));
       archived = [...all.values()].filter(isArchivedEntry);
+      settle(result.workspaces);
       emit();
   };
   // Paseo 0.15: poll the revision diff. 0.16: the worker pushes the same diff (follow.workspaces-feed), and nothing polls.
@@ -80,6 +102,7 @@ export function createLiveStore(client: PluginClientContext) {
     all = new Map(all).set(w.id, entry);
     workspaces = new Map([...all.values()].filter((x): x is ListWorkspace => !isArchivedEntry(x)).map(x => [x.id, x]));
     archived = [...all.values()].filter(isArchivedEntry);
+    settle([entry]);
     emit();
   };
   opened.add(accept);
@@ -88,8 +111,8 @@ export function createLiveStore(client: PluginClientContext) {
   return {
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     version: () => version,
-    get: (id: string) => workspaces.get(id),
-    all: () => [...workspaces.values()],
+    get: (id: string) => { const w = workspaces.get(id); return w && view(w); },
+    all: () => [...workspaces.values()].map(view),
     archived: () => archived,
     /** After an action: the feed pushes the change by itself; polling hosts read at once. */
     refresh: () => { if (pushed()) return; if (timer) clearTimeout(timer); void poll(); },
@@ -97,7 +120,7 @@ export function createLiveStore(client: PluginClientContext) {
     nudge: () => { if (nudged || stopped || pushed()) return; nudged = setTimeout(() => { nudged = null; if (timer) clearTimeout(timer); void poll(); }, 1_500); },
     /** A fresh read of one workspace this store follows; kept only if newer (acceptWorkspace). */
     accept,
-    stop() { stopped = true; opened.delete(accept); feed?.stop(); offVisible(); if (timer) clearTimeout(timer); if (nudged) clearTimeout(nudged); listeners.clear(); },
+    stop() { stopped = true; offPending(); shown = new Map(); opened.delete(accept); feed?.stop(); offVisible(); if (timer) clearTimeout(timer); if (nudged) clearTimeout(nudged); listeners.clear(); },
   };
 }
 export type LiveStore = ReturnType<typeof createLiveStore>;
