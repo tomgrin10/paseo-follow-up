@@ -9,6 +9,7 @@ export const nudgeReason: string;
 export const turnEndPrefix: string;
 export const dueHeader: string;
 export const syncBookkeeping: string;
+export const syncCall: string;
 export const ENVELOPE_GUIDANCE: string;
 export function batchParagraph(workflow: Workflow): string;
 export const NO_REVIEW_MERGE: string;

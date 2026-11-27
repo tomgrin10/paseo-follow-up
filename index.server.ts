@@ -111,7 +111,7 @@ import { holderOf, issueWorkspaces } from "./shared/issue-workspace";
 import { currentSummary } from "./shared/about";
 import { RpcTiming } from "./server/rpc-timing";
 import { hostAtLeast, hostFeature, ROW_BADGES_SINCE, type ServerInfo } from "./server/host-features";
-import { CODEX_PROMPT_MIN, atLeast, codexVersion, withSystemPrompt, type BridgeTexts, type PromptDeps } from "./server/session-prompt";
+import { CHANGED_INSTRUCTIONS_HEADER, CODEX_PROMPT_MIN, atLeast, changedInstructions, codexVersion, promptRecordPath, withSystemPrompt, type BridgeTexts, type PromptDeps, type PromptRecord } from "./server/session-prompt";
 import { isAcp } from "./shared/provider-support";
 import { newWorkspaceTarget, sendReport, type ReportSendDeps } from "./server/report-send";
 type ServerInfoClient = { getLastServerInfoMessage?: () => ServerInfo };
@@ -675,6 +675,8 @@ export default function contribute(server: PluginServerContext) {
     const handler = handlers.get(method); if (!handler) throw new Error(`Unknown Follow-up method ${method}.`);
     return handler.run(await handler.input.parseAsync(input), { paseo: context.paseo });
   };
+  // Set once promptDeps exists (below); tools call it only after the worker started.
+  let changedLead: ((agentId: string) => Promise<string | null>) | undefined;
   const withTools = async <R extends Parameters<typeof withSessionMcp>[0]>(request: R, recovery: boolean, brief: string | null, root: boolean, overseer = false): Promise<R> => {
     // FOLLOW_UP_TOOL_PROVIDERS / FOLLOW_UP_FORCE_STDIO exist for the isolated harness (scripts/check-native-tools.mjs).
     // Every provider gets the tools (an-agent-on-any-provider-gets-follow-up): Paseo serves them through its agent MCP to
@@ -686,7 +688,7 @@ export default function contribute(server: PluginServerContext) {
       const flags = { recovery, brief: !!brief && !recovery, root: root && !recovery, overseer: overseer && !recovery };
       const env = { ...request.env, FOLLOW_UP_TOOLS: "native", FOLLOW_UP_PROVIDER: request.provider, ...(flags.root ? { FOLLOW_UP_ROOT: "1" } : {}), ...(flags.overseer ? { FOLLOW_UP_OVERSEER: "1" } : {}) };
       if (/^[\w-]+$/.test(request.agentId)) await writeFile(join(directory, "hook-state", `native-${request.agentId}.json`), JSON.stringify({ instance: toolsInstance }), { mode: 0o600 }).catch(() => undefined);
-      return { ...request, env, tools: [...request.tools, ...nativeTools(flags, live, invoke, workflowSummary([...knownRepos(await store.snapshot())].map(r => prWorkflow.cachedWorkflow(r))))] };
+      return { ...request, env, tools: [...request.tools, ...nativeTools(flags, live, invoke, workflowSummary([...knownRepos(await store.snapshot())].map(r => prWorkflow.cachedWorkflow(r))), agentId => changedLead?.(agentId) ?? Promise.resolve(null))] };
     }
     return withSessionMcp({ ...request, env: { ...request.env, FOLLOW_UP_TOOLS: "stdio", FOLLOW_UP_PROVIDER: request.provider } }, directory, clientEntry(), paseoHome, recovery, process.env, brief, root, overseer, providers) as R;
   };
@@ -2240,6 +2242,17 @@ export default function contribute(server: PluginServerContext) {
       if (!entry || entry.role === "recovery") return null;
       return agentText.workspaceText({ contributor: entry.role === "contributor", workflow: entry.workflow, native, clientEntry: clientEntry(), bridge: join(directory, "mcp.mjs") });
     },
+    record: async (agentId, hash) => {
+      if (/^[\w-]+$/.test(agentId)) await writeFile(join(directory, promptRecordPath(agentId)), JSON.stringify({ hash, at: Date.now() } satisfies PromptRecord), { mode: 0o600 });
+    },
+  };
+  // A workspace text that changed since the session's system prompt leads the agent's next Follow-up tool result, once.
+  changedLead = async agentId => {
+    const text = await changedInstructions(agentId, {
+      recorded: async id => /^[\w-]+$/.test(id) ? JSON.parse(await readFile(join(directory, promptRecordPath(id)), "utf8")) as PromptRecord : null,
+      workspace: promptDeps.workspace!, record: promptDeps.record!,
+    });
+    return text ? `${CHANGED_INSTRUCTIONS_HEADER}\n\n${text}` : null;
   };
   const withWait = (handler: SessionOpen): SessionOpen => async (input, context) => {
     const background = await isBackground(input.request.agentId, context.paseo);

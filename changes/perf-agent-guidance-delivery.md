@@ -1,0 +1,1 @@
+- Agents spend less of their context on Follow-up: its instructions are given once per session, not again after every compaction, every resume or, on Codex, every turn.

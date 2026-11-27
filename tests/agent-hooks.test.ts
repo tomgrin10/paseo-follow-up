@@ -5,6 +5,7 @@ import { mkdtemp, readFile, writeFile, rm, mkdir, symlink, lstat, readdir, readl
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { AgentHooks, reconcileHooks } from "../server/agent-hooks";
+import { tools } from "../server/mcp.mjs";
 import { workspace } from "./fixtures";
 
 async function fixture() {
@@ -48,7 +49,11 @@ test("only an enabled, unarchived main agent receives normal-turn instructions, 
     assert.match(result.hookSpecificOutput.additionalContext, /Do routine bookkeeping silently/); assert.match(result.hookSpecificOutput.additionalContext, /without another recap/);
     const context = result.hookSpecificOutput.additionalContext;
     for (const rule of ["skip resolved tasks", "one PR fully before the next", "/fix-pr", "--publish", "safe reparent", "preserve uncommitted work", "currently serving revision", "acknowledge_batch", "acknowledge a completion batch first", "Merging and archiving remain the developer's actions", "FOLLOW_UP_CLIENT_ENTRY", "/fixture/client.js"]) assert.ok(context.includes(rule), `standing context retains ${rule}`);
-    for (const rule of ["original Slack threadUrl", "explicit developer authorization", "purpose=verified", "actual sent replyUrl", "never claim a draft was sent", "do not authorize repairs"]) assert.ok(context.includes(rule), `standing context retains communication rule: ${rule}`);
+    // Invariant 147: rules that matter only when a field is set live with that field (update_obligation's description);
+    // the standing context points there.
+    assert.match(context, /stakeholder replies \(communication\) follow (?:follow_)?update_obligation's rules/);
+    const obligation = tools.find(t => t[0] === "update_obligation")![1];
+    for (const rule of ["original threadUrl", "explicit developer authorization", "purpose (progress or verified)", "sent replyUrl", "never treat a draft as sent", "does not authorize repairs"]) assert.ok(obligation.includes(rule), `update_obligation keeps the communication rule: ${rule}`);
     assert.equal(await f.run(event, { PASEO_AGENT_ID: "secondary" }), null);
     assert.equal(await f.run(event, { PASEO_AGENT_ID: "" }), null);
     assert.equal(await f.run(event, { FOLLOW_UP_RECOVERY: "1" }), null);

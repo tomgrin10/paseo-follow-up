@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { AgentToolDefinition } from "@getpaseo/plugin/server";
 import { checksLine, named } from "../shared/agent-text.mjs";
@@ -11,12 +12,22 @@ import { hasHooks, isAcp } from "../shared/provider-support";
  * lack (needs_you, the action tools, the Overseer), Wait's guidance, and the wait_for_checks line. The worker names the
  * parts it put in the prompt in FOLLOW_UP_SYSTEM_PROMPT, and the hook leaves exactly those out (docs/hooks.md).
  *
- * Only parts the hook would surely add are moved; the rest stays the hook's: the workspace instructions (they follow
- * the role and the PR workflow, which change mid-session), the digest, the polling nudge and the Stop check.
+ * One delivery path (one-place-for-agent-text): on a host and provider that take it, every provider gets all of its
+ * session text here, the tracked workspace's instructions included (part `workspace`), and the hook adds none of it.
+ * The workspace text follows the role and the PR workflow, which can change mid-session; what the session was given is
+ * recorded (`hook-state/prompt-<agent>.json`, a hash), and a change reaches the agent once, through whichever comes
+ * first: the next Follow-up tool result (any provider, `changedInstructions`) or the hook's next prompt (Claude Code,
+ * Codex). What stays the hook's: the Overseer's digest, the polling nudge, the detached notice and the Stop check.
  */
 export const SYSTEM_PROMPT_ENV = "FOLLOW_UP_SYSTEM_PROMPT";
-export const PROMPT_PARTS = ["needsYou", "action", "overseer", "wait", "backgroundWork", "checks"] as const;
+export const PROMPT_PARTS = ["needsYou", "action", "overseer", "wait", "backgroundWork", "checks", "workspace"] as const;
 export type PromptPart = typeof PROMPT_PARTS[number];
+
+/** The hash the hook compares too (server/agent-hook.mjs `digest`): sha256, 16 hex characters. */
+export const textHash = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 16);
+/** Where the workspace text a session was given is recorded, relative to the data directory. */
+export const promptRecordPath = (agentId: string) => `hook-state/prompt-${agentId}.json`;
+export type PromptRecord = { hash: string; at: number };
 
 /** The role and Wait texts (shared/agent-text.mjs), the ones the hook adds too. */
 export type BridgeTexts = { needsYouInstruction?: string; actionInstruction?: string; overseerInstruction?: string; waitInstruction?: string; backgroundWorkInstruction?: string };
@@ -50,7 +61,7 @@ export function promptParts(env: Readonly<Record<string, string | undefined>>): 
 export function promptText(parts: readonly PromptPart[], bridge: BridgeTexts, native: boolean): { parts: PromptPart[]; text: string[] } {
   const raw: Record<PromptPart, string | undefined> = {
     needsYou: bridge.needsYouInstruction, action: bridge.actionInstruction, overseer: bridge.overseerInstruction,
-    wait: bridge.waitInstruction, backgroundWork: bridge.backgroundWorkInstruction, checks: checksLine,
+    wait: bridge.waitInstruction, backgroundWork: bridge.backgroundWorkInstruction, checks: checksLine, workspace: undefined,
   };
   const kept = parts.filter(p => !!raw[p]);
   // Role texts and the checks line are named for native tools, as the hook does; Wait's texts never name Follow-up's.
@@ -92,10 +103,12 @@ export type PromptDeps = {
   providerSupports(provider: string): Promise<boolean>;
   bridge(): Promise<BridgeTexts | null>;
   /**
-   * For a provider without hooks: the tracked workspace's instructions for this agent (the hook's own text,
-   * server/agent-hook.mjs workspaceInstructions), or null when it isn't a tracked main or contributor agent.
+   * The tracked workspace's instructions for this agent (shared/agent-text.mjs workspaceText, what the hook adds), or
+   * null when it isn't a tracked main or contributor agent.
    */
   workspace?(agentId: string, native: boolean): Promise<string | null>;
+  /** Records the hash of the workspace text this session was given ("" for none), for a later change (promptRecordPath). */
+  record?(agentId: string, hash: string): Promise<void>;
   /** Paseo runs this provider over ACP (shared/provider-support.ts isAcp, from Paseo's config): it drops a plugin's system prompt. */
   acp?(provider: string): Promise<boolean>;
 };
@@ -114,9 +127,9 @@ export async function withSystemPrompt<R extends OpenRequest>(request: R, deps: 
   // An ACP agent never receives appendSystemPrompt (Paseo 0.17.4): the same text goes in a tool it is told to read
   // first (instructionsTool), and no env claims a system prompt it never got.
   const acp = !hooked && await (deps.acp?.(request.provider) ?? Promise.resolve(isAcp(request.provider))).catch(() => isAcp(request.provider));
-  // Without a hook, the system prompt is the only way Follow-up's text reaches the agent (an-agent-on-any-provider-gets-follow-up).
-  const workspace = hooked || request.env.FOLLOW_UP_RECOVERY === "1" || !request.agentId || !deps.workspace ? null : await deps.workspace(request.agentId, native).catch(() => null);
-  const wanted = hooked ? promptParts(request.env) : hooklessParts(request.env, !!workspace);
+  // The workspace instructions go in the system prompt for every provider (one delivery path).
+  const workspace = request.env.FOLLOW_UP_RECOVERY === "1" || !request.agentId || !deps.workspace ? null : await deps.workspace(request.agentId, native).catch(() => null);
+  const wanted = hooklessParts(request.env, !!workspace);
   if (!wanted.length && !workspace) return request;
   if (acp) {
     if (!Array.isArray(request.tools) || request.tools.some(t => t.name === INSTRUCTIONS_TOOL)) return request;
@@ -132,8 +145,30 @@ export async function withSystemPrompt<R extends OpenRequest>(request: R, deps: 
   if (!bridge) return request;
   const { parts, text } = promptText(wanted, bridge, native);
   if (!parts.length && !workspace) return request;
-  return { ...request, appendSystemPrompt: [...(request.appendSystemPrompt ?? []), [...(workspace ? [workspace] : []), ...text].join("\n\n")], env: { ...request.env, [SYSTEM_PROMPT_ENV]: parts.join(",") } };
+  // A root or tracked agent's workspace text is this prompt's from now on, even when it has none yet (an untracked root
+  // agent enrolled later gets its text once, like a role change). Recorded before the session opens.
+  const owns = !!deps.record && request.env.FOLLOW_UP_OVERSEER !== "1" && (request.env.FOLLOW_UP_ROOT === "1" || !!workspace);
+  if (owns) await deps.record!(request.agentId!, workspace ? textHash(workspace) : "").catch(() => undefined);
+  const claimed = owns || workspace ? [...parts, "workspace"] : parts;
+  return { ...request, appendSystemPrompt: [...(request.appendSystemPrompt ?? []), [...(workspace ? [workspace] : []), ...text].join("\n\n")], env: { ...request.env, [SYSTEM_PROMPT_ENV]: claimed.join(",") } };
 }
+
+/**
+ * The workspace instructions a session hasn't been given yet, once: its role or PR workflow changed since its system
+ * prompt (or it was enrolled after it opened). Null when nothing changed, the session's text isn't recorded (an older
+ * host or provider: the hook carries it), or the agent has no workspace text now. Records what it returns, so the
+ * hook's next prompt and later tool results stay quiet.
+ */
+export async function changedInstructions(agentId: string, deps: { recorded(agentId: string): Promise<PromptRecord | null>; workspace(agentId: string, native: boolean): Promise<string | null>; record(agentId: string, hash: string): Promise<void> }): Promise<string | null> {
+  const record = await deps.recorded(agentId).catch(() => null);
+  if (!record) return null;
+  const text = await deps.workspace(agentId, true).catch(() => null);
+  if (!text || textHash(text) === record.hash) return null;
+  await deps.record(agentId, textHash(text));
+  return text;
+}
+/** How a changed text leads a tool result. */
+export const CHANGED_INSTRUCTIONS_HEADER = "Follow-up's instructions for this session changed (your role or this workspace's PR workflow did). They replace the earlier workspace instructions:";
 
 /** The installed Codex CLI's version as [major, minor, patch], or null (not installed, unreadable). */
 export function codexVersion(command = "codex", timeoutMs = 5000): Promise<[number, number, number] | null> {

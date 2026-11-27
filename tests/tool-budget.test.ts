@@ -150,3 +150,65 @@ for (const [name, s] of Object.entries(SCAN)) {
     }
   });
 }
+
+// Invariant 147 (one-place-for-agent-text): what Follow-up injects into each role's context, per event, on Claude Code
+// and Codex, Paseo 0.17 path (system prompt + hook). Tokens are chars / 4. Measured 2026-11-27, before → after:
+//   main         start 2621 → 2166 · each Codex turn 1837 → 0 · each compaction or resume 1837 → 0 · Stop sync block 1963 → 151
+//   contributor  start  837 →  837 · each Codex turn  278 → 0 · each compaction or resume  278 → 0 · Stop sync block  315 →  63
+//   untracked    start  784 →  784 · Stop nudge 88 (Codex: 0 → 88, the needs_you nudge it never got)
+//   Overseer     start  819 →  819 (its per-turn digest has its own bound: tests/overseer.test.ts)
+// A budget is a ceiling with a little room; raising one is a decision: say why in the PR.
+const TEXT_BUDGET = {
+  main: { start: 2300, perTurn: 0, resume: 0, stop: 200 },
+  contributor: { start: 900, perTurn: 0, resume: 0, stop: 100 },
+  untracked: { start: 850, perTurn: 0, resume: 0, stop: 120 },
+  overseer: { start: 900, perTurn: null, resume: 0, stop: 0 },
+} as const;
+const TEXT_ROLES: Record<keyof typeof TEXT_BUDGET, { env: Record<string, string>; scope?: { role: string; workspaceId: string; workflow?: object } }> = {
+  main: { env: { FOLLOW_UP_TOOLS: "native", FOLLOW_UP_ROOT: "1", FOLLOW_UP_BRIEF: "", FOLLOW_UP_WAIT: "1" }, scope: { role: "main", workspaceId: "w1", workflow: { mode: "graphite", reviewFix: "/fix-pr" } } },
+  contributor: { env: { FOLLOW_UP_TOOLS: "native", FOLLOW_UP_ROOT: "1", FOLLOW_UP_WAIT: "1" }, scope: { role: "contributor", workspaceId: "w1" } },
+  untracked: { env: { FOLLOW_UP_TOOLS: "native", FOLLOW_UP_ROOT: "1", FOLLOW_UP_BRIEF: "", FOLLOW_UP_WAIT: "1" } },
+  overseer: { env: { FOLLOW_UP_TOOLS: "native", FOLLOW_UP_ROOT: "1", FOLLOW_UP_OVERSEER: "1", FOLLOW_UP_BRIEF: "", FOLLOW_UP_WAIT: "1" } },
+};
+const textTokens = (s: string) => Math.round(s.length / 4);
+
+for (const provider of ["claude", "codex"])
+  for (const [name, role] of Object.entries(TEXT_ROLES) as [keyof typeof TEXT_BUDGET, (typeof TEXT_ROLES)[keyof typeof TEXT_BUDGET]][]) {
+    test(`one-place-for-agent-text: ${name} on ${provider} stays inside its injected-text budget`, async t => {
+      const root = await mkdtemp(join(tmpdir(), "text-budget-")); t.after(() => rm(root, { recursive: true, force: true }));
+      const directory = join(root, "plugin-data/follow-up"); await mkdir(join(directory, "hook-state"), { recursive: true });
+      for (const file of ["agent-hook.mjs", "mcp.mjs"]) await writeFile(join(directory, file), shipped(file));
+      await writeFile(join(directory, "hooks-enabled.json"), JSON.stringify({ expiresAt: Date.now() + 600_000, clientEntry: "/fixture/client.js" }));
+      await writeFile(join(directory, "scopes.json"), JSON.stringify({ agents: role.scope ? { a1: role.scope } : {} }));
+      await writeFile(join(directory, "brief.json"), JSON.stringify({ enable_inbox: true, enable_brief_nudge: true, pending: [] }));
+      await writeFile(join(directory, "background-agents.json"), JSON.stringify({ agents: [] }));
+      const scope = role.scope;
+      const deps: PromptDeps = {
+        hostSupports: async () => true, providerSupports: async () => true, bridge: async () => bridge,
+        workspace: async (_agentId, native) => scope ? bridge.workspaceText({ contributor: scope.role === "contributor", workflow: scope.workflow as never, native, clientEntry: "/fixture/client.js", bridge: join(directory, "mcp.mjs") }) : null,
+        record: async (agentId, hash) => writeFile(join(directory, `hook-state/prompt-${agentId}.json`), JSON.stringify({ hash, at: Date.now() })),
+      };
+      const env = { ...role.env, ...(role.env.FOLLOW_UP_BRIEF !== undefined ? { FOLLOW_UP_BRIEF: provider } : {}), FOLLOW_UP_PROVIDER: provider };
+      const opened = await withSystemPrompt({ agentId: "a1", provider, purpose: "interactive", env }, deps);
+      const blank = Object.fromEntries(["HOOK_IMPORT", "RECOVERY", "TOOLS", "PROVIDER", "ROOT", "BRIEF", "OVERSEER", "WAIT", "BACKGROUND_WORK", "SYSTEM_PROMPT"].map(k => [`FOLLOW_UP_${k}`, ""]));
+      const fire = (event: object) => new Promise<string>((ok, bad) => {
+        const child = spawn(process.execPath, [join(directory, "agent-hook.mjs")], { env: { ...process.env, ...blank, PASEO_AGENT_ID: "a1", ...opened.env }, stdio: ["pipe", "pipe", "pipe"] });
+        let out = ""; child.stdout.on("data", c => out += c); child.once("error", bad);
+        child.once("exit", () => { const o = out.trim(); if (!o) return ok(""); const j = JSON.parse(o); ok(j.reason ?? j.hookSpecificOutput?.additionalContext ?? ""); });
+        child.stdin.end(JSON.stringify({ session_id: "s1", ...event }));
+      });
+      const prompt = (opened.appendSystemPrompt ?? []).join("\n\n");
+      const measured = {
+        start: textTokens(prompt) + textTokens(await fire({ hook_event_name: "SessionStart", source: "startup" })),
+        perTurn: (await fire({ hook_event_name: "UserPromptSubmit", prompt: "one" }), textTokens(await fire({ hook_event_name: "UserPromptSubmit", prompt: "two" }))),
+        resume: textTokens(await fire({ hook_event_name: "SessionStart", source: "compact" })),
+        stop: (await fire({ hook_event_name: "PostToolUse", tool_name: "Edit", tool_input: { file_path: "a" } }), textTokens(await fire({ hook_event_name: "Stop", stop_hook_active: false }))),
+      };
+      const budget = TEXT_BUDGET[name];
+      for (const k of ["start", "perTurn", "resume", "stop"] as const) {
+        const limit = budget[k];
+        if (limit === null) continue;
+        assert.ok(measured[k] <= limit, `${name} on ${provider}: ${k} ${measured[k]} tokens, budget ${limit}`);
+      }
+    });
+  }

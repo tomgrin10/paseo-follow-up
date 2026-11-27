@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createHash, randomUUID } from "node:crypto";
 // One place for Follow-up's words and the one turn-end decision (shared/agent-text.mjs, shared/turn-checks.mjs).
 // scripts/build.mjs inlines both into hook-source.ts, so the copy in the data directory still imports nothing else.
-import { named, detachedNotice, quietInstruction, stopReason, nudgeReason, syncBookkeeping, checksLine, pollNudge, workspaceText, demotedNotice, needsYouInstruction, actionInstruction, overseerInstruction, waitInstruction, backgroundWorkInstruction } from "../shared/agent-text.mjs";
+import { named, detachedNotice, quietInstruction, stopReason, nudgeReason, syncBookkeeping, syncCall, checksLine, pollNudge, workspaceText, demotedNotice, needsYouInstruction, actionInstruction, overseerInstruction, waitInstruction, backgroundWorkInstruction } from "../shared/agent-text.mjs";
 import { isAskInput, pickNudges, turnEndDecision, dueBlock } from "../shared/turn-checks.mjs";
 
 /** Set by the worker's prelude (shared/legacy.ts withRuntimePrelude); absent when a test imports this file. */
@@ -228,7 +228,19 @@ async function main() {
     return;
   }
   const context = () => workspaceInstructions({ contributor, workflow, clientEntry: lease.clientEntry });
-  const sessionText = async () => [workspace ? context() : null, ...await nativeExtras(brief), ...await waitExtras(), (workspace || env("ROOT") === "1") && !inPrompt.has("checks") ? say(checksLine) : null].filter(Boolean).join("\n\n");
+  // Paseo 0.17: the workspace text is in the system prompt (part "workspace"), and hook-state/prompt-<agent>.json records
+  // which. Left out while it is still that text; a changed one (a role or workflow change, an enrollment) is said once,
+  // here or in the next Follow-up tool result, whichever comes first, and recorded (server/session-prompt.ts).
+  const recordPath = join(directory, "hook-state", `prompt-${agentId}.json`);
+  const workspacePart = async () => {
+    if (!workspace) return null;
+    const text = context();
+    if (!inPrompt.has("workspace")) return text;
+    const record = await json(recordPath).catch(() => null);
+    return record?.hash === digest(text) ? null : text;
+  };
+  const recordSaid = async text => { if (inPrompt.has("workspace") && workspace && text.includes(context())) await save(recordPath, { hash: digest(context()), at: Date.now() }).catch(() => undefined); };
+  const sessionText = async () => [await workspacePart(), ...await nativeExtras(brief), ...await waitExtras(), (workspace || env("ROOT") === "1") && !inPrompt.has("checks") ? say(checksLine) : null].filter(Boolean).join("\n\n");
   const name = event.hook_event_name;
   if (!["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"].includes(name)) return;
   const session = createHash("sha256").update(String(event.session_id ?? agentId)).digest("hex").slice(0, 24);
@@ -237,7 +249,7 @@ async function main() {
   const emit = text => process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: name, additionalContext: text } }) + "\n");
   if (name === "SessionStart") {
     const text = await sessionText();
-    if (text) { emit(text); await save(path, { ...turn, contextHash: digest(text) }); }
+    if (text) { emit(text); await save(path, { ...turn, contextHash: digest(text) }); await recordSaid(text); }
     return;
   }
   if (name === "UserPromptSubmit") {
@@ -247,7 +259,7 @@ async function main() {
     const tellDemoted = demoted && turn?.demotedNotice !== demoted.at;
     await save(path, { startedAt: Date.now(), dirtyAt: null, lastToolAt: null, stopped: false, quietRevision, contextHash: hash, ...(turn?.detachedNotice ? { detachedNotice: turn.detachedNotice } : {}), ...(tellDemoted || turn?.demotedNotice ? { demotedNotice: tellDemoted ? demoted.at : turn.demotedNotice } : {}) });
     const out = [text && shouldRepeat(env("PROVIDER"), turn, hash) ? text : null, tellDemoted ? demoted.text : null].filter(Boolean);
-    if (out.length) emit(out.join("\n\n"));
+    if (out.length) { emit(out.join("\n\n")); await recordSaid(out.join("\n\n")); }
     return;
   }
   if (name === "PostToolUse") {
@@ -290,7 +302,7 @@ async function main() {
   // The reply this Stop interrupts is the agent's real answer; what it says after the bookkeeping continuation answers
   // Follow-up. The inbox reports this one as the Finished reason (server/inbox-classifier.ts finishedReply).
   if (typeof event.last_assistant_message === "string" && event.last_assistant_message.trim()) await save(join(directory, "hook-state", `bookkeeping-${agentId}.json`), { at: Date.now(), reply: event.last_assistant_message.slice(0, 4000) }).catch(() => undefined);
-  const reasons = [detached ? detachedNotice : null, decision.due.length ? dueBlock(decision.due, native) : null, decision.sync ? `${stopReason} ${syncBookkeeping}\n\n` + context() : null, decision.nudge ? say(nudgeReason) : null].filter(Boolean);
+  const reasons = [detached ? detachedNotice : null, decision.due.length ? dueBlock(decision.due, native) : null, decision.sync ? (inPrompt.has("workspace") ? `${stopReason} ${syncBookkeeping} ${say(syncCall)}` : `${stopReason} ${syncBookkeeping}\n\n` + context()) : null, decision.nudge ? say(nudgeReason) : null].filter(Boolean);
   process.stdout.write(JSON.stringify({ decision: "block", reason: reasons.join("\n\n") }) + "\n");
 }
 // Tests import shouldNudge without running the hook; the worker imports workspaceInstructions the same way.
