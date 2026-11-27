@@ -1770,6 +1770,16 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    view (`LARGE_SCREEN`) is retired: its id only redirects to the tab. 2026-11-27, the developer: one view instead of
    the panel, the larger view and Home's pane each laying out the same workspace differently. Guarded by
    `tests/workspace-view.test.ts` and `scripts/screenshots.mjs --only workspace-view`.
+141. **One Home model per store change** (`one-home-model-per-change`). Home's model (`buildHome`, `shared/home.ts`) is
+   built once per change to the stores it reads, and every surface that draws it shares that one object: Home, Catch
+   up, the sidebar view and the sidebar item's badge all read `useHomeModel` (`client/home-data.ts`), whose
+   `sharedHome` returns the model already built for the same inputs (compared by identity), so the first consumer to
+   render after a change builds it and the rest reuse it; the Display arrangement over it (`useArranged`, Home and the
+   sidebar view) is shared the same way. No client surface calls `buildHome` or `arrangeHome` itself. 2026-11-27 (live-sized seed,
+   the broad perf check): each consumer built it for itself, 210-480 ms a run on a phone (6x CPU), so a feed push or
+   an agent update rebuilt it up to four times, the badge's on every screen; Catch up opened in 1.4-1.5 s with two
+   builds. Guarded by `tests/one-home-model.test.ts` (four mounted consumers, one build per change, the same object;
+   a scan for `buildHome` in `client/`).
 
 136. **Checks say what they are doing** (`checks-say-what-they-are-doing`). One helper, `checksState`
    (`shared/pr-status.ts`), says what a PR's checks are doing: failed, running (a check in progress, `checksRunning`),

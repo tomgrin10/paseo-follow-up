@@ -94,7 +94,8 @@ export function useHomeModel(sources: HomeSources): HomeModel {
   const compass = useSyncExternalStore(extras.subscribe, extras.compass, extras.compass);
   // Your questions: an unread answer is a Needs-you row; a question asking is its row's line (the home feed's context).
   const questions = useSyncExternalStore(extras.subscribe, extras.context, extras.context);
-  return useMemo(() => buildHome({ rows: inbox.rows(), tracked: live.all(), paseo: paseo.all(), now: Date.now(), sort, priorities, hidden: overseer ? [overseer] : [], hold, compass, raised, questions }), [a, b, c, now, sort, priorities, inbox, live, paseo, overseer, hold, raised, compass, questions]);
+  const deps = [inbox, live, paseo, extras, a, b, c, now, sort, priorities, overseer, hold, raised, compass, questions];
+  return useMemo(() => sharedHome(deps, () => buildHome({ rows: inbox.rows(), tracked: live.all(), paseo: paseo.all(), now: Date.now(), sort, priorities, hidden: overseer ? [overseer] : [], hold, compass, raised, questions })), deps);
 }
 
 /**
@@ -105,10 +106,33 @@ export function useArranged(sources: HomeSources, model: HomeModel): { arranged:
   const { paseo, extras } = sources;
   const view = useSyncExternalStore(extras.subscribe, extras.view, extras.view);
   const c = useSyncExternalStore(paseo.subscribe, paseo.version, paseo.version);
-  const facts = useMemo(() => (id: string) => paseo.get(id), [paseo, c]);
-  const arranged = useMemo(() => arrangeHome(model, view, facts), [model, view, facts]);
+  // Shared like the model (one-home-model-per-change): Home and the sidebar view arrange the same model once.
+  const deps = [model, view, paseo, c];
+  const { facts, arranged } = useMemo(() => sharedArrangement(deps, () => { const facts = (id: string) => paseo.get(id); return { facts, arranged: arrangeHome(model, view, facts) }; }), deps);
   return { arranged, view, facts };
 }
+
+/**
+ * One Home model per store change, shared by every consumer (one-home-model-per-change, invariant 141). Home, Catch
+ * up, the sidebar view and the sidebar item's badge each call useHomeModel and are often mounted together; each used
+ * to build the whole model itself (`buildHome`, 210-480 ms on a phone at 140 workspaces), so one feed push rebuilt it
+ * up to four times, on screens that weren't Home too. The first consumer to render after a change builds it; the rest
+ * get that same object, because the inputs are compared by identity. One entry is kept: every consumer renders the
+ * same store versions in the same commit.
+ */
+function sharedOne<T>() {
+  let held: { deps: readonly unknown[]; value: T } | null = null; let builds = 0;
+  const get = (deps: readonly unknown[], build: () => T): T => {
+    if (held && held.deps.length === deps.length && held.deps.every((d, i) => Object.is(d, deps[i]))) return held.value;
+    builds++; held = { deps, value: build() }; return held.value;
+  };
+  return Object.assign(get, { builds: () => builds });
+}
+export const sharedHome = sharedOne<HomeModel>();
+const sharedArrangement = sharedOne<{ facts: (id: string) => PaseoWorkspaceLite | undefined; arranged: ArrangedHome }>();
+/** How many times Home's model and its arrangement were built (tests/one-home-model.test.ts). */
+export const homeBuilds = () => sharedHome.builds();
+export const arrangeBuilds = () => sharedArrangement.builds();
 
 /** Rebuilds a value at most every `ms` while mounted (used for the brief pane's source ages). */
 export function useTick(ms: number): number {

@@ -71,7 +71,7 @@ Nothing polls while the app is hidden.
 | `client/list-keys.ts`, `shared/list-keys.ts` | The keyboard walk through a list's rows, for Home and the sidebar view. See [Keyboard walk](#keyboard-walk). |
 | `client/row-menu.tsx`, `client/menu-item.tsx`, `client/row-actions.ts`, `shared/row-menu.ts`, `client/panel-menu.tsx`, `client/rename.tsx` | The row menu: right-click, long-press or the menu key (Shift+F10) on a Home row or search result. See [Row menu](#row-menu). |
 | `client/home-view.ts` | Home's derived model: sort choice, priorities, titles for search, limits. |
-| `client/home-data.ts` | Paseo's own workspace list, for untracked rows (Quiet) and header buttons. |
+| `client/home-data.ts` | Paseo's own workspace list, for untracked rows (Quiet) and header buttons; `useHomeModel`, Home's model for every surface that draws it (Home, Catch up, the sidebar view, the sidebar item's badge), built once per store change and shared (`sharedHome`, invariant 141). |
 | `client/sidebar-view.tsx`, `client/sidebar-visibility.ts` | Home's list as Paseo's sidebar (on hosts that support it), and its registration. |
 | `client/row-badges.tsx`, `shared/row-badges.ts` | Paseo 0.17.1+: Follow-up's badges on Paseo's own sidebar workspace rows (`addWorkspaceRowBadgeItem`). One item, "Follow-up: Done" in the sidebar's Show menu: a green Done where Home shows the workspace as Done, read from the live store (no poll of its own). It replaces the worker's Done label there; older hosts register nothing and keep the label (invariant 113). |
 | `client/panel.tsx` | The workspace view (`WorkspaceView`) and its two panels: this workspace only. |

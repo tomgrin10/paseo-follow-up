@@ -1,0 +1,1 @@
+- Opening Home, Catch up, Settings or a chat is faster: Follow-up works out what needs you once per change instead of once for every place that shows it.
