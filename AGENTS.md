@@ -1453,7 +1453,12 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    started (told from its prompt, so it holds across a worker restart), only to the agent whose turn just ended; the
    `needs_you` nudge only after a turn the developer started (2026-11-26, check-install: a repair's turn was nudged,
    and a reload between a nudge and its reply let the next nudge through). Wait attaches to every provider; outside Claude Code its command
-   detaches itself. A job that reads other people's words runs wherever the provider promises it no tools (Claude Code,
+   detaches itself. On every shell, the runner starts in its own session using Node's detached spawn
+   (Linux and macOS), so launch-shell process-group cleanup cannot kill the receipt writer. Claude's launcher
+   keeps streaming output and reports the runner's exit; other shells return at once with outputPath. Killing the
+   launcher ends observation only; signalling the runner still stops its command and writes the receipt.
+   Guarded by `tests/wait-jobs.test.ts` (launch-group SIGKILL on sh, bash and background Bash, with and without
+   timeout). A job that reads other people's words runs wherever the provider promises it no tools (Claude Code,
    Codex and Pi through their CLIs, OpenCode through a session with every permission denied) and nowhere else
    (invariant 81); `providerNotes` says in one block only what a provider the developer has can't do, with what to do,
    never a pick the developer can't make. Every helper left on its default runs on a provider Paseo has

@@ -45,6 +45,22 @@ export interface JobStatus { jobId: string; status: "prepared" | "running" | "co
 export type WaitResult = JobStatus & { outcome: "completed" | "failed" | "still_pending" | "new_message"; waitedSeconds: number; instruction: string };
 
 const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+// Node is already required by Paseo. detached creates a new session on Linux and macOS;
+// nohup only ignores HUP and cannot survive a shell tool killing its launch process group.
+const launcher = `
+const { spawn } = require('node:child_process');
+const { openSync, closeSync } = require('node:fs');
+const { constants } = require('node:os');
+const [mode, runner, directory, cwd, command, output] = process.argv.slice(1);
+const fd = mode === 'detached' ? openSync(output, 'a', 0o600) : undefined;
+const child = spawn('sh', [runner, directory, cwd, command], {
+  detached: true, stdio: fd === undefined ? ['ignore', 'inherit', 'inherit'] : ['ignore', fd, fd],
+});
+if (fd !== undefined) closeSync(fd);
+child.on('error', error => { console.error(error.message); process.exitCode = 1; });
+if (mode === 'detached') child.unref();
+else child.on('exit', (code, signal) => { process.exitCode = code ?? 128 + constants.signals[signal]; });
+`;
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT";
 
 /** A record the runner or this store wrote: a small regular file, never a symlink. */
@@ -88,12 +104,12 @@ export class WaitJobs {
     await writeFile(join(path, "job.json"), JSON.stringify(record), { mode: 0o600, flag: "wx" });
     const limit = input.timeoutSeconds ?? DEFAULT_JOB_TIMEOUT_SECONDS;
     await writeFile(join(path, "timeout"), String(limit), { mode: 0o600, flag: "wx" });
-    const run = ["sh", runner, path, owner.cwd, input.command].map(quote).join(" ");
+    const output = join(path, "output.log");
+    const run = [process.execPath, "-e", launcher, "--", shell, runner, path, owner.cwd, input.command, output].map(quote).join(" ");
     if (shell === "detached") {
-      const output = join(path, "output.log");
       return {
         jobId: id,
-        bashCommand: `nohup ${run} > ${quote(output)} 2>&1 < /dev/null &`,
+        bashCommand: run,
         outputPath: output,
         instruction: "Run bashCommand with your shell tool exactly as given: it starts the job in the background and returns at once. Then call wait_for_job. Its output is in outputPath. Preparing this job has not executed the command.",
       };

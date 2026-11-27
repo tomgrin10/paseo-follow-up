@@ -139,7 +139,7 @@ test("Wait on a provider without background Bash: the command detaches itself, a
     const jobs = new WaitJobs(dir, null);
     const owner = { id: "agent-1", cwd: dir };
     const prepared = await jobs.prepare(owner, { description: "echo", command: "echo hello-from-wait" }, "detached") as { jobId: string; bashCommand: string; outputPath: string; instruction: string };
-    assert.match(prepared.bashCommand, /^nohup .* &$/); assert.match(prepared.instruction, /returns at once/);
+    assert.doesNotMatch(prepared.bashCommand, /nohup/); assert.match(prepared.instruction, /returns at once/);
     // What an agent's shell tool does: run it. It must return at once, before the job is done.
     const ran = spawnSync("sh", ["-c", prepared.bashCommand], { timeout: 5000 });
     assert.equal(ran.status, 0);

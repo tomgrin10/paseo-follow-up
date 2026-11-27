@@ -32,10 +32,13 @@ const only = casesAt >= 0 ? new Set(process.argv[casesAt + 1].split(",")) : proc
 // Real model calls need Claude credentials, and Wait's native tools need Paseo 0.15+. Without either (CI has no
 // credentials and installs Paseo 0.14), this prints SKIP with the reason and exits 0. --live (npm run test:wait-live)
 // makes a missing prerequisite a failure instead.
+const withCodex = process.argv.includes("--codex");
+const liveCodex = process.env.CODEX_HOME ?? join(homedir(), ".codex");
 const liveClaude = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
 const skip = await (async () => {
   const credentials = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"].some(key => process.env[key])
     || await access(join(liveClaude, ".credentials.json")).then(() => true, () => false);
+  if (withCodex && !await access(join(liveCodex, "auth.json")).then(() => true, () => false)) return "--codex needs Codex auth.json";
   if (!credentials) return `no Claude credentials (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, CLAUDE_CODE_OAUTH_TOKEN or ${join(liveClaude, ".credentials.json")})`;
   const version = await exec("paseo", ["--version"], { timeout: 30000 }).then(({ stdout }) => stdout.trim(), () => "");
   const [major, minor] = (version.match(/(\d+)\.(\d+)\./) ?? []).slice(1).map(Number);
@@ -71,7 +74,7 @@ const url = `ws://127.0.0.1:${port}/ws`;
 const pluginId = "follow-up";
 const configFile = join(home, "config.json");
 // The live-model check: claude stays real, in the env (its stub skipped) and in the config (its provider on).
-const REAL = ["claude"];
+const REAL = withCodex ? ["claude", "codex"] : ["claude"];
 const writeConfig = (extra = {}) => writeFile(configFile, JSON.stringify(harnessConfig({ port, mcp: true, real: REAL, extra: { plugins: { [pluginId]: { source: "directory", path: packedDirectory, enabled: true }, ...extra } } })));
 const result = { cases: [], memory: [] };
 const log = (name, data = {}) => console.log(JSON.stringify({ event: name, ...data }));
@@ -112,17 +115,18 @@ async function call(agentId, name, input) {
   return { ...out, value: out.structuredContent ?? (() => { try { return JSON.parse(out.text); } catch { return null; } })() };
 }
 async function runCase(workspaceId, label, command, maxWait, action) {
-  const agent = await client.createAgent({ provider: "claude", model: "haiku", modeId: "bypassPermissions", cwd, workspaceId, title: `Wait ${label}` });
+  const codex = label === "codex";
+  const agent = await client.createAgent({ provider: codex ? "codex" : "claude", model: codex ? "gpt-5.4" : "haiku", modeId: codex ? "full-access" : "bypassPermissions", cwd, workspaceId, title: `Wait ${label}` });
   const names = daemon.agentManager.getPluginTools(agent.id).map(t => t.name);
   for (const name of ["wait_prepare_job", "wait_for_job", "wait_get_job"]) assert.ok(names.includes(name), `${name} attached natively`);
   const prompt = label === "adoption"
     ? `Run this finite command: ${JSON.stringify(command)}. It takes about 12 seconds. Report WAIT_ADOPTION with its actual exit code once it has finished.`
-    : `Prepare one job with description ${JSON.stringify(label)} and command ${JSON.stringify(command)}. Run its exact bashCommand with native Bash run_in_background=true. Then wait_for_job with max_wait_seconds=${maxWait}. Each still_pending requires wait_get_job and another wait while pending, again with max_wait_seconds=${maxWait}: every wait_for_job call in this task uses max_wait_seconds=${maxWait}, never more. When finished, reply WAIT_${label.toUpperCase()} and the actual exit code. Do not use timers or plain final replies as a substitute for wait_for_job.`;
+    : `Prepare one job with description ${JSON.stringify(label)} and command ${JSON.stringify(command)}. Run its exact bashCommand ${codex ? "with exec_command, which returns at once; read outputPath for output" : "with native Bash run_in_background=true"}. Then wait_for_job with max_wait_seconds=${maxWait}. Each still_pending requires wait_get_job and another wait while pending, again with max_wait_seconds=${maxWait}: every wait_for_job call in this task uses max_wait_seconds=${maxWait}, never more. When finished, reply WAIT_${label.toUpperCase()} and the actual exit code. Do not use timers or plain final replies as a substitute for wait_for_job.`;
   await client.sendMessage(agent.id, prompt);
   const timeline = () => daemon.agentManager.getTimeline(agent.id);
   await until(() => timeline().some(i => i.type === "tool_call" && i.name.endsWith("wait_for_job") && i.status === "running"), `${label} wait starts`);
   const lifecycle = daemon.agentManager.getAgent(agent.id)?.lifecycle; assert.equal(lifecycle, "running", "the agent stays Running while it waits");
-  assert.equal(launches.get(agent.id)?.env?.CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS, "0");
+  if (!codex) assert.equal(launches.get(agent.id)?.env?.CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS, "0");
   assert.ok(!Object.keys(launches.get(agent.id)?.mcpServers ?? {}).some(name => /wait/.test(name)), "no Wait MCP server of its own");
   let actionMs;
   if (action) {
@@ -140,6 +144,11 @@ async function runCase(workspaceId, label, command, maxWait, action) {
   if (!action) {
     const terminal = calls.filter(i => i.name.endsWith("wait_for_job") || i.name.endsWith("wait_get_job")).map(receipt).findLast(r => r?.status === "completed" || r?.status === "failed");
     assert.equal(terminal?.status, label === "failure" ? "failed" : "completed", "completion must be observed through a receipt");
+    if (codex) {
+      assert.ok(calls.some(i => i.name.endsWith("exec_command")), "a real Codex exec_command launches the job");
+      assert.ok(prepared.outputPath, "Codex gets detached output");
+      assert.match(await readFile(prepared.outputPath, "utf8"), /WAIT_CODEX_COMPLETE/);
+    }
     if (label === "repeat") { assert.ok(waits.filter(w => w.receipt?.outcome === "still_pending").length >= 2, "the agent wakes repeatedly"); assert.ok(calls.some(i => i.name.endsWith("wait_get_job")), "and inspects between waits"); }
   } else if (action === "stop") assert.equal(waits.at(-1).status, "canceled");
   else { assert.equal(waits.at(-1).receipt?.outcome, "new_message"); assert.ok(endedMs - actionMs < 7000, "a message releases the wait before the job finishes"); }
@@ -158,6 +167,11 @@ try {
   // real config dir (actualClaude, for credentials), explicitly; Follow-up's hooks land in userHome.
   // The one live-model check: its Claude agent runs the real claude CLI with the developer's credentials (opt-in, skipped in CI).
   applyEnv(harnessEnv(root, { home: userHome, paseoHome: home, set: { PASEO_DAEMON_URL: url }, real: REAL }));
+  if (withCodex) {
+    await mkdir(process.env.CODEX_HOME, { recursive: true });
+    // Credentials only: config, hooks, sessions and all writes remain in the isolated harness home.
+    await writeFile(join(process.env.CODEX_HOME, "auth.json"), await readFile(join(liveCodex, "auth.json")), { mode: 0o600 });
+  }
   await writeConfig();
   // Explicit activation only (as check-install.mjs): no tracking, so Follow-up doesn't call gh or a model here.
   await mkdir(join(home, "plugin-data", pluginId), { recursive: true });
@@ -198,6 +212,7 @@ try {
   const workspace = await client.createWorkspace({ source: { kind: "directory", path: cwd }, title: "Synthetic bounded waits" });
   const workspaceId = workspace.workspace.id;
   const want = label => !only || only.has(label);
+  if (withCodex && want("codex")) await runCase(workspaceId, "codex", "sleep 12; printf WAIT_CODEX_COMPLETE", 2);
   let adoption, repeat;
   // The job cases need Follow-up's Wait, which a host that runs background work doesn't attach.
   if (!hostRunsBackgroundWork) {
