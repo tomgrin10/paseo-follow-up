@@ -1,0 +1,1 @@
+- Scheduled check-backs and requested checks results now arrive after an hour idle, even when Paseo has unloaded the agent. Archived workspaces and agents still cancel delivery.

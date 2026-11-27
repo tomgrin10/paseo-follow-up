@@ -348,8 +348,9 @@ waiting one, and a waiting one says what moves it ("Check alert emails in stagin
   <ISO>: <title>`, then where it stood and what to do), and marks the trigger `queuedAt`; the queue's channel marks
   `sentAt` when it leaves and `notSent` when it is cancelled. It goes whether Auto-send is on or not: someone named the
   time (the developer, or the agent for its own check-back on a waiting task). A running turn is waited out; an idle
-  agent is messaged even unloaded (it asked, as with `wait_for_checks`); a closed or archived agent gets nothing and the
-  row reads "Didn't go out · the agent was closed" in amber. The engine's untouched-pass skip ends at the earliest due time
+  agent is messaged even unloaded (`closed`): Paseo reopens it, as with `wait_for_checks`. An archived workspace,
+  archived agent or gone agent cancels, and the row says why ("Didn't go out · the agent was archived") in amber.
+  Old stored cancellation reasons stay as recorded. The engine's untouched-pass skip ends at the earliest due time
   (`nextDue`), so it fires within a tick and never before; a worker down at the time fires it once on its first pass,
   and the message says it is late. Paused with the rest of background work while the governor holds it. Developer
   lines (row "Sends 12:15", then "Sent 12:15"; the live line and Home's Waiting row "<title> · checks back 12:15")

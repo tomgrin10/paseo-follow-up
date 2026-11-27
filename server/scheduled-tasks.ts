@@ -9,7 +9,7 @@ import { pendingAt, scheduledText } from "../shared/task-trigger";
 export type ScheduledAgent = { status: string; archived: boolean; workspaceId: string | null } | null;
 export const scheduledItemId = (workspaceId: string, obligationId: string, at: string) => `scheduled:${workspaceId}:${obligationId}:${at}`;
 /** Why a time trigger didn't go out, as the task row says it ("Not sent · the agent was archived"). */
-export const NOT_SENT = { archived: "the agent was archived", closed: "the agent was closed", workspace: "the workspace was archived", none: "the workspace has no main agent" } as const;
+export const NOT_SENT = { archived: "the agent was archived", workspace: "the workspace was archived", none: "the workspace has no main agent" } as const;
 
 /**
  * Scheduled tasks (a-scheduled-task-arrives-once-at-its-time): a task whose trigger is a time goes to its main agent
@@ -17,10 +17,10 @@ export const NOT_SENT = { archived: "the agent was archived", closed: "the agent
  * for its own check-back). `evaluate` runs after each engine pass, whose untouched-pass skip already ends at the
  * earliest due time (engine nextDue), so it fires within a tick and never before. A due trigger is saved as one
  * `scheduled` queue message first (a-message-is-saved-before-sent-and-arrives-once) and then marked `queuedAt` on the
- * task, so a crash between the two re-enqueues the same id, which the queue returns as it is. A closed or archived
+ * task, so a crash between the two re-enqueues the same id, which the queue returns as it is. An archived workspace, an archived agent or a gone
  * agent gets nothing, and the task row says why (`notSent`); a worker down at the time fires once, late, on its first
- * pass. The channel resolves the agent when it goes, waits for a running turn to end, and sends to an idle one even
- * when Paseo unloaded it: it asked for this message, as with wait_for_checks (the one exception to invariant 1).
+ * pass. The channel resolves the agent when it goes, waits for a running turn to end, and sends even
+ * when Paseo unloaded the agent (status `closed`): it asked for this message, as with wait_for_checks (the one exception to invariant 1).
  */
 export class ScheduledTasks {
   private queue: MessageQueue | null = null;
@@ -50,7 +50,7 @@ export class ScheduledTasks {
     const agent = w.archived ? null : await this.deps.agent(w.mainAgentId).catch(() => undefined);
     // Unknown (Paseo unreachable): try on the next pass; never a guess either way.
     if (agent === undefined) return;
-    const why = w.archived ? NOT_SENT.workspace : !w.mainAgentId ? NOT_SENT.none : !agent || agent.archived ? NOT_SENT.archived : agent.status === "closed" ? NOT_SENT.closed : null;
+    const why = w.archived ? NOT_SENT.workspace : !w.mainAgentId ? NOT_SENT.none : !agent || agent.archived ? NOT_SENT.archived : null;
     if (!why && this.queue) {
       this.queue.enqueue({ id: scheduledItemId(w.id, o.id, at), kind: "scheduled", key: w.id, ref: { workspaceId: w.id, obligationId: o.id, agentId: w.mainAgentId, at },
         messageId: `scheduled-${o.id}-${Date.parse(at).toString(36)}`, text: scheduledText(o, at, now), priority: "now", state: "queued" });
@@ -68,16 +68,17 @@ export class ScheduledTasks {
     }).catch(error => console.warn(`[follow-up] couldn't record a scheduled task: ${error instanceof Error ? error.message : String(error)}`));
   }
 
-  /** The queue's `scheduled` channel: the main agent, resolved when it goes; never woken from closed or archived. */
+  /** The queue's `scheduled` channel: the main agent, resolved when it goes; Paseo reopens unloaded agents; archived targets cancel. */
   attachQueue(queue: MessageQueue): void {
     this.queue = queue;
     queue.register("scheduled", {
       resolve: async (item): Promise<Resolution> => {
+        const w = (await this.deps.snapshot()).workspaces.find(w => w.id === item.ref.workspaceId);
+        if (!w || w.archived) return { cancel: NOT_SENT.workspace };
         let agent: ScheduledAgent;
         try { agent = await this.deps.agent(item.ref.agentId!); }
         catch { return { defer: "Paseo unreachable" }; }
         if (!agent || agent.archived) return { cancel: NOT_SENT.archived };
-        if (agent.status === "closed") return { cancel: NOT_SENT.closed };
         if (item.state === "queued" && ["running", "initializing"].includes(agent.status)) return { defer: "waits for the agent's turn to end" };
         return { target: { workspaceId: agent.workspaceId, recipients: [item.ref.agentId!] } };
       },

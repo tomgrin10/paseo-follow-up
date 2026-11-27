@@ -50,7 +50,7 @@ async function fixture(t: { after: (f: () => Promise<void>) => void }, w: Worksp
   q.queue.enqueue = input => { const item = enqueue(input); if (item.kind === "scheduled" && !enqueued.some(i => i.id === item.id)) enqueued.push({ ...item }); return item; };
   const items = () => enqueued;
   return {
-    store, sends, items, get engine() { return engine; }, get scheduled() { return scheduled; },
+    store, sends, items, delivered: q.delivered, get engine() { return engine; }, get scheduled() { return scheduled; },
     get: async () => (await store.snapshot()).workspaces[0],
     advance: (ms: number) => { now += ms; }, at: () => now,
     setAgent: (f: (id: string) => ScheduledAgent) => { agent = f; },
@@ -118,8 +118,17 @@ test("Auto-send off still delivers a time trigger, and still holds now, merge an
   assert.equal(f.sends.length, 0, "and nothing auto-sent it");
 });
 
-test("a closed or archived agent gets nothing, and the task row says why", async t => {
-  for (const [agent, why] of [[{ status: "closed", archived: false }, NOT_SENT.closed], [{ status: "idle", archived: true }, NOT_SENT.archived], [null, NOT_SENT.archived]] as const) {
+test("a closed agent receives its requested time trigger once after idle unload", async t => {
+  const f = await fixture(t, workspace({ obligations: [timed(clock + 65 * MIN)] }), { agent: () => ({ status: "closed", archived: false, workspaceId: "workspace" }) });
+  f.advance(65 * MIN); await f.engine.tick(); await f.engine.tick();
+  assert.equal(f.delivered.length, 1);
+  assert.deepEqual(f.delivered[0].target.recipients, ["main-agent"]);
+  assert.ok((await f.get()).obligations[0].trigger?.sentAt);
+  assert.equal((await f.get()).obligations[0].trigger?.notSent, undefined);
+});
+
+test("an archived or gone agent gets nothing, and the task row says why", async t => {
+  for (const [agent, why] of [[{ status: "closed", archived: true }, NOT_SENT.archived], [null, NOT_SENT.archived]] as const) {
     const f = await fixture(t, workspace({ obligations: [timed(clock + MIN)] }), { agent: () => agent && { ...agent, workspaceId: "workspace" } });
     f.advance(MIN); await f.engine.tick();
     assert.equal(f.items().length, 0, JSON.stringify(agent));
@@ -130,7 +139,7 @@ test("a closed or archived agent gets nothing, and the task row says why", async
   }
 });
 
-test("at send time the channel waits for a running turn, cancels for a closed agent, and the row mirrors the message", async t => {
+test("at send time the channel waits for a running turn, reopens a closed agent and cancels for an archived agent, and the row mirrors the message", async t => {
   const f = await fixture(t, workspace({ obligations: [timed(clock + MIN)] }));
   f.advance(MIN); await f.engine.tick();
   const item = f.items()[0];
@@ -140,13 +149,15 @@ test("at send time the channel waits for a running turn, cancels for a closed ag
   f.setAgent(() => ({ status: "idle", archived: false, workspaceId: "workspace" }));
   assert.deepEqual(await channel.resolve({ ...item, state: "queued" }), { target: { workspaceId: "workspace", recipients: ["main-agent"] } }, "idle, loaded or not: it asked for this message");
   f.setAgent(() => ({ status: "closed", archived: false, workspaceId: "workspace" }));
-  assert.deepEqual(await channel.resolve({ ...item, state: "queued" }), { cancel: NOT_SENT.closed });
+  assert.deepEqual(await channel.resolve({ ...item, state: "queued" }), { target: { workspaceId: "workspace", recipients: ["main-agent"] } });
+  f.setAgent(() => ({ status: "closed", archived: true, workspaceId: "workspace" }));
+  assert.deepEqual(await channel.resolve({ ...item, state: "queued" }), { cancel: NOT_SENT.archived });
   await channel.project({ ...item, state: "sent", envelope: { messageId: item.messageId, to: "main-agent", at: iso(clock + MIN + 2_000) } });
   let w = await f.get();
   assert.equal(w.obligations[0].trigger?.sentAt, iso(clock + MIN + 2_000));
   assert.equal(atLabel(w.obligations[0].trigger!, clock + MIN, "UTC"), "Sent 10:01");
-  await channel.project({ ...item, state: "cancelled", reason: NOT_SENT.closed });
-  w = await f.get(); assert.equal(w.obligations[0].trigger?.notSent, NOT_SENT.closed);
+  await channel.project({ ...item, state: "cancelled", reason: NOT_SENT.archived });
+  w = await f.get(); assert.equal(w.obligations[0].trigger?.notSent, NOT_SENT.archived);
 });
 
 test("a worker down at the time fires once, late, on its first pass, and a second restart sends nothing more", async t => {
@@ -184,4 +195,19 @@ test("the sheet's typed time: a date and time, or just a clock time (today, else
   const example = /like (\d{4}-\d\d-\d\d \d\d:\d\d)\./.exec(atProblem(null, now)!)![1];
   assert.equal(atProblem(parseLocalTime(example, now), now), null, "the format example is itself a valid time");
   assert.equal(example, localTimeText(atChoices(now)[2].at));
+});
+
+test("an archived workspace cancels a time trigger before enqueue and before send", async t => {
+  const f = await fixture(t, workspace({ obligations: [timed(clock + MIN)] }));
+  f.advance(MIN); await f.engine.tick();
+  const item = f.items()[0];
+  const channel = (f.scheduled as unknown as { queue: { channels: Map<string, import("../server/message-queue").Channel> } }).queue.channels.get("scheduled")!;
+  await f.store.mutateWorkspace("workspace", w => { w.archived = true; });
+  assert.deepEqual(await channel.resolve(item), { cancel: NOT_SENT.workspace });
+  await channel.project({ ...item, state: "cancelled", reason: NOT_SENT.workspace });
+  assert.equal((await f.get()).obligations[0].trigger?.notSent, NOT_SENT.workspace);
+  const g = await fixture(t, workspace({ archived: true, obligations: [timed(clock + MIN)] }));
+  g.advance(MIN); await g.scheduled.evaluate();
+  assert.equal(g.items().length, 0);
+  assert.equal((await g.get()).obligations[0].trigger?.notSent, NOT_SENT.workspace);
 });
