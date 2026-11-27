@@ -133,7 +133,7 @@ export default function contribute(host: PluginClientContext) {
   const Overview = (props: PluginScreenProps) => <KeyboardRoom compact={props.layout.compact}><FollowHome {...props} deps={homeDeps} />{reportHost(props)}</KeyboardRoom>;
   const Panel = (props: PluginWorkspacePanelProps) => <KeyboardRoom compact={props.layout.compact}><FollowPanel {...props} place="panel" openSettings={openSettings} openOverview={openOverview} openView={openPanel} inbox={inbox} live={store} briefDeps={briefDeps} sources={sources} />{reportHost(props)}</KeyboardRoom>;
   const ViewTab = (props: PluginWorkspacePanelProps) => <KeyboardRoom compact={props.layout.compact}><FollowPanel {...props} place="tab" openSettings={openSettings} openOverview={openOverview} inbox={inbox} live={store} briefDeps={briefDeps} sources={sources} />{reportHost(props)}</KeyboardRoom>;
-  const Large = (props: PluginScreenProps) => <LargeRedirect {...props} openView={openPanel} />;
+  const Large = (props: PluginScreenProps) => <KeyboardRoom compact={props.layout.compact}><LargeRedirect {...props} openView={openPanel} /></KeyboardRoom>;
   const removers: (() => unknown)[] = [
     client.addScreen({ id: OVERVIEW, title: "Follow-up", Component: Overview }),
     client.addScreen({ id: LARGE_SCREEN, title: params => store.get(params.workspaceId ?? "")?.title ?? "Follow-up", Component: Large }),

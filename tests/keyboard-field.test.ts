@@ -38,14 +38,14 @@ test("the-keyboard-never-covers-a-field: every text field in the client is Field
 
 test("the-keyboard-never-covers-a-field: every screen, panel and settings screen draws inside a KeyboardRoom", async () => {
   const s = await read("index.client.tsx");
-  for (const name of ["Settings", "Overview", "Panel", "Large"]) {
+  for (const name of ["Settings", "Overview", "Panel", "ViewTab", "Large"]) {
     const m = s.match(new RegExp(`const ${name} = \\(props: [^)]*\\) => (<[A-Za-z]+)`));
     assert.ok(m, `${name} is defined`);
     assert.equal(m![1], "<KeyboardRoom", `${name}'s surface draws inside a KeyboardRoom`);
   }
   // Every registered surface is one of those.
   for (const m of s.matchAll(/client\.(addScreen|addWorkspacePanel)\(\{[^}]*Component: (\w+)/g))
-    assert.ok(["Settings", "Overview", "Panel", "Large"].includes(m[2]), `${m[1]} registers ${m[2]}, which isn't in a KeyboardRoom`);
+    assert.ok(["Settings", "Overview", "Panel", "ViewTab", "Large"].includes(m[2]), `${m[1]} registers ${m[2]}, which isn't in a KeyboardRoom`);
   assert.match(await read("client/settings-screens.ts"), /createElement\(Screen/, "settings screens render the Settings surface");
   // The docked pane is a room too: setup draws it in a sheet, outside any surface's room.
   assert.match(await read("client/docked-pane.tsx"), /<KeyboardRoom compact=\{compact\}/);

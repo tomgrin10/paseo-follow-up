@@ -1814,7 +1814,7 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    at phone width), the field you type in stays above the on-screen keyboard, on every screen, panel and sheet. Paseo
    draws edge to edge, so the window never shrinks for the keyboard; it moves only its own composer and positions
    fields in its sheets. Every text field is `Field` (`client/field.tsx`, the SDK's `TextInput`), never a raw one, and
-   every surface (Home and the Overseer, the larger view, the workspace panel, every settings screen) and `DockedPane`
+   every surface (Home and the Overseer, the workspace view in the panel and its tab, every settings screen) and `DockedPane`
    is a `KeyboardRoom` (`client/keyboard.tsx`): it stops above the keyboard by what the keyboard covers of it, then
    scrolls the focused field into view (with room for its Send in a docked pane) and lifts by what scrolling can't
    cover. One keyboard reader for the whole client, events only. 2026-11-27, the developer: "when writing something,
