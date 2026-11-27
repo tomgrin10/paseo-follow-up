@@ -27,7 +27,7 @@ test("the workspace panel: the Summary takes the goal's slot under the title; Re
   assert.doesNotMatch(header, /<Text[^>]*>\{w\.goal\}<\/Text>/, "the goal only shows through the Summary line's fallback");
   const panel = await source("client/panel.tsx");
   assert.doesNotMatch(panel, /AboutSection|\babout=\{/);
-  const card = panel.slice(panel.indexOf('label="Spec, agent and recovery"'));
+  const card = panel.slice(panel.indexOf('title="Spec, agent and recovery"'));
   assert.ok(card.indexOf("<SummaryRow") > 0 && card.indexOf("<SummaryRow") < card.indexOf("Main agent"), "first row after the spec");
 });
 

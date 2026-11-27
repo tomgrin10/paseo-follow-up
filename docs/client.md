@@ -72,6 +72,7 @@ Nothing polls while the app is hidden.
 | `client/sidebar-view.tsx`, `client/sidebar-visibility.ts` | Home's list as Paseo's sidebar (on hosts that support it), and its registration. |
 | `client/row-badges.tsx`, `shared/row-badges.ts` | Paseo 0.17.1+: Follow-up's badges on Paseo's own sidebar workspace rows (`addWorkspaceRowBadgeItem`). One item, "Follow-up: Done" in the sidebar's Show menu: a green Done where Home shows the workspace as Done, read from the live store (no poll of its own). It replaces the worker's Done label there; older hosts register nothing and keep the label (invariant 113). |
 | `client/panel.tsx` | The workspace panel: this workspace only. |
+| `client/fold.tsx` | The one fold (panel-sections-fold): `useFold` (open or closed per device, per section) and `FoldButton` (the header button with its expanded state), used by every panel section (`Card`'s `fold`, Your questions) and settings' `Disclosure`. Section ids are `PANEL_FOLDS` (`shared/settings-nav.ts`). |
 | `client/recovery-actions.ts` | The Recovery block's one primary action per state (`recovery-offers-one-primary-action`): Retry recovery after a failure, Run recovery (or Run queued recovery) otherwise, plus Open recovery agent when an agent exists. |
 | `client/large.tsx` | The panel as a two-column screen. |
 | `client/header.tsx` | The stack bar and the header status. |
@@ -213,10 +214,33 @@ Rules:
   `set_priorities` only takes ranker scores. The workspace panel's navigator and the sidebar view don't have the menu
   yet.
 
+## Panel sections fold
+
+Every section of the workspace panel (Needs you, Your questions, Messages to the agent, Pull requests, Agent's tasks,
+Activity, Spec, agent and recovery) folds the same way, through one fold (`client/fold.tsx`, invariant
+panel-sections-fold):
+
+- **The header is the button**: the icon, title, count and a chevron at the end, with its expanded state for screen
+  readers; a click or Enter toggles it (Space never reaches a plugin's button in Paseo's web app, whose window
+  listener takes it first). Controls in the header (search, Activity's tabs) sit beside the button
+  and show only while the section is open.
+- **Folded**, the body unmounts and the header keeps its count, plus a short plain line where it helps: Needs you's
+  first ask, the next message ("2 repairs queued"), the PRs ("6 PRs in 2 stacks") when the open count doesn't say it,
+  Activity's latest event, the tasks' line (shown open too). No new labels.
+- **Remembered per device, per section**, never per workspace: the device document's `follow-up.settings.fold.panel.<id>`
+  (`PANEL_FOLDS`), the same store as settings' folds (invariant 22), so it survives reloads. Open by default, except
+  Agent's tasks and Spec, agent and recovery, which start folded as before.
+- The larger view and phones draw the same sections, so they fold the same way. Home's detail pane draws Needs you and
+  Your questions without the fold.
+- **Adding a section**: give its card `fold={{ id }}` with a new `PANEL_FOLDS` id, or an exemption with a reason in
+  `tests/panel-folds.test.ts`, which fails on any element the panel lays out without one, and on any `Card` without
+  a fold that isn't an error or empty state. Exempt today: each agent's line, the Shipped notice, and the shipped
+  history fold.
+
 ## Section search
 
-The panel's Pull requests and Activity cards each have a search icon at the right of their header, always shown
-(`useSectionSearch`, `client/section-search.tsx`). Pressing it turns the header into the shared `QueryField`
+The panel's Pull requests and Activity cards each have a search icon at the right of their header, shown while the
+section is open (`useSectionSearch`, `client/section-search.tsx`). Pressing it turns the header into the shared `QueryField`
 ("Search pull requests", "Search activity") with focus in it, "n of N" inside the field and ✕ beside
 it. Esc or ✕ closes it, and focus returns to the icon. There's no key binding, so Ctrl/Cmd+F stays the browser's find.
 

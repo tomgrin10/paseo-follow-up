@@ -510,6 +510,7 @@ export function ActivityCard({ workspace: w, theme, compact, now, open, toggle, 
     : (info.pages > 1 || !searching) && <Pager theme={theme} compact={compact} info={info} busy={reply.isFetching && reply.isPlaceholderData} noun={tab === "timeline" ? "events" : "questions"}
       onPage={p => setPage({ key, at: p })} onLess={searching ? undefined : () => { setPage({ key, at: 0 }); toggle("activity"); }} />;
   return <Card theme={theme} compact={compact} icon="Activity" title="Activity" search={search.header}
+    fold={{ id: "activity", summary: info.page === 0 ? d.timeline[0]?.row.text ?? null : null }}
     right={<View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>{hasQuestions ? tabs(false) : null}{search.button}</View>}>
     {/* Searching: the tabs move under the field and count their matches, so a hit in the other tab is never hidden. */}
     {search.header && <View style={{ flexDirection: "row", paddingHorizontal: compact ? 14 : 12, paddingTop: 6, paddingBottom: 10 }}>{tabs(searching)}</View>}

@@ -13,7 +13,8 @@ import { HISTORY_FILTERS, askingNow, questionCounts, questionHistory, questionOu
 import { ago } from "../shared/attention";
 import { errorText } from "../shared/errors";
 import { Button, IconButton, SubmitScope, text, useNow, type Theme } from "./kit";
-import { tint, withAlpha } from "./theme";
+import { raised, tint, withAlpha } from "./theme";
+import { FoldButton, PANEL_FOLDS, useFold } from "./fold";
 import { RichText } from "./rich-text";
 import { Spinner } from "./motion";
 import { PRIMARY_FORM } from "./dock";
@@ -333,23 +334,31 @@ export function useWorkspaceRunning(paseo: PaseoWorkspaces | undefined, workspac
  * The card. `openAgent` opens an agent's chat (absent where there is no navigation). Phones open the history in a
  * sheet; desktop unfolds it in the card.
  */
-export function YourQuestionsCard({ workspaceId, mainAgentId, theme, compact, openAgent, style, running = false, foldAsk = false }: { workspaceId: string; mainAgentId: string | null; theme: Theme; compact: boolean; openAgent?: (agentId: string) => void; style?: object;
+export function YourQuestionsCard({ workspaceId, mainAgentId, theme, compact, openAgent, style, running = false, foldAsk = false, fold = false }: { workspaceId: string; mainAgentId: string | null; theme: Theme; compact: boolean; openAgent?: (agentId: string) => void; style?: object;
   /** Paseo's directory says the workspace is running (no read of its own): asking rows add "the agent is mid-turn". */ running?: boolean;
-  /** The pane has a docked reply field: the ask field stays one line until tapped. */ foldAsk?: boolean }) {
+  /** The pane has a docked reply field: the ask field stays one line until tapped. */ foldAsk?: boolean;
+  /** The workspace panel's section: the header folds it (client/fold.tsx), keeping its counts. */ fold?: boolean }) {
   const c = theme.colors; const t = text(c, compact);
   const now = useNow(30_000);
   const q = useWorkspaceQuestions(workspaceId);
   const [history, setHistory] = useState(false);
   const counts = questionCounts({ unread: q.unread, asking: q.asking });
   const total = q.all.length;
-  const header = <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8, paddingHorizontal: compact ? 14 : 12, paddingTop: 12, paddingBottom: 10, minHeight: compact ? 44 : undefined }}>
+  const folding = useFold(fold ? PANEL_FOLDS.questions : null, true);
+  const open = folding.open;
+  const headStyle = { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8, paddingHorizontal: compact ? 14 : 12, paddingTop: 12, paddingBottom: 10, minHeight: compact ? 44 : undefined } as const;
+  const headInner = <>
     <Icon name="MessageSquareReply" size={compact ? 16 : 14} color={c.foregroundMuted} />
-    <Text accessibilityRole="header" style={[t.label, { flex: 1 }]}>Your questions</Text>
+    <Text accessibilityRole={fold ? undefined : "header"} style={[t.label, { flex: 1 }]}>Your questions</Text>
     {!!counts && <View accessibilityLabel={counts} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
       {!!q.unread.length && <View style={{ paddingHorizontal: 8, paddingVertical: 1, borderRadius: 999, backgroundColor: tint(c.statusWarning, c) }}><Text style={[t.meta, { color: c.statusWarning, fontWeight: "600" }]}>{`${q.unread.length} answer${q.unread.length === 1 ? "" : "s"}`}</Text></View>}
       {!!q.asking.length && <Text style={t.meta}>{`${q.asking.length} asking`}</Text>}
     </View>}
-  </View>;
+  </>;
+  const header = fold
+    ? <View accessibilityRole="header"><FoldButton open={open} onToggle={folding.toggle} label={counts ? `Your questions, ${counts}` : "Your questions"} theme={theme} chevron="end"
+        style={(hovered, pressed) => [headStyle, { paddingTop: 10, paddingBottom: open ? 8 : 10, backgroundColor: pressed ? c.surface2 : hovered ? c.surface1 : "transparent" }]}>{headInner}</FoldButton></View>
+    : <View style={headStyle}>{headInner}</View>;
   const historyRow = total > 0 && <Pressable accessibilityRole="button" aria-expanded={compact ? undefined : history} accessibilityState={compact ? undefined : { expanded: history }} accessibilityLabel={`History, ${total} question${total === 1 ? "" : "s"}`} accessibilityHint="Search every question and answer, kept 30 days" onPress={() => setHistory(v => !v)}
     style={state => ({ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: compact ? 14 : 12, minHeight: compact ? 48 : 38, borderTopWidth: 1, borderTopColor: c.border,
       backgroundColor: (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
@@ -358,8 +367,11 @@ export function YourQuestionsCard({ workspaceId, mainAgentId, theme, compact, op
     <View style={{ flex: 1 }} />
     {!compact && <Text numberOfLines={1} style={t.small}>search, kept 30 days</Text>}
   </Pressable>;
-  return <View {...({ dataSet: { yourQuestions: workspaceId } } as object)} style={[{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 8, borderWidth: 1, borderColor: q.unread.length ? withAlpha(c.statusWarning, 0.45) : c.border, backgroundColor: c.surface0, overflow: "hidden" }, style]}>
+  return <View {...({ dataSet: { yourQuestions: workspaceId } } as object)} style={[{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 8, backgroundColor: c.surface0, overflow: "hidden" },
+    // In the panel it is one of the sections, raised like the others; an unread answer keeps its amber border.
+    q.unread.length ? { borderWidth: 1, borderColor: withAlpha(c.statusWarning, 0.45) } : fold ? raised(c) : { borderWidth: 1, borderColor: c.border }, style]}>
     {header}
+    {open && <>
     <AskField workspaceId={workspaceId} theme={theme} compact={compact} folded={foldAsk} />
     {q.unread.map(r => <AnswerItem key={r.id} r={r} theme={theme} compact={compact} now={now} mainAgentId={mainAgentId} openAgent={openAgent} />)}
     {q.asking.map(r => <AskingItem key={r.id} r={r} theme={theme} compact={compact} now={now} busyAgent={!!running} />)}
@@ -370,6 +382,7 @@ export function YourQuestionsCard({ workspaceId, mainAgentId, theme, compact, op
         <QuestionHistory workspaceId={workspaceId} theme={theme} compact />
       </Modal.Content>
     </Modal>}
+    </>}
   </View>;
 }
 

@@ -204,7 +204,7 @@ function ShippedCard({ workspace: w, theme, compact, now }: { workspace: Workspa
 }
 
 /** Quiet extras: the main agent, optional recovery and the Graphite merge-when-ready connection. */
-function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, browserReady, openOverview, editSpec }: { workspace: Workspace; theme: Theme; compact: boolean; open: (key: string) => boolean; toggle: (key: string) => void; openAgent?: (id: string) => void; browserReady: boolean | null; openOverview: () => void; editSpec: () => void }) {
+function WorkspaceCard({ workspace: w, theme, compact, openAgent, browserReady, openOverview, editSpec }: { workspace: Workspace; theme: Theme; compact: boolean; openAgent?: (id: string) => void; browserReady: boolean | null; openOverview: () => void; editSpec: () => void }) {
   const c = theme.colors; const t = text(c);
   const control = useRpc(controlRpc); const send = useRpc(sendRpc); const runRecovery = useRpc(recoverRpc); const cache = useQueryClient(); const toast = useToast();
   const invalidate = () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); };
@@ -216,11 +216,10 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
   const actions = recoveryActions(last, { archived: w.archived, starting: recovery.isPending });
   const recoveryState = last ? last.state === "sent" ? "Recovery is running" : last.state === "completed" ? "Last recovery finished" : last.state === "pending" ? "Recovery is ready to run" : last.state === "sending" ? "Starting recovery" : "Recovery needs a check" : null;
   const active = w.prs.some(p => !settledForDisplay(p));
-  const shown = open("workspace");
   const openUrl = (url: string) => { void openExternalUrl(url).catch(() => undefined); };
-  return <View style={{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 8, borderWidth: 1, borderColor: c.border, overflow: "hidden" }}>
-    <View style={{ marginTop: -1 }}><FoldRow theme={theme} compact={compact} open={shown} onPress={() => toggle("workspace")} icon="SlidersHorizontal" iconColor={c.foregroundMuted} label="Spec, agent and recovery" /></View>
-    {shown && <>
+  // Quiet and folded by default; open or closed is remembered per device, like every panel section.
+  return <Card theme={theme} compact={compact} icon="SlidersHorizontal" title="Spec, agent and recovery" fold={{ id: "workspace", defaultOpen: false }}>
+    <>
       <SpecRow workspace={w} theme={theme} compact={compact} onEdit={editSpec} />
       <LinkedItemsRow workspace={w} theme={theme} compact={compact} />
       <CardRow theme={theme} compact={compact}><SummaryRow workspaceId={w.id} theme={theme} compact={compact} /></CardRow>
@@ -262,8 +261,8 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
           <Button title="Open Graphite" icon="ExternalLink" theme={theme} compact={compact} accessibilityLabel="Connect Graphite" onPress={() => openUrl("https://app.graphite.com")} />
         </View>
       </CardRow>}
-    </>}
-  </View>;
+    </>
+  </Card>;
 }
 
 /** An agent's title from Paseo's client state (no fetch), or a short id while it loads or once it's gone. */
@@ -395,9 +394,9 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const shipped = <ShippedCard workspace={w} theme={theme} compact={compact} now={now} />;
   // What each agent is on now (shared/now.ts); once shipped nobody is working toward the goal.
   const agents = !done && <AgentLines workspace={w} inbox={inbox} theme={theme} compact={compact} now={now} openAgent={openAgent} />;
-  const needs = <NeedsYouBlock workspace={w} theme={theme} compact={compact} now={now} brief={ask?.brief ?? null} briefCard={ask?.card ?? null} actions={{ openAgent, openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion }} />;
+  const needs = <NeedsYouBlock workspace={w} theme={theme} compact={compact} now={now} brief={ask?.brief ?? null} briefCard={ask?.card ?? null} actions={{ openAgent, openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion }} fold />;
   // Your questions (docs/needs-you.md#your-questions): under Needs you, the same card as Home's detail pane.
-  const questions = <YourQuestionsCard workspaceId={w.id} mainAgentId={w.mainAgentId} theme={theme} compact={compact} openAgent={openAgent} running={running} />;
+  const questions = <YourQuestionsCard workspaceId={w.id} mainAgentId={w.mainAgentId} theme={theme} compact={compact} openAgent={openAgent} running={running} fold />;
   // Once shipped, the stack and tasks are history: one quiet fold instead of two near-empty cards.
   const history = done && <View style={{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.colors.border, overflow: "hidden" }}>
     <View style={{ marginTop: -1 }}><FoldRow theme={theme} compact={compact} open={isOpen("history")} onPress={() => toggle("history")} icon="History" iconColor={theme.colors.foregroundMuted} label={historyLabel(w)} /></View>
@@ -415,7 +414,7 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   // The send queue (what Follow-up sends the main agent next, and the repairs in it) is Follow-up's, not the agent's to-do list.
   const messages = showWork && <MessagesCard workspace={w} theme={theme} compact={compact} openAgent={openAgent} now={now} />;
   const log = <View ref={logRef} onLayout={e => { logY.current = e.nativeEvent.layout.y; }}><ActivityCard workspace={w} theme={theme} compact={compact} now={now} open={isOpen} toggle={toggle} onOpenQuestion={(id, q) => { setOldQuestion(q ?? null); setQuestion(id); }} /></View>;
-  const extras = <WorkspaceCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} openAgent={openAgent} browserReady={browser.data ? browser.data.ready : null} openOverview={openOverview} editSpec={() => setSpecOpen(true)} />;
+  const extras = <WorkspaceCard workspace={w} theme={theme} compact={compact} openAgent={openAgent} browserReady={browser.data ? browser.data.ready : null} openOverview={openOverview} editSpec={() => setSpecOpen(true)} />;
   return <View onLayout={event => setWidth(event.nativeEvent.layout.width)} style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>
     {/* Phones fold the top bar into the header's own row. */}
     {!compact && top}

@@ -203,23 +203,23 @@ export function TasksCard({ workspace: w, theme, compact, open, toggle, onOpenQu
   // Opened, the card pages its rows (client/paged-list.tsx): due and stale sort first, so page 1 holds what moves.
   const page = usePagedList({ items: rows, theme, compact, noun: "tasks" });
   if (!rows.length && !sum.finished) return null;
-  // Collapsed by default, in every state: the tasks are the agent's, and the line says whether it keeps up.
-  const shown = open("tasks");
+  // Collapsed by default, in every state: the tasks are the agent's, and the line says whether it keeps up. The line
+  // shows open or folded.
   const parts = summaryParts(sum);
   const footer = finishedParts(sum);
   const label = `${parts.neutral}${parts.stale ? ` · ${parts.stale}` : ""}`;
-  return <Card theme={theme} compact={compact} icon="ListTodo" title="Agent's tasks" fold={{ open: shown, onToggle: () => toggle("tasks"), label }}
-    right={<Text numberOfLines={1} style={{ flexShrink: 1, color: c.foregroundMuted, fontSize: 12, lineHeight: 17, fontVariant: ["tabular-nums"] }}>{parts.neutral}{parts.stale ? <Text style={{ color: staleColor(c), fontWeight: "600" }}>{` · ${parts.stale}`}</Text> : null}</Text>}>
-    {shown && page.shown.map(r => {
+  const line = <Text numberOfLines={1} style={{ flexShrink: 1, color: c.foregroundMuted, fontSize: 12, lineHeight: 17, fontVariant: ["tabular-nums"] }}>{parts.neutral}{parts.stale ? <Text style={{ color: staleColor(c), fontWeight: "600" }}>{` · ${parts.stale}`}</Text> : null}</Text>;
+  return <Card theme={theme} compact={compact} icon="ListTodo" title="Agent's tasks" fold={{ id: "tasks", defaultOpen: false, summary: line, openSummary: line, label }}>
+    {page.shown.map(r => {
       const q = linkedQuestion(r.o, w);
       return <TaskRow key={r.o.id} row={r} w={w} theme={theme} compact={compact} open={open(`task:${r.o.id}`)} openAgent={openAgent} onSchedule={() => setSchedule(r.o.id)}
         onPress={() => r.kind === "needs-you" && q && onOpenQuestion ? onOpenQuestion(q.id) : toggle(`task:${r.o.id}`)} />;
     })}
-    {shown && page.footer}
-    {shown && !rows.length && <View style={{ paddingHorizontal: compact ? 14 : 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border }}>
+    {page.footer}
+    {!rows.length && <View style={{ paddingHorizontal: compact ? 14 : 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border }}>
       <Text style={t.meta}>Nothing open. The agent records work that outlives a merge here, like a migration to run or a production check.</Text>
     </View>}
-    {shown && footer && (onShowActivity
+    {footer && (onShowActivity
       // "in Activity" is a link: finished tasks are listed there (tasks-are-the-agent-s). The whole row is the target
       // (44pt on touch), and the label says where it goes when read alone.
       ? <Pressable accessibilityRole="link" accessibilityLabel={`${footer.count}. Show finished tasks in Activity`} onPress={onShowActivity}

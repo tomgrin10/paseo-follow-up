@@ -5,6 +5,7 @@ import { Icon } from "@getpaseo/plugin/client/ui";
 import { openExternalUrl, type PluginSvgIcon } from "@getpaseo/plugin/client";
 import { PressScale, Spinner } from "./motion";
 import { raised, tint, withAlpha, type Colors, type Theme } from "./theme";
+import { FoldButton, PANEL_FOLDS, useFold, type PanelFold } from "./fold";
 
 export type { Theme } from "./theme";
 
@@ -172,34 +173,51 @@ export type CardTone = "plain" | "attention" | "success";
 /**
  * A raised container with an icon title. Attention cards trade the ring for a warning border. `search`: the section
  * is being searched (client/section-search.tsx), and its field takes the title's place in the header.
+ * `fold`: a section of the workspace panel (invariant 132, panel-sections-fold). The title, count and chevron are one
+ * button (client/fold.tsx), remembered per device per section; folded, the body unmounts and the header keeps the
+ * count and `summary`. Controls in `right` (search, tabs) sit outside the button and show only while open.
  */
 export function Card({ theme, icon, title, tone = "plain", count, right, children, compact = false, style, search, fold }: {
   theme: Theme; icon: string | PluginSvgIcon; title: string; tone?: CardTone; count?: string | number; right?: ReactNode; children: ReactNode; compact?: boolean; style?: StyleProp<ViewStyle>; search?: ReactNode;
-  /** A card that folds to its header line: the whole header toggles it, with a chevron at the end. */
-  fold?: { open: boolean; onToggle: () => void; label: string };
+  fold?: { id: PanelFold; defaultOpen?: boolean; /** Shown while folded. */ summary?: ReactNode; /** Shown while open (the tasks' line). */ openSummary?: ReactNode; /** What a screen reader hears after the title; else the count. */ label?: string };
 }) {
   const c = theme.colors;
+  const state = useFold(fold ? PANEL_FOLDS[fold.id] : null, fold?.defaultOpen ?? true);
+  const open = !fold || state.open;
   const accent = tone === "attention" ? c.statusWarning : tone === "success" ? c.statusSuccess : null;
-  const head = { flexDirection: "row", alignItems: "center", gap: compact ? 8 : 7, paddingHorizontal: compact ? 14 : 12, paddingTop: 10, paddingBottom: fold && !fold.open ? 10 : 8, minHeight: compact ? 44 : undefined } as const;
-  const inner = <>
-    {/* The icon never shrinks: a header whose title, tabs and search run wider than the card (Activity on a narrow
-        panel) squeezed it to a sliver, a stray mark before the title. */}
-    <View style={{ flexShrink: 0 }}>{typeof icon === "string" ? <Icon name={icon} size={compact ? 16 : 14} color={accent ?? c.foregroundMuted} /> : <Icon icon={icon} size={compact ? 16 : 14} color={accent ?? c.foregroundMuted} />}</View>
-    {search ?? <>
-      <Text accessibilityRole="header" style={{ color: accent ?? c.foreground, fontSize: compact ? 14 : 13, lineHeight: compact ? 20 : 18, fontWeight: "600" }}>{title}</Text>
-      {count !== undefined && count !== "" && <Chip theme={theme} color={accent ?? c.foregroundMuted} label={String(count)} />}
-      <View style={{ flex: 1 }} />
-      {right}
-      {fold && <Icon name={fold.open ? "ChevronUp" : "ChevronDown"} size={14} color={c.foregroundMuted} />}
-    </>}
+  const pad = { paddingHorizontal: compact ? 14 : 12, paddingTop: 10, paddingBottom: open ? 8 : 10, minHeight: compact ? 44 : undefined } as const;
+  const row = { flexDirection: "row", alignItems: "center", gap: compact ? 8 : 7 } as const;
+  // The icon never shrinks: a header whose title, tabs and search run wider than the card (Activity on a narrow
+  // panel) squeezed it to a sliver, a stray mark before the title.
+  const glyph = <View style={{ flexShrink: 0 }}>{typeof icon === "string" ? <Icon name={icon} size={compact ? 16 : 14} color={accent ?? c.foregroundMuted} /> : <Icon icon={icon} size={compact ? 16 : 14} color={accent ?? c.foregroundMuted} />}</View>;
+  const titled = <>
+    <Text accessibilityRole={fold ? undefined : "header"} numberOfLines={1} style={{ flexShrink: 0, color: accent ?? c.foreground, fontSize: compact ? 14 : 13, lineHeight: compact ? 20 : 18, fontWeight: "600" }}>{title}</Text>
+    {count !== undefined && count !== "" && <Chip theme={theme} color={accent ?? c.foregroundMuted} label={String(count)} />}
   </>;
+  const summary = fold ? (open ? fold.openSummary : fold.summary) : null;
+  const summaryNode = summary == null || summary === "" ? null : typeof summary === "string"
+    ? <Text numberOfLines={1} style={{ flexShrink: 1, color: c.foregroundMuted, fontSize: 12, lineHeight: 17, fontVariant: ["tabular-nums"] }}>{summary}</Text> : summary;
+  let head: ReactNode;
+  if (search) head = <View style={[row, pad]}>{glyph}{search}</View>;
+  else if (!fold) head = <View style={[row, pad]}>{glyph}{titled}<View style={{ flex: 1 }} />{right}</View>;
+  else {
+    const spoken = fold.label ?? (count !== undefined && count !== "" ? String(count) : "");
+    const button = <FoldButton open={open} onToggle={state.toggle} label={spoken ? `${title}, ${spoken}` : title} theme={theme} chevron="end"
+      style={(hovered, pressed) => [row, pad, { flex: 1, minWidth: 0, backgroundColor: pressed ? c.surface2 : hovered ? c.surface1 : "transparent" }]}>
+      {glyph}{titled}
+      <View style={{ flex: 1, minWidth: 0, flexDirection: "row", justifyContent: "flex-end" }}>{summaryNode}</View>
+    </FoldButton>;
+    // The section's heading for screen readers wraps the button, as a disclosure's heading does.
+    head = open && right ? <View style={{ flexDirection: "row", alignItems: "center" }}>
+      <View accessibilityRole="header" style={{ flex: 1, minWidth: 0 }}>{button}</View>
+      <View style={{ flexDirection: "row", alignItems: "center", paddingRight: compact ? 10 : 8, paddingTop: 2 }}>{right}</View>
+    </View> : <View accessibilityRole="header">{button}</View>;
+  }
   // dataSet: a paged list inside turns its page back to this card's header (client/paged-list.tsx, toListStart).
   return <View {...({ dataSet: { pagedTop: "1" } } as object)} style={[{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 8, overflow: "hidden", backgroundColor: c.surface0 },
     accent ? { borderWidth: 1, borderColor: withAlpha(accent, 0.7) } : raised(c), style]}>
-    {fold ? <Pressable accessibilityRole="button" aria-expanded={fold.open} accessibilityState={{ expanded: fold.open }} accessibilityLabel={`${title}: ${fold.label}. ${fold.open ? "Hide" : "Show"} them`} onPress={fold.onToggle}
-      style={state => ({ ...head, backgroundColor: state.pressed ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>{inner}</Pressable>
-      : <View style={head}>{inner}</View>}
-    {children}
+    {head}
+    {open && children}
   </View>;
 }
 

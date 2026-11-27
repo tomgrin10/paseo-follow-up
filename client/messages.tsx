@@ -159,7 +159,9 @@ export function MessagesCard({ workspace: w, theme, compact, openAgent, now = Da
   if (!strip && !repairs.open.length) return null;
   const repairRow = repairs.open.find(r => r.task.key === repair) ?? null;
   // The card's title and icon say what it is; the strip under it says to whom, how many, when and why.
-  return <Card theme={theme} compact={compact} icon="Send" title="Messages to the agent">
+  // Folded, the header says what is in the next message and where it stands ("2 repairs queued").
+  const folded = strip ? `${strip.what} ${strip.phase}` : `${repairs.open.length} repair${repairs.open.length === 1 ? "" : "s"} open`;
+  return <Card theme={theme} compact={compact} icon="Send" title="Messages to the agent" fold={{ id: "messages", summary: folded, label: folded }}>
     {strip && <StripRow strip={strip} w={w} theme={theme} compact={compact} onPreview={() => setPreview(true)} openAgent={openAgent} />}
     {page.shown.map(r => <RepairTaskRow key={r.task.key} row={r} w={w} theme={theme} compact={compact} onOpen={() => setRepair(r.task.key)} />)}
     {page.footer}

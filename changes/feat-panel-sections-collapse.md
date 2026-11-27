@@ -1,0 +1,2 @@
+- Every section of the workspace panel now collapses, like Agent's tasks, Needs you included.
+- A collapsed section still shows its count and a short line, and stays as you left it on this device.
