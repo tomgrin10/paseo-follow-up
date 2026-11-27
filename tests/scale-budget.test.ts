@@ -238,3 +238,14 @@ test("the scale check holds workspace_status to the agent tools' own TOOL_BUDGET
   const { TOOL_BUDGET } = await import("../shared/paged");
   assert.equal(PAGED_REPLY_BUDGET_BYTES["follow.agent-status"], TOOL_BUDGET);
 });
+
+test("read-stamps-never-count: the idle feed budget passes a stamps push a minute and fails whole-workspace churn", async () => {
+  const { feedIdleVerdict, FEED_IDLE_BUDGET_KB } = await import("../scripts/scale-budget.mjs");
+  // After the fix, live-sized seed: one stamps-only push (~40 KB) a minute.
+  const quiet = feedIdleVerdict([{ bytes: 40_000, full: false }, { bytes: 40_000, full: false }], 90_000);
+  assert.equal(quiet.over, false, `${quiet.kbPerMin} KB a minute`);
+  // 2026-11-27 before it: 342 KB every ~15 s plus 2 MB about once a minute.
+  const churn = feedIdleVerdict([...Array.from({ length: 6 }, () => ({ bytes: 342_000, full: false })), { bytes: 2_000_000, full: false }], 90_000);
+  assert.equal(churn.over, true); assert.ok(churn.kbPerMin > 10 * FEED_IDLE_BUDGET_KB);
+  assert.equal(feedIdleVerdict([{ bytes: 2_000_000, full: true }], 90_000).over, false, "a full answer (a resubscribe) isn't idle churn");
+});

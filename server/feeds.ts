@@ -1,6 +1,6 @@
 import type { ListCache } from "./list-cache";
 import type { State } from "../shared/model";
-import type { ListEntry } from "../shared/list";
+import { READS_PUSH_MS, type ListEntry, type ReadStamps } from "../shared/list";
 
 /**
  * Pushes instead of client polling (Paseo 0.16 subscriptions, plan item 6). A feed is one shared serve per topic: a
@@ -54,28 +54,33 @@ export class ValueFeed<E> {
   }
 }
 
-export type WorkspacesEvent = { revision: number; full: boolean; workspaces: ListEntry[]; removed: string[]; error: string | null };
+export type WorkspacesEvent = { revision: number; full: boolean; workspaces: ListEntry[]; removed: string[]; reads: Record<string, ReadStamps>; error: string | null };
 
 /**
  * follow.list as a feed: each subscriber holds a revision, and a change sends it only the workspaces changed since,
  * computed once per distinct revision (normally one, since every subscriber is caught up). The worker's error rides
  * along, so a banner appears or clears without a poll.
+ *
+ * Read stamps never count (invariant 140): a change that moved only read stamps (ListCache's `stampsOnly`) goes to a
+ * subscriber at most once per READS_PUSH_MS. A held one isn't lost: the subscriber keeps its revision, so its next push
+ * (the next change after the window, with or without new entries) carries every stamp that moved since. No timer: the
+ * worker's own ticks call `changed()`.
  */
 export class WorkspacesFeed {
-  private subs = new Set<{ push: Push<WorkspacesEvent>; revision: number | undefined; error: string | null }>();
+  private subs = new Set<{ push: Push<WorkspacesEvent>; revision: number | undefined; error: string | null; readsAt: number }>();
   private reading: Promise<void> | null = null;
   private again = false;
-  constructor(private cache: ListCache, private state: () => Promise<State>, private error: () => string | null) {}
+  constructor(private cache: ListCache, private state: () => Promise<State>, private error: () => string | null, private now: () => number = Date.now) {}
   get size() { return this.subs.size; }
 
   serve(since: number | undefined, push: Push<WorkspacesEvent>, signal: AbortSignal): void {
     if (signal.aborted) return;
-    const sub = { push, revision: since, error: null as string | null };
+    const sub = { push, revision: since, error: null as string | null, readsAt: this.now() };
     this.subs.add(sub);
     signal.addEventListener("abort", () => { this.subs.delete(sub); }, { once: true });
     void this.state().then(state => {
       if (!this.subs.has(sub)) return;
-      const answer = this.cache.answer(state, sub.revision);
+      const { stampsOnly: _s, ...answer } = this.cache.answer(state, sub.revision);
       sub.revision = answer.revision; sub.error = this.error();
       return push({ ...answer, error: sub.error });
     }).catch(() => undefined);
@@ -93,10 +98,14 @@ export class WorkspacesFeed {
         await Promise.all([...this.subs].map(sub => {
           let answer = answers.get(sub.revision);
           if (!answer) { answer = this.cache.answer(state, sub.revision); answers.set(sub.revision, answer); }
-          const empty = !answer.full && !answer.workspaces.length && !answer.removed.length;
+          const empty = !answer.full && !answer.workspaces.length && !answer.removed.length && !Object.keys(answer.reads).length;
           if (empty && sub.error === error) { sub.revision = answer.revision; return undefined; }
+          // Only read stamps moved: hold them (keeping the revision) until the window is up.
+          if (answer.stampsOnly && sub.error === error && this.now() - sub.readsAt < READS_PUSH_MS) return undefined;
           sub.revision = answer.revision; sub.error = error;
-          return sub.push({ ...answer, error }).catch(() => undefined);
+          if (Object.keys(answer.reads).length) sub.readsAt = this.now();
+          const { stampsOnly: _s, ...event } = answer;
+          return sub.push({ ...event, error }).catch(() => undefined);
         }));
       } while (this.again && this.subs.size);
     })().catch(() => undefined).finally(() => { this.reading = null; });

@@ -1,5 +1,5 @@
 import type { State, Workspace } from "../shared/model";
-import { listEntry, type ListEntry } from "../shared/list";
+import { listEntry, splitReadStamps, type ListEntry, type ReadStamps } from "../shared/list";
 
 /**
  * Diffed answers for follow.list (1.3.0-beta.4). Clients send the revision they hold and get back only the
@@ -10,6 +10,10 @@ import { listEntry, type ListEntry } from "../shared/list";
  * Each workspace goes out in its list form (shared/list.ts, a-list-carries-only-what-lists-draw). The store keeps an
  * unchanged workspace's saved object across mutations (a-mutation-copies-only-what-it-changes), so the list form and
  * its JSON are computed once per changed workspace, not for every workspace on every change.
+ *
+ * Read stamps never count (read-stamps-never-count, invariant 140): an entry is diffed and sent without them
+ * (shared/list.ts splitReadStamps); a workspace whose stamps alone moved isn't a changed workspace, its stamps go out
+ * in `reads`, and `stampsOnly` tells the feed it may hold them (READS_PUSH_MS).
  */
 export class ListCache {
   private state: State | null = null;
@@ -19,6 +23,10 @@ export class ListCache {
   /** The workspace object each `json` entry was serialised from: the same frozen object needs no new serialisation. */
   private objects = new Map<string, Workspace>();
   private changedAt = new Map<string, number>();
+  /** Each workspace's read stamps (JSON, to compare), the stamps, and the revision they last moved at. */
+  private stampJson = new Map<string, string>();
+  private stamps = new Map<string, ReadStamps>();
+  private stampsAt = new Map<string, number>();
   private removedAt = new Map<string, number>();
   private current: ListEntry[] = [];
   /** Each listed workspace's list form, as last projected from `objects`. */
@@ -42,26 +50,36 @@ export class ListCache {
       const held = this.entries.get(w.id);
       if (held && this.objects.get(w.id) === w && Object.isFrozen(w)) { next.push(held); continue; }
       this.objects.set(w.id, w);
-      const entry = listEntry(w);
+      const { bare: entry, stamps } = splitReadStamps(listEntry(w));
       const text = JSON.stringify(entry);
       this.entries.set(w.id, entry);
       next.push(entry);
       if (this.json.get(w.id) !== text) { this.json.set(w.id, text); this.changedAt.set(w.id, revision); this.removedAt.delete(w.id); changed = true; }
+      const stampText = stamps ? JSON.stringify(stamps) : "";
+      if ((this.stampJson.get(w.id) ?? "") !== stampText) {
+        this.stampJson.set(w.id, stampText); this.stampsAt.set(w.id, revision); changed = true;
+        if (stamps) this.stamps.set(w.id, stamps); else this.stamps.delete(w.id);
+      }
     }
-    for (const id of [...this.json.keys()]) if (!seen.has(id)) { this.json.delete(id); this.objects.delete(id); this.entries.delete(id); this.changedAt.delete(id); this.removedAt.set(id, revision); changed = true; }
+    for (const id of [...this.json.keys()]) if (!seen.has(id)) { this.json.delete(id); this.objects.delete(id); this.entries.delete(id); this.changedAt.delete(id); this.stampJson.delete(id); this.stamps.delete(id); this.stampsAt.delete(id); this.removedAt.set(id, revision); changed = true; }
     // Removal records are kept for a while so slow clients still learn about them; past that they resync fully.
     if (this.removedAt.size > 500) { const cut = [...this.removedAt.values()].sort((a, b) => a - b)[this.removedAt.size - 500]; for (const [id, at] of this.removedAt) if (at < cut) this.removedAt.delete(id); this.floor = cut; }
     this.current = next;
     if (changed) this.revision = revision;
   }
-  /** Everything when `since` is absent, unknown or too old; otherwise only what changed after it. */
-  answer(state: State, since?: number): { revision: number; full: boolean; workspaces: ListEntry[]; removed: string[] } {
+  /**
+   * Everything when `since` is absent, unknown or too old; otherwise only what changed after it. `reads`: the read
+   * stamps of every listed workspace (full) or of those whose stamps moved since (diff), whose entries the client
+   * fills them into. `stampsOnly`: a diff that carries nothing but stamps.
+   */
+  answer(state: State, since?: number): { revision: number; full: boolean; workspaces: ListEntry[]; removed: string[]; reads: Record<string, ReadStamps>; stampsOnly: boolean } {
     this.update(state);
-    if (since === undefined || since > this.revision || since < this.floor) return { revision: this.revision, full: true, workspaces: this.current, removed: [] };
-    return {
-      revision: this.revision, full: false,
-      workspaces: this.current.filter(w => (this.changedAt.get(w.id) ?? 0) > since),
-      removed: [...this.removedAt].filter(([, at]) => at > since).map(([id]) => id),
-    };
+    if (since === undefined || since > this.revision || since < this.floor) return { revision: this.revision, full: true, workspaces: this.current, removed: [], reads: Object.fromEntries(this.stamps), stampsOnly: false };
+    const workspaces = this.current.filter(w => (this.changedAt.get(w.id) ?? 0) > since);
+    const removed = [...this.removedAt].filter(([, at]) => at > since).map(([id]) => id);
+    // A changed workspace carries its stamps too, so the client never holds a bare entry.
+    const ids = new Set(workspaces.map(w => w.id));
+    const reads = Object.fromEntries([...this.stamps].filter(([id]) => ids.has(id) || (this.stampsAt.get(id) ?? 0) > since));
+    return { revision: this.revision, full: false, workspaces, removed, reads, stampsOnly: !workspaces.length && !removed.length && Object.keys(reads).length > 0 };
   }
 }

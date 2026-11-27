@@ -1,0 +1,1 @@
+- Follow-up stays quieter while you read: it no longer resends whole workspaces every time it checks your pull requests, so taps and scrolling no longer stutter when a check lands, most of all on phones and in big workspaces.

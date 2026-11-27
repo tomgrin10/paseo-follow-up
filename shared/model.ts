@@ -326,7 +326,7 @@ export function completionGate(w: ListWorkspace, now = Date.now()): CompletionGa
       else if (deploy === "unconfirmed") unconfirmed.push(ref);
       continue;
     }
-    if (pr.error || !pr.snapshot?.complete || now - Date.parse(pr.snapshot.observedAt) > OBSERVATION_FRESH_MS) { add("wait", `Refresh status for ${ref}`); continue; }
+    if (pr.error || !pr.snapshot?.complete || !pr.snapshot.observedAt || now - Date.parse(pr.snapshot.observedAt) > OBSERVATION_FRESH_MS) { add("wait", `Refresh status for ${ref}`); continue; }
     if (pr.snapshot.state === "CLOSED") add("agent", `Settle ${ref} with a disposition`);
     else add("developer", `Settle ${ref}`);
   }

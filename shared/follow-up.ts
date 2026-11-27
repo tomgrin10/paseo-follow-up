@@ -22,7 +22,8 @@ export function deployState(pr: Pr, now = Date.now()): DeployState {
   const s = pr.snapshot;
   if (s?.state !== "MERGED") return "none";
   const d = s.deployment;
-  const age = d ? now - Date.parse(d.observedAt) : NaN;
+  // No stamp (a list copy before its reads arrive) is not fresh: read-stamps-never-count.
+  const age = d?.observedAt ? now - Date.parse(d.observedAt) : NaN;
   const fresh = age >= 0 && age <= DEPLOY_FRESH_MS;
   if (d && fresh && (d.state === "pending" || d.state === "partial")) return "not-deployed";
   if (s.mergeCommit && pr.deploymentAnchor?.mergeCommit === s.mergeCommit) return "deployed";

@@ -33,7 +33,10 @@ const WORKSPACE_DETAIL = { inventory: true, excludedStacks: true, nextMessage: t
  */
 const OPEN_ONLY = { head: true, draft: true, graphiteMergeStatus: true, conflict: true, reviewDecision: true, reviewers: true, mergeWhenReady: true, threads: true, failedChecks: true, otherFailedChecks: true, checksPending: true, checksRunning: true, mergeStateStatus: true, inMergeQueue: true } as const;
 export const listSnapshotSchema = snapshotSchema.omit(SNAPSHOT_DETAIL).partial(OPEN_ONLY).extend({
-  deployment: deploymentSchema.omit(DEPLOYMENT_DETAIL).nullable().optional(),
+  // Read stamps travel apart from the entry (splitReadStamps, read-stamps-never-count): optional on the wire, filled
+  // back in by the client store before any reader sees the entry.
+  observedAt: snapshotSchema.shape.observedAt.optional(),
+  deployment: deploymentSchema.omit(DEPLOYMENT_DETAIL).extend({ observedAt: deploymentSchema.shape.observedAt.optional() }).nullable().optional(),
   // Defaulted in the stored schema; a merged PR's list form leaves them out, so parsing mustn't put them back.
   graphiteMergeStatus: z.string().nullable().optional(), mergeWhenReady: z.enum(["on", "off", "unknown"]).optional(),
 });
@@ -87,3 +90,42 @@ export type ListSnapshot = NonNullable<ListPr["snapshot"]>;
 export type ListObligation = ListWorkspace["obligations"][number];
 export type ListBatch = ListWorkspace["batches"][number];
 export type ListQuestion = ListWorkspace["questions"][number];
+
+/**
+ * Read-time stamps (read-stamps-never-count, invariant 140): when Follow-up last read a PR (`snapshot.observedAt`) and
+ * its deploy target (`snapshot.deployment.observedAt`). Every GitHub probe moves them, so inside a list entry they made
+ * every poll a change: the workspaces feed resent whole workspaces (2026-11-27, live-sized seed: 342 KB every ~15 s,
+ * the 153-PR workspace's entry alone 317 KB, and all 140 workspaces, 2 MB, about once a minute) and every client
+ * rebuilt Home and re-rendered its panel for nothing it could see. ListCache splits them off: the entry it diffs and
+ * sends has none, and the stamps ride beside it (`reads`), stamps-only at most once per READS_PUSH_MS. The client
+ * store puts them back (withReadStamps), so readers (deployState's freshness, Home's "GitHub" source line) keep them.
+ */
+export const readStampsSchema = z.record(z.string(), z.record(z.string(), z.union([z.tuple([z.string()]), z.tuple([z.string(), z.string()])])));
+export type ReadStamps = Record<string, [observed: string, deployment?: string]>;
+/** How often a feed sends stamps that changed while nothing else did: inside DEPLOY_FRESH_MS (2 min) with a tick to spare. */
+export const READS_PUSH_MS = 60_000;
+
+/** The entry without its read stamps, and the stamps (null when it has none, e.g. archived or no PR read yet). */
+export function splitReadStamps(entry: ListEntry): { bare: ListEntry; stamps: ReadStamps | null } {
+  if (isArchivedEntry(entry)) return { bare: entry, stamps: null };
+  let stamps: ReadStamps | null = null;
+  const prs = entry.prs.map(p => {
+    const s = p.snapshot;
+    if (!s || (s.observedAt === undefined && s.deployment?.observedAt === undefined)) return p;
+    (stamps ??= {})[p.key] = s.deployment?.observedAt !== undefined ? [s.observedAt ?? "", s.deployment.observedAt] : [s.observedAt ?? ""];
+    const { observedAt: _o, deployment, ...rest } = s;
+    const bare = deployment ? (({ observedAt: _d, ...d }) => d)(deployment) : deployment;
+    return { ...p, snapshot: deployment !== undefined ? { ...rest, deployment: bare } : rest };
+  });
+  return { bare: stamps ? { ...entry, prs } : entry, stamps };
+}
+
+/** The entry with its read stamps back (the client store, before any reader sees it). Unknown keys are ignored. */
+export function withReadStamps<E extends ListEntry>(entry: E, stamps: ReadStamps | null | undefined): E {
+  if (!stamps || isArchivedEntry(entry)) return entry;
+  return { ...entry, prs: (entry as ListWorkspace).prs.map(p => {
+    const st = stamps[p.key]; const s = p.snapshot;
+    if (!st || !s) return p;
+    return { ...p, snapshot: { ...s, ...(st[0] ? { observedAt: st[0] } : {}), ...(s.deployment && st[1] !== undefined ? { deployment: { ...s.deployment, observedAt: st[1] } } : {}) } };
+  }) } as E;
+}
