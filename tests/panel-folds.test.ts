@@ -20,6 +20,8 @@ const SECTIONS: Record<string, { fold: keyof typeof PANEL_FOLDS; file: string; m
   log: { fold: "activity", file: "client/questions.tsx", mark: /fold=\{\{ id: "activity"/ },
   extras: { fold: "workspace", file: "client/panel.tsx", mark: /fold=\{\{ id: "workspace"/ },
   agentCard: { fold: "steps", file: "client/agent-card.tsx", mark: /useFold\(PANEL_FOLDS\.steps, place !== "panel"\)/ },
+  pointedCards: { fold: "cards", file: "client/shown-cards.tsx", mark: /useFold\(place === "large" \? null : `\$\{PANEL_FOLDS\.cards\}\.\$\{card\.id\}`/ },
+  shownCards: { fold: "cards", file: "client/shown-cards.tsx", mark: /useFold\(place === "large" \? null : `\$\{PANEL_FOLDS\.cards\}\.\$\{card\.id\}`/ },
   shipped: { exempt: "the Shipped notice once the work is done: one moment, not a list to fold" },
   history: { exempt: "itself a fold, once shipped: it brings back the Pull requests and tasks sections, which fold on their own" },
 };
@@ -41,7 +43,7 @@ test("panel-sections-fold: every element the panel lays out is a folded section 
   // The panel turns the fold on for the components Home's detail pane also draws (there they stay open).
   assert.match(view, /<NeedsYouBlock [^\n]*\bfold \/>;/);
   assert.match(view, /<YourQuestionsCard [^\n]*\bfold \/>;/);
-  assert.deepEqual(Object.keys(PANEL_FOLDS).sort(), Object.values(SECTIONS).flatMap(s => "fold" in s ? [s.fold] : []).sort(), "every fold id has its section");
+  assert.deepEqual(Object.keys(PANEL_FOLDS).sort(), [...new Set(Object.values(SECTIONS).flatMap(s => "fold" in s ? [s.fold] : []))].sort(), "every fold id has its section");
 });
 
 test("panel-sections-fold: every Card in the client is a folded section or an error or empty state", async () => {

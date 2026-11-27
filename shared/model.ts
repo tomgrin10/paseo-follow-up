@@ -10,6 +10,7 @@ import { taskTriggerSchema } from "./task-trigger";
 import { blockedOnDeveloper, isOpen as questionOpen, questionSchema, waitsOnDeveloper } from "./questions";
 export { blockedOnDeveloper, waitsOnDeveloper };
 import { artifactSchema, specSchema } from "./spec";
+import { CARD_LIMITS } from "./cards";
 import { storedMilestoneSchema } from "./now";
 import type { ListPr, ListWorkspace } from "./list";
 
@@ -225,6 +226,12 @@ export const workspaceSchema = z.object({
   // Added with spec links; older saved states parse with none.
   spec: specSchema.nullable().default(null),
   artifacts: z.array(artifactSchema).default([]),
+  /**
+   * What the workspace's agents show the developer (show_card, shared/cards.ts), as the view lists it: id, title, when,
+   * who and Keep. The cards themselves live in cards.json (follow.cards); this copy moves the workspace's updatedAt, so
+   * the view knows to read them again, places them before the read answers and points the header and questions at them.
+   */
+  shownCards: z.array(z.object({ id: z.string(), title: z.string(), updatedAt: z.string(), by: z.string(), keep: z.boolean().default(false) })).max(CARD_LIMITS.cards).optional(),
   inventory: z.object({
     revision: z.number().int().positive(), syncedRevision: z.number().int().nonnegative(),
     candidates: z.array(idSchema), historyComplete: z.boolean(), historyError: z.string().nullable(),

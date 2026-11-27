@@ -9,7 +9,7 @@ import { rowMenu, type LaterChoice, type RowMenuItem } from "../shared/row-menu"
 import type { Workstream } from "../shared/home";
 import { aboutKey } from "./about";
 import { openRename } from "./rename";
-import { bindToast, runAction } from "./toast-store";
+import { bindToast, pushToast, runAction } from "./toast-store";
 import type { HomeSources } from "./home-data";
 
 /** What the surface showing the menu does for the moves that leave the list (open, answer, ask). */
@@ -110,8 +110,33 @@ export function useRowMenu(host: RowMenuHost) {
           after();
           return "archived" as const;
         }, success: r => r === "undone" ? `${s.title} stays: its archive was undone` : `Archived ${s.title}. It's under Archived in search.` }, `archive:${workspaceId}`);
+        // A card's ⋯ menu runs these through runCardAction below; a row never lists them.
+        default: return Promise.resolve(false);
       }
     };
     return { build, pick: (s: Workstream, item: RowMenuItem) => { void pick(s, item); } };
   }, []);
+}
+
+/** What a shown card's ⋯ menu acts on (client/shown-cards.tsx). */
+export type CardMenuTarget = {
+  workspaceId: string; id: string; title: string; keep: boolean;
+  act: (id: string, action: "remove" | "undo" | "keep" | "unkeep") => Promise<{ message: string }>;
+  openLarge: () => void;
+};
+
+/**
+ * A shown card's ⋯ menu: the same runAction as a row's (the menu is closed; a double tap runs once; a failure is a
+ * toast with Retry). Remove has already been confirmed in place by RowMenu; its toast carries Undo for 10 s.
+ */
+export function runCardAction(item: Pick<RowMenuItem, "action">, c: CardMenuTarget): Promise<boolean> {
+  const key = `card:${c.workspaceId}:${c.id}`;
+  switch (item.action) {
+    case "card_open": return runAction({ label: "Open large", run: async () => c.openLarge(), success: null });
+    case "card_keep": return runAction({ label: c.keep ? "Let it fold when old" : "Keep", run: () => c.act(c.id, c.keep ? "unkeep" : "keep"), success: r => r.message,
+      failure: c.keep ? "Couldn't let it fold" : "Couldn't keep it" }, key);
+    case "card_remove": return runAction({ label: "Remove", run: () => c.act(c.id, "remove"), success: null, failure: `Couldn't remove ${c.title}`,
+      onSuccess: () => pushToast("info", `Removed ${c.title}`, [{ label: "Undo", onPress: () => void runAction({ label: "Undo", run: () => c.act(c.id, "undo"), success: null, failure: `Couldn't bring back ${c.title}` }, key) }], { durationMs: 10_000 }) }, key);
+    default: return Promise.resolve(false);
+  }
 }

@@ -63,7 +63,8 @@ test("the side panel never draws the reply box, and its Recent steps start folde
 test("while anything waits on the developer, Needs you takes the left (wide) column and the agent card moves over", async () => {
   const panel = await src("client/panel.tsx");
   assert.match(panel, /const agentCol = waiting \? 1 : 0;/);
-  assert.match(panel, /\.\.\.\(waiting \? \[\{ key: "needs", node: needs, column: 0 \}\] : \[\]\)/);
+  // A card a question points at stays right under Needs you, in its column (client/shown-cards.tsx).
+  assert.match(panel, /\.\.\.\(waiting \? \[\{ key: "needs", node: needs, column: 0 \}, \{ key: "pointed", node: pointedCards, column: 0 \}\] : \[\]\)/);
   assert.match(panel, /col === 0 \? AGENT_SHARE/, "the left column is the wide one");
 });
 

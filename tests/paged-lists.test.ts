@@ -159,6 +159,7 @@ test("PagedRows draws one page of a long list, and Next moves on", async () => {
 /** Lists whose store caps them far below a page's worth of trouble, with the cap that bounds them. */
 const BOUNDED: Record<string, string> = {
   "client/linked.tsx": "linked items: at most LIMITS.items (50) a workspace, pruned on insert (shared/linked.ts)",
+  "client/card-blocks.tsx": "a card's table, list and code: show_card refuses past CARD_LIMITS (50 rows, 30 items, 60 lines; shared/cards.ts)",
 };
 
 test("every list pages: no 'Show all' or 'Show N more' that draws the whole list, outside the shared pager", async () => {

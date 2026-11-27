@@ -225,3 +225,41 @@ test("What's new on a phone and on desktop: every version in one scroll, nothing
   const { r } = await render(createElement(WhatsNewSheet, { open: true, name: "Follow-up", feed, releases: null, theme, compact: true, onClose: () => {} }));
   assert.equal(r!.root.findAll(n => n.props.accessibilityLabel === "Release notes on GitHub").length, 0, "no release pages known: no link");
 });
+
+// What an agent shows (docs/cards.md) on a phone: every block type at once, folded and open, its ⋯ menu, and the
+// question's link row, under the phone's rules (invariant 51).
+test("a shown card on a phone renders under the phone's rules: all eight blocks, folded, the menu, the question's row", async () => {
+  const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
+  const { showInputSchema, cardSummary, cardContents } = await import("../shared/cards");
+  const { ShownCard, CardLinkRow } = await import("../client/shown-cards");
+  const input = showInputSchema.parse({ id: "renders", title: "Checkout redesign", blocks: [
+    { type: "text", md: "All **six** screens in the dark look. See [the page](https://example.com/p).\n\n- one\n- two" },
+    { type: "media", layout: "pairs", items: [{ src: "ui/after-1.png", before: "ui/before-1.png", label: "Cart" }, { src: "ui/after-2.png", before: "ui/before-2.png", label: "Pay" }] },
+    { type: "table", columns: ["Platform", "Chrome", "Firefox"], rows: [["macOS", { state: "done" }, { state: "running" }], ["Ubuntu", { state: "failed" }, "12 ms"]] },
+    { type: "facts", items: [["p95", "301 ms", "good"], ["Errors", "0"]] },
+    { type: "list", ranked: true, items: [{ text: "Retry storm in the gateway", state: "warning", tag: "high", refs: ["src/pay.ts:84", "https://example.com/i/1"] }] },
+    { type: "chart", kind: "line", labels: ["1", "2", "3"], series: [{ name: "Rows", values: [0, 40, 812] }] },
+    { type: "files", items: [{ path: "out/report.md" }, { url: "https://example.com/flame?token=abc" }] },
+    { type: "code", ref: "src/charge.ts:84-86", diff: true, text: "+ const a = 1;\n- const b = 2;\n  return a;", mark: [85] },
+  ] });
+  const blocks = (input.blocks ?? []).map(b => b.type === "media" ? { ...b, items: b.items.map(i => ({ ...i, src: { missing: "Moved or deleted" }, before: { missing: "Moved or deleted" } })) } : b);
+  const base = { id: "renders", title: input.title, blocks, by: "a1", byTitle: null, createdAt: "2026-11-27T09:00:00Z", updatedAt: "2026-11-27T09:30:00Z", changed: { }, keep: false } as never;
+  const card = { ...(base as object), freshness: { kind: "stale", label: "agent idle · 3 h" }, summary: cardSummary(base), contents: cardContents(base), question: "Q1" } as never;
+  const workspace = { id: "w1", mainAgentId: "a1", questions: [{ id: "Q1", links: [{ card: "renders" }] }], shownCards: [{ id: "renders", title: input.title, updatedAt: "2026-11-27T09:30:00Z", by: "a1", keep: false }] } as never;
+  const wrap = (el: unknown) => createElement(QueryClientProvider, { client: new QueryClient() }, el);
+  for (const [name, el] of [
+    ["the card, open", wrap(createElement(ShownCard, { card, workspace, theme, compact: true, now: Date.parse("2026-11-27T12:30:00Z"), pointed: true, openQuestion: () => {} }))],
+    ["the card, large", wrap(createElement(ShownCard, { card, workspace, theme, compact: true, now: Date.parse("2026-11-27T12:30:00Z"), place: "large" }))],
+    ["the question's row", wrap(createElement(CardLinkRow, { workspace, cardId: "renders", theme, compact: true }))],
+    ["Needs you's line", wrap(createElement(CardLinkRow, { workspace, cardId: "renders", theme, compact: true, dense: true }))],
+  ] as const) {
+    const { r, error } = await render(el as never);
+    try {
+      assert.equal(error, null, `${name} crashed on a phone: ${(error as Error)?.message}`);
+      if (name === "the card, open") {
+        const labels = r!.root.findAll(n => typeof n.type === "string" && typeof n.props.accessibilityLabel === "string").map(n => n.props.accessibilityLabel as string);
+        assert.ok(labels.some(l => /more|menu|actions/i.test(l)), `the ⋯ menu button: ${labels.join(" | ")}`);
+      }
+    } finally { await act(async () => { (r as unknown as { unmount(): void } | undefined)?.unmount(); }); }
+  }
+});

@@ -242,7 +242,7 @@ detail pane (`place` "home"), the right side panel (`follow-up`, "panel") and a 
 | 1400 and up | three columns, the left one Needs you's or the agent's as in two | 10 |
 
 The head spans every column; nothing is centred in a max-width box. In one column the order is Shipped, Needs you, the
-agent card, Messages to the agent, Your questions, the shipped history, Pull requests, Agent's tasks, Activity, then
+agent card, Messages to the agent, Your questions, what agents show (cards; [cards](cards.md#in-the-view)), the shipped history, Pull requests, Agent's tasks, Activity, then
 Spec, agent and recovery. In more columns the left column (the wide one in two) holds Shipped, the agent card, Messages
 and the history; Needs you, Your questions, Pull requests and Agent's tasks take the next. While anything waits on the
 developer, Needs you takes the left column under Shipped instead and the agent card, Messages and the history move to
@@ -259,6 +259,8 @@ the next, so the decision reads first as it does in one column. Activity and Spe
   screen; Home's pane and the tab mark it while Recent steps shows, so its status-line peek stays shut. On a phone
   Home's moves and reply box sit in the bottom dock.
 - **Permissions** an agent waits on sit at the top of Needs you with Allow and Deny.
+- **What agents show** (`client/shown-cards.tsx`): a card an open question points at sits right under Needs you in
+  every layout; the others follow Your questions in one column and take their own slots in the pool with more.
 - **Amber is Needs you's alone**: stale tasks and Your questions' unread chip are neutral.
 
 ## Section hints
