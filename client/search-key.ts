@@ -1,8 +1,7 @@
 import { Platform } from "react-native";
 import type { PluginClientContext } from "@getpaseo/plugin/client";
-import { displayPreferences, displayRpc } from "../shared/display";
 import { isDesktopApp, isMac, matchesShortcut, newShortcutPreset, searchShortcutOf, shortcutLabel, type KeyEventLike, type NewShortcut, type SearchShortcut } from "../shared/search-key";
-import { subscribeDisplay } from "./display";
+import { displayValues, subscribeDisplay } from "./display";
 import { requestSearch } from "./search-focus";
 import type { SearchFocus } from "../shared/search-focus";
 
@@ -63,11 +62,9 @@ export function installSearchShortcut(client: PluginClientContext, key: SearchKe
   if (Platform.OS !== "web" || !doc) return () => undefined;
   const mac = isMac();
   let live = true;
-  void client.rpc(displayRpc.read, {}).then(doc => {
-    if (!live || doc.status !== "ready") return;
-    const parsed = displayPreferences.schema.safeParse(doc.values);
-    if (parsed.success) { key.set(parsed.data.search_shortcut); extra?.key.set(parsed.data.new_shortcut); }
-  }).catch(() => undefined);
+  // The Display store's copy (client/display.tsx: the feed, or its poll on 0.15), never a read of its own
+  // (one-read-per-key-at-mount): the values it already has, then every change.
+  const now = displayValues(); if (now) { key.set(now.search_shortcut); extra?.key.set(now.new_shortcut); }
   const offDisplay = subscribeDisplay(values => { key.set(values.search_shortcut); extra?.key.set(values.new_shortcut); });
   const onKey = (e: DomKey) => {
     // New from anywhere shares this one listener (every-shortcut-is-configurable-and-never-paseo-s).

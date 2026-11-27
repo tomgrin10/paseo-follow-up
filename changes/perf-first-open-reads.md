@@ -1,0 +1,1 @@
+- Opening Follow-up asks the server for less: settings, usage and your Linear queue are each read once when Home opens, not two or three times.

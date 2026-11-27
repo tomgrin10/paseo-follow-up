@@ -1,3 +1,4 @@
+import { queueMoved } from "../shared/linear-queue";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PagedRows } from "./paged-list";
 import { Platform, View } from "react-native";
@@ -120,7 +121,7 @@ export function SinceBlock({ theme, compact, openQueue, onStarted, navigation, r
   const { view, error, reload } = useQueueView({ open: true });
   // The home feed's queue revision moved (a sweep ended, or a dismissal): an open brief pane re-reads, no timer.
   const seen = useRef(revision);
-  useEffect(() => { if (seen.current === revision) return; seen.current = revision; void reload(); }, [revision, reload]);
+  useEffect(() => { const moved = queueMoved(seen.current, revision); seen.current = revision; if (moved) void reload(); }, [revision, reload]);
   const actions = useActions();
   if (error && !view) return <View style={{ gap: 4, marginTop: 6 }}>
     <Text accessibilityRole="header" style={t.section}>Your Linear queue</Text>
