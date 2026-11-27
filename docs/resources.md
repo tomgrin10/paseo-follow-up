@@ -16,6 +16,10 @@ loaded for an hour.
 - **The active window.** `server/agent-load.ts` defines it (`workspaceActive`, `activeWindowMs`; default
   `DEFAULT_ACTIVE_WINDOW_DAYS` = 3 days) and `conversationGone`. Dormant workspaces get no observation, and auto-send never
   targets an unloaded or long-unused agent.
+- **Requested messages arrive.** A time trigger or `wait_for_checks` verdict is the exception: sending resumes
+  the agent even when its runtime was unloaded (`closed`), including after an hour idle. A running turn waits;
+  an archived workspace, archived agent or gone agent cancels. Nudges, repairs, briefs and auto-sends keep the
+  normal rule. See invariants 1, 71 and 121.
 - **Ask only when needed.** Provider subagents are asked about only when a send is due or awaiting
   acknowledgment, or completion is being checked.
 - **Finding what woke an agent.** Every wake goes through a timeline or subagent read: `paseo.agents.ref(id).timeline`

@@ -17,8 +17,8 @@ export type WatchAgent = { status: string; archived: boolean; workspaceId: strin
  * save behind the reply (an-ack-never-waits-on-the-disk). `evaluate` runs after each engine pass on the state that pass
  * wrote, so a watch costs no GitHub read of its own (waiting-for-checks-adds-no-github-read): its PR only counts as
  * due at the running-checks cadence (`watched`). A verdict becomes one `checks` message on the queue
- * (a-message-is-saved-before-sent-and-arrives-once), sent only to an agent that is neither closed nor archived
- * (a-watch-never-wakes-a-closed-agent), and never beside a repair that carries the same failure
+ * (a-message-is-saved-before-sent-and-arrives-once), sent even when Paseo unloaded the requesting agent
+ * (a-requested-verdict-reopens-an-unloaded-agent), and never beside a repair that carries the same failure
  * (a-waited-for-failure-is-sent-once).
  */
 export class CheckWatches {
@@ -117,25 +117,26 @@ export class CheckWatches {
   }
   private async deliver(watch: CheckWatch, verdict: Verdict, w: Workspace | undefined): Promise<void> {
     if (verdict.kind === "failed" && w && coveredByRepair(w, watch.agentId, watch.prKey)) { this.fired.push({ watch, verdict, sent: false, why: "repair" }); return; }
-    // Closed or archived: the watch ends with nothing sent (a-watch-never-wakes-a-closed-agent). Unknown keeps the
-    // message; the channel checks again when it goes.
+    if (!w || w.archived) { this.fired.push({ watch, verdict, sent: false, why: "workspace archived" }); return; }
+    // Archived: the watch ends with nothing sent. Unknown keeps the message; the channel checks again when it goes.
     const agent = await this.deps.agent(watch.agentId).catch(() => null);
-    if (agent && (agent.archived || agent.status === "closed")) { this.fired.push({ watch, verdict, sent: false, why: agent.archived ? "archived" : "closed" }); return; }
+    if (agent?.archived) { this.fired.push({ watch, verdict, sent: false, why: "archived" }); return; }
     if (!this.queue) { this.fired.push({ watch, verdict, sent: false, why: "no queue" }); return; }
     this.queue.enqueue({ id: checksItemId(watch), kind: "checks", key: watch.workspaceId, ref: { agentId: watch.agentId, workspaceId: watch.workspaceId, prKey: watch.prKey },
       messageId: `checks-${watch.id}-${Date.parse(watch.createdAt).toString(36)}`, text: verdict.text, priority: "now", state: "queued" });
     this.fired.push({ watch, verdict, sent: true, why: "queued" });
   }
-  /** The queue's `checks` channel: the agent is resolved when the message goes, never woken from closed or archived. */
+  /** The queue's `checks` channel: the agent is resolved when the message goes, Paseo reopens unloaded agents; archived targets cancel. */
   attachQueue(queue: MessageQueue): void {
     this.queue = queue;
     queue.register("checks", {
       resolve: async (item): Promise<Resolution> => {
+        const w = (await this.deps.snapshot()).workspaces.find(w => w.id === item.ref.workspaceId);
+        if (!w || w.archived) return { cancel: "The workspace was archived, so the checks result wasn't sent." };
         let agent: WatchAgent;
         try { agent = await this.deps.agent(item.ref.agentId!); }
         catch { return { defer: "Paseo unreachable" }; }
         if (!agent || agent.archived) return { cancel: "The agent was archived, so the checks result wasn't sent." };
-        if (agent.status === "closed") return { cancel: "The agent was closed, so the checks result wasn't sent (Follow-up never reopens it for this)." };
         if (item.state === "queued" && ["running", "initializing"].includes(agent.status)) return { defer: "waits for the agent's turn to end" };
         return { target: { workspaceId: agent.workspaceId, recipients: [item.ref.agentId!] } };
       },

@@ -115,7 +115,11 @@ These are product rules. Each has tests, and breaking one is a bug even when the
 1. **Never wake a dormant agent.** Reading an unloaded agent's timeline or provider subagents loads it (about 650 MB)
    for an hour. Check `isLoaded()` (`shared/agent-load.ts`) or use the cached directory first. For an unloaded
    agent, read its transcript on disk (`server/transcript.ts`). Auto-send skips agents that aren't loaded or that
-   had no user message within the active window. Guarded by `tests/never-wake.test.ts`,
+   had no user message within the active window. The exception is a message the agent requested: a time trigger or
+   `wait_for_checks` verdict resumes an unloaded agent, including status `closed` (Paseo's idle runtime cleanup,
+   shutdown or provider retirement). It waits for a running turn and cancels only for an archived workspace,
+   an archived agent or a gone agent. Follow-up's own nudges, repairs, briefs and auto-sends keep the normal rule.
+   Guarded by `tests/never-wake.test.ts`,
    `tests/daemon-load.test.ts` and `npm run test:scale`. See [docs/resources.md](docs/resources.md).
 2. **Stay inside resource budgets.**
    - One worker process, and no process per agent or per job.
@@ -990,12 +994,12 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    poller would cost ~240-1440 points an hour for PRs Follow-up already reads. That day agents ran ~117 polling loops
    in 24 h (`gh pr checks`, `gh api graphql` every 1-60 s). Guarded by `tests/wait-for-checks.test.ts`
    ([docs/wait-for-checks.md](docs/wait-for-checks.md)).
-71. **A watch never wakes a closed or archived agent; a waited-for failure is sent once**
-   (`a-watch-never-wakes-a-closed-agent`, `a-waited-for-failure-is-sent-once`). A verdict is one `checks` queue message
-   after the agent's turn; a closed or archived agent's watch ends with nothing sent, and the channel checks again when
-   it goes. An idle agent that asked is messaged even when unloaded (it asked for that message: invariant 1's one
-   exception). A failure a repair will carry (main agent, Auto-send on, its checks task queued or out) ends the watch
-   quietly. Guarded by `tests/wait-for-checks.test.ts`.
+71. **A requested verdict reopens an unloaded agent; a waited-for failure is sent once**
+   (`a-requested-verdict-reopens-an-unloaded-agent`, `a-waited-for-failure-is-sent-once`). A verdict is one `checks`
+   queue message after the agent's turn, even when unloaded (`closed`); Paseo reopens it. An archived workspace, archived agent or
+   gone agent cancels, checked again when the message goes (invariant 1's requested-message exception).
+   Renamed from `a-watch-never-wakes-a-closed-agent`: closed means unloaded, not ended.
+   A failure a repair will carry (main agent, Auto-send on, its checks task queued or out) ends the watch quietly. Guarded by `tests/wait-for-checks.test.ts`.
 72. **The polling nudge never blocks** (`the-polling-nudge-never-blocks`). The PostToolUse hook (already run for every
    tool, so no new process) adds context once per turn when a shell command polls GitHub for CI (`pollsGithub`,
    `server/agent-hook.mjs`); a single `gh pr checks` never nudges, and nothing is ever blocked. Guarded by
@@ -1555,9 +1559,10 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    schedule) or by the agent for its own check-back on something Follow-up can't see; the hook, tool and skill say so in
    the one trigger rule. It goes to the main agent exactly once, never before its time and within a tick after it, as a
    `scheduled` queue message saved before it is sent (invariant 36), whether Auto-send is on or not; now, merge and
-   deploy keep following Auto-send. It never goes to a closed or archived agent, and the task row says why, in amber ("Didn't
-   go out · the agent was archived"); an idle agent gets it even when Paseo unloaded it (it asked for it: the same exception to
-   invariant 1 as `wait_for_checks`, invariant 71). A worker down at the time sends it once on its first pass, saying it is late.
+   deploy keep following Auto-send. It waits for a running turn and reopens an unloaded (`closed`) agent. An archived
+   workspace, archived agent or gone agent cancels, and the task row says why, in amber ("Didn't go out · the agent
+   was archived"). This is invariant 1's requested-message exception, shared with `wait_for_checks` (invariant 71).
+   A worker down at the time sends it once on its first pass, saying it is late.
    The developer reads times on their own clock; an agent reads ISO with an offset. 2026-11-26, the developer: agents
    that wanted to hear back at a time used a separate defer plugin other Follow-up users don't have, or sleep loops.
    Guarded by `tests/scheduled-tasks.test.ts` ([docs/workspaces.md](docs/workspaces.md)).

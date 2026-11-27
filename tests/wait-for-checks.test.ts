@@ -10,6 +10,7 @@ import { CheckWatches, checksItemId, type WatchAgent } from "../server/check-wat
 import { hostWatches, waitForChecksAnswer } from "../server/wait-for-checks";
 import { RUNNING_POLL_MS, TICK_MS, dueForRead } from "../shared/poll";
 import { QUEUE_KINDS, type NewQueueItem } from "../shared/queue";
+import { testQueue } from "./support/queue";
 import type { Channel } from "../server/message-queue";
 import { tools, toolList } from "../server/mcp.mjs";
 
@@ -101,19 +102,31 @@ test("a watch fires once, as one checks message, and ends", async t => {
   assert.ok(QUEUE_KINDS.includes("checks"));
 });
 
-test("a watch never wakes a closed or archived agent", async t => {
-  for (const agent of [{ status: "closed", archived: false }, { status: "idle", archived: true }]) {
+test("a requested verdict reaches a closed agent once after idle unload", async t => {
+  const { store, directory } = await watches(t, { workspaces: [workspace([pr({ state: "MERGED" })])] }, () => ({ status: "closed", archived: false, workspaceId: "ws1" }));
+  const q = await testQueue(directory); store.attachQueue(q.queue); q.queue.start();
+  t.after(async () => { q.queue.stop(); });
+  const w = await store.add({ agentId: "a1", workspaceId: "ws1", prKey: "example/app#12", url: "", ms: 3600_000 });
+  await store.answered(w.id, false); await store.evaluate(); await q.queue.idle(); await store.evaluate(); await q.queue.idle();
+  assert.equal(q.delivered.length, 1);
+  assert.deepEqual(q.delivered[0].target.recipients, ["a1"]);
+  assert.deepEqual(await store.list(), []);
+});
+
+test("a watch never wakes an archived agent", async t => {
+  for (const agent of [{ status: "closed", archived: true }, { status: "idle", archived: true }]) {
     const { store, q } = await watches(t, { workspaces: [workspace([pr({ state: "MERGED" })])] }, () => ({ ...agent, workspaceId: "ws1" }));
     const w = await store.add({ agentId: "a1", workspaceId: "ws1", prKey: "example/app#12", url: "", ms: 3600_000 }); await store.answered(w.id, false);
     await store.evaluate();
     assert.equal(q.items.length, 0, JSON.stringify(agent)); assert.deepEqual(await store.list(), [], "and the watch ends");
   }
-  // At send time too: the channel cancels a closed or archived agent, and holds a running one until its turn ends.
-  const { q } = await watches(t, { workspaces: [] }, id => id === "closed" ? { status: "closed", archived: false, workspaceId: "ws1" } : id === "gone" ? null : { status: "running", archived: false, workspaceId: "ws1" });
+  // The channel reopens an unloaded agent, cancels a gone agent, and holds a running turn.
+  const { q } = await watches(t, { workspaces: [workspace([])] }, id => id === "closed" ? { status: "closed", archived: false, workspaceId: "ws1" } : id === "archived" ? { status: "closed", archived: true, workspaceId: "ws1" } : id === "gone" ? null : { status: "running", archived: false, workspaceId: "ws1" });
   const channel = q.channels.get("checks")!;
-  const item = (agentId: string) => ({ ref: { agentId }, state: "queued" }) as never;
-  assert.ok("cancel" in await channel.resolve(item("closed")));
+  const item = (agentId: string) => ({ ref: { agentId, workspaceId: "ws1" }, state: "queued" }) as never;
+  assert.deepEqual(await channel.resolve(item("closed")), { target: { workspaceId: "ws1", recipients: ["closed"] } });
   assert.ok("cancel" in await channel.resolve(item("gone")));
+  assert.ok("cancel" in await channel.resolve(item("archived")));
   assert.deepEqual(await channel.resolve(item("busy")), { defer: "waits for the agent's turn to end" });
 });
 
@@ -220,4 +233,17 @@ test("the polling nudge never blocks a command and comes at most once per turn",
     await fire(agent, { hook_event_name: "UserPromptSubmit", prompt: "again" });
     assert.match(await fire(agent, poll), /wait_for_checks/, `${agent}: a new turn can be nudged again`);
   }
+});
+
+test("an archived workspace cancels checks before enqueue and before send", async t => {
+  const state = { workspaces: [workspace([pr({ state: "MERGED" })])] };
+  const { store, q } = await watches(t, state);
+  const w = await store.add({ agentId: "a1", workspaceId: "ws1", prKey: "example/app#12", url: "", ms: 3600_000 });
+  await store.answered(w.id, false); await store.evaluate();
+  state.workspaces[0].archived = true;
+  assert.ok("cancel" in await q.channels.get("checks")!.resolve(q.items[0] as never));
+  const again = await store.add({ agentId: "a1", workspaceId: "ws1", prKey: "example/app#12", url: "", ms: 3600_000 });
+  await store.answered(again.id, false); await store.evaluate();
+  assert.equal(q.items.length, 1, "nothing enqueued after archive");
+  assert.deepEqual(await store.list(), []);
 });

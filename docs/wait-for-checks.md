@@ -47,10 +47,12 @@ and the developer decides when those go out.
   cadence (`watchedSince` in `dueForRead`, `shared/poll.ts`): once after its wait began, then at most every 30 s (2 min
   once checks run past 10 min), as a probe unless the probe sees a change, and never past the reserve or for a merged
   or closed PR. Guarded by `tests/wait-for-checks.test.ts`.
-- **A watch never wakes a closed or archived agent** (`a-watch-never-wakes-a-closed-agent`). A closed or archived agent's
-  watch ends with nothing sent, and the `checks` channel checks again when the message goes: closed or archived cancels,
-  a running agent waits for its turn to end. An idle agent that asked is messaged even when Paseo has unloaded it: it
-  asked for exactly that message, like Paseo's background-work wake-up (an exception to invariant 1, shared only with a scheduled task's message).
+- **A requested verdict reopens an unloaded agent** (`a-requested-verdict-reopens-an-unloaded-agent`, renamed from
+  `a-watch-never-wakes-a-closed-agent`). Paseo's `closed` means the runtime was unloaded (idle cleanup, shutdown or
+  provider retirement). The requested verdict still arrives once: sending reopens it. A running agent waits for its
+  turn to end. An archived workspace, archived agent or gone agent cancels, checked again when the message goes.
+  This and a scheduled task's message are invariant 1's requested-message exception; automatic nudges, repairs,
+  briefs and auto-sends still never wake an unloaded agent.
 - **A waited-for failure is sent once** (`a-waited-for-failure-is-sent-once`). When the agent waiting is the main agent,
   Auto-send is on and a repair batch carrying this PR's checks task is queued or out, the repair is the one message and
   the watch ends quietly (`coveredByRepair`). With Auto-send off, or a contributor waiting, the watch sends it.
