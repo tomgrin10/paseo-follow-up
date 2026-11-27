@@ -49,7 +49,9 @@ Nothing polls while the app is hidden.
   until dismissed, at most three stacked). `ToastHost` mounts beside WhatsNewGate on Home, the panel and the sidebar
   row; only the first mounted one draws, in the host toast's place and shape, below Paseo's own toast. With none
   mounted, `runAction` uses the host toast. A sent answer stays in `client/pending-answers.ts` (localStorage on web
-  and desktop, memory on phones) until the server has it; a failed one shows "Not sent · Retry" with the words.
+  and desktop, memory on phones) until the client's copy has it, and every surface reads it as answered at once
+  through one overlay (`shared/optimistic-answers.ts`, invariant 138 `answering-is-optimistic`); a failed one is open
+  again with "Not sent · Retry", the pick, the words and the images.
   `tests/quick-actions.test.ts` fails when a dialog closes in a mutation's `onSuccess`. Left blocking, with the
   reason in the test: Merge and merge-when-ready, which re-check the stack and can ask again.
 - **The composer pill is always a popover**, Undo included (Paseo 0.16 draws a chevron on popover pills;

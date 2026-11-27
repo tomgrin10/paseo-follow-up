@@ -3,6 +3,8 @@ import { dismissRpc, inboxActRpc, inboxFeed, inboxListRpc } from "../shared/cont
 import { openFeed, type Feed } from "./feeds";
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import { withoutWithdrawnAsks, type InboxRow } from "../shared/inbox";
+import type { Question } from "../shared/questions";
+import { withSettledBrief } from "../shared/optimistic-answers";
 import { onNoReviewRepos, setHandedBackPrs } from "../shared/pr-workflow";
 import { subscribeDisplay } from "./display";
 import { onVisible, whileVisible } from "./visibility";
@@ -64,6 +66,8 @@ export function createInboxStore(client: PluginClientContext) {
       // Nothing changed since the answer this store holds: keep it, and only re-render if we were offline.
       if (next.unchanged && data) { if (offlineSince !== null || failures) { offlineSince = null; failures = 0; emit(); } return; }
       data = next; offlineSince = null; failures = 0; shown = null;
+      // The worker's copy has moved on from a brief answered here (answered, or a newer one): nothing left to hold.
+      if (answering.size) answering = new Map([...answering].filter(([id, at]) => next.rows.some(r => r.agentId === id && r.brief?.state === "open" && r.brief.at === at)));
       setHandedBackPrs(next.handedBack ?? []);
       // Rows signed off while offline stay hidden until the replay lands.
       emit();
@@ -100,7 +104,17 @@ export function createInboxStore(client: PluginClientContext) {
    * The rows every surface draws: the daemon's, minus add-reviewers asks for PRs the agent merges itself
    * (shared/inbox.ts withoutWithdrawnAsks). Cached per answer and per review-mode change, so selectors stay stable.
    */
-  const view = () => shown ??= { rows: (data?.rows ?? []).map(r => withoutWithdrawnAsks(r)), overseer: data?.overseer ? withoutWithdrawnAsks(data.overseer) : null };
+  const view = () => shown ??= { rows: (data?.rows ?? []).map(r => answeredHere(settled(withoutWithdrawnAsks(r)))), overseer: data?.overseer ? withoutWithdrawnAsks(data.overseer) : null };
+  /** answering-is-optimistic: a row whose questions the developer answered reads as the server will make it (settleWith). */
+  let workspaceOf: ((id: string) => { questions: readonly Pick<Question, "id" | "answer" | "closed">[] } | undefined) | null = null;
+  const settled = (r: InboxRow): InboxRow => workspaceOf && r.workspaceId ? withSettledBrief(r, workspaceOf(r.workspaceId)) : r;
+  /**
+   * answering-is-optimistic: briefs the developer answered from a chat card (no question behind them) read as answered
+   * until the worker's copy does, keyed by the brief's time so a newer brief is never hidden. A failed send lets go.
+   */
+  let answering = new Map<string, string | undefined>();
+  // The answer goes out as the developer's message, which clears the flag (shared/inbox.ts, rule #11).
+  const answeredHere = (r: InboxRow): InboxRow => r.brief?.state === "open" && answering.has(r.agentId) && answering.get(r.agentId) === r.brief.at ? { ...r, needs: null, snooze: null, brief: { ...r.brief, state: "answered" } } : r;
   const patch = (agentIds: string[], change: (row: InboxRow) => InboxRow) => {
     if (!data) return;
     data = { ...data, rows: data.rows.map(r => agentIds.includes(r.agentId) ? change(r) : r) }; shown = null;
@@ -190,6 +204,28 @@ export function createInboxStore(client: PluginClientContext) {
     noteLater(label: string, until: string, restore: () => Promise<void>, key?: string) {
       recent = { kind: "later_ws", agentIds: [], label, at: Date.now(), batch: false, until, restore, key };
       emit();
+    },
+    /**
+     * Read rows against the workspaces with the developer's answers overlaid (client/live.tsx): a row whose questions
+     * are answered resolves on every surface at once. Emits only when a row actually reads differently.
+     */
+    settleWith(get: (workspaceId: string) => { questions: readonly Pick<Question, "id" | "answer" | "closed">[] } | undefined, subscribe: (listener: () => void) => () => void): () => void {
+      workspaceOf = get; shown = null;
+      const off = subscribe(() => {
+        if (!shown) return;
+        const before = shown.rows;
+        shown = null;
+        const after = view().rows;
+        if (after.length !== before.length || after.some((r, i) => r.brief?.state !== before[i]?.brief?.state || r.needs !== before[i]?.needs)) emit();
+      });
+      emit();
+      return () => { off(); workspaceOf = null; shown = null; };
+    },
+    /** A chat card's answer is on its way: its row reads as answered at once. Returns the rollback for a failed send. */
+    holdAnswered(agentId: string): () => void {
+      const at = data?.rows.find(r => r.agentId === agentId)?.brief?.at;
+      answering = new Map(answering).set(agentId, at); shown = null; emit();
+      return () => { if (!answering.has(agentId)) return; answering = new Map(answering); answering.delete(agentId); shown = null; emit(); };
     },
     /** Done's Undo windows (client/done-windows.ts): the pill says Done until that agent's toast ends. */
     noteDone: (agentId: string, cancel: () => void) => dones.note(agentId, cancel),

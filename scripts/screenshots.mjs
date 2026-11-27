@@ -47,7 +47,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as the CHANGELOG's newest stable, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["menu-bounds", "tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "peek", "pr-now", "panel-folds", "workspace-view", "question-links", "gallery", "frames", "onboarding", "setup-popup", "advanced"];
+const REVIEW_SHOTS = ["menu-bounds", "tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "peek", "pr-now", "panel-folds", "optimistic-answers", "workspace-view", "question-links", "gallery", "frames", "onboarding", "setup-popup", "advanced"];
 /** Pasted images and their Add image button share one harness setup (an Overseer and the fixture provider taking images). */
 const PASTE_LIKE = only => only.includes("paste-images") || only.includes("attach-images");
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
@@ -796,8 +796,10 @@ async function seed({ call, home }) {
   if (only.includes("review-mode") || only.includes("pr-link")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }] });
   // reviewers-click: Ravi and Mina review example/app, so each PR's row reads "Add reviewers to #N: Ravi and Mina".
   if (only.includes("reviewers-click")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }, { login: "mina", name: "Mina" }] });
-  const specs = [...WORKSPACES.filter(w => !only.includes("pr-now") || ["audit", "billing"].includes(w.key)).filter(w => !(argv.includes("--rename-fixup-review") || only.includes("local-titles")) || ["audit", "billing"].includes(w.key)), ...(only.includes("needs-you-states") || only.includes("panel-folds") || only.includes("tasks-view") || only.includes("own-answer") || only.includes("more-context") || only.includes("dismiss") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") || PASTE_LIKE(only) ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") || only.includes("dismiss") ? MERGE_CLICK_STATES : []), ...(only.includes("reviewers-click") ? REVIEWERS_CLICK_STATES : []), ...(only.includes("pr-scale") ? PR_SCALE_STATES : []), ...(only.includes("batch-churn") ? BATCH_CHURN_STATES : []), ...(only.includes("scheduled-tasks") ? SCHEDULED_STATES : []), ...(only.includes("paged-lists") ? PAGED_STATES : []), ...(only.includes("now-line") ? NOW_LINE_STATES : []), ...(only.includes("peek") ? PEEK_STATES : []), ...(only.includes("pr-now") ? PR_NOW_STATES : []), ...(only.includes("question-links") ? QL_STATES : [])];
+  const specs = [...WORKSPACES.filter(w => !only.includes("pr-now") || ["audit", "billing"].includes(w.key)).filter(w => !(argv.includes("--rename-fixup-review") || only.includes("local-titles")) || ["audit", "billing"].includes(w.key)), ...(only.includes("needs-you-states") || only.includes("panel-folds") || only.includes("tasks-view") || only.includes("own-answer") || only.includes("optimistic-answers") || only.includes("more-context") || only.includes("dismiss") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") || PASTE_LIKE(only) ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") || only.includes("optimistic-answers") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") || only.includes("dismiss") ? MERGE_CLICK_STATES : []), ...(only.includes("reviewers-click") ? REVIEWERS_CLICK_STATES : []), ...(only.includes("pr-scale") ? PR_SCALE_STATES : []), ...(only.includes("batch-churn") ? BATCH_CHURN_STATES : []), ...(only.includes("scheduled-tasks") ? SCHEDULED_STATES : []), ...(only.includes("paged-lists") ? PAGED_STATES : []), ...(only.includes("now-line") ? NOW_LINE_STATES : []), ...(only.includes("peek") ? PEEK_STATES : []), ...(only.includes("pr-now") ? PR_NOW_STATES : []), ...(only.includes("question-links") ? QL_STATES : [])];
   // Geometry checks need one question, one repair and one permission row, not the full README inventory.
+  // optimistic-answers needs one lone question and one chat card; the clock only moves forward (pn-one sits before the last needs-you states).
+  if (only.includes("optimistic-answers")) specs.splice(0, specs.length, ...specs.filter(w => !NEEDS_YOU_STATES.includes(w) && !PICK_NOTES.includes(w) || ["ny-lone", "pn-one"].includes(w.key)));
   if (only.includes("menu-bounds")) specs.splice(0, specs.length, ...specs.filter(w => ["billing", "email", "search"].includes(w.key)));
   if (only.includes("layout-search")) {
     specs.splice(0, specs.length, ...specs.filter(w => ["audit", "billing"].includes(w.key)));
@@ -2394,6 +2396,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   if (only.includes("question-links")) await questionLinksShots({ shoot, call, seeded, home });
   if (only.includes("workspace-view")) await workspaceViewShots({ shoot, call, seeded });
   if (only.includes("own-answer")) await ownAnswerShots({ shoot });
+  if (only.includes("optimistic-answers")) await optimisticAnswerShots({ shoot });
   if (only.includes("more-context")) await moreContextShots({ shoot, call });
   if (only.includes("your-questions")) await yourQuestionsShots({ shoot, call, seeded, home, cli });
   if (only.includes("paste-images")) await pasteImagesShots({ shoot, call });
@@ -5557,6 +5560,57 @@ async function ownAnswerShots({ shoot }) {
     await shoot(name(`own-dialog-${theme}`), DESKTOP, theme, async page => { await dialog(lone, "Missing keys")(page); await own(page); });
     await shoot(name(`two-panel-${theme}`), TALL, theme, panel(two, "Limit scope"));
     await shoot(name(`two-home-phone-${theme}`), PHONE, theme, homePhone(two, "Limit scope"));
+  }
+}
+
+/**
+ * optimistic-answers (answering-is-optimistic, invariant 138): the panel's question before Send (Something else, words
+ * typed), right after Send while the server hasn't replied (the request held on the page's daemon socket: the question
+ * is gone and every count dropped), and a send that fails (the request dropped, then the socket closed: the question is
+ * back with its pick and words, Not sent and Retry, and the toast). Desktop light and dark, Home on a phone dark, and
+ * the chat's brief card before and right after a lettered tap.
+ */
+async function optimisticAnswerShots({ shoot }) {
+  const OWN = "Show the key itself, and log it so we add the translation.";
+  const TALL = { width: DESKTOP.width, height: 1000 };
+  const lone = pick("ny-lone");
+  // A decision card in the chat with no tracked question behind it (pick-notes' fixture): a tap answers the brief itself.
+  const card = pick("pn-one");
+  const visible = l => l.filter({ visible: true }).first();
+  // An answer goes out as follow.answer-question (a question) or follow.brief-action (a chat card's own decision).
+  const holds = text => { const s = typeof text === "string" ? text : Buffer.from(text).toString("latin1"); return s.includes("follow.answer-question") || s.includes("follow.brief-action"); };
+  // The page's daemon socket: an answer's request is held (never reaches the daemon) or dropped and the socket closed.
+  const proxy = mode => ws => {
+    const server = ws.connectToServer();
+    server.onMessage(m => ws.send(m));
+    ws.onMessage(m => {
+      if (!holds(m)) { server.send(m); return; }
+      if (mode === "fail") setTimeout(() => { void ws.close({ code: 1011, reason: "harness: connection lost" }); }, 400);
+    });
+  };
+  const panel = async page => { await page.setViewportSize(TALL); await openChat(page, lone.title, lone.prompt); await page.getByRole("button", { name: "Follow-up", exact: true }).last().click(); await visible(page.getByText("Missing keys")).waitFor(); };
+  const homePhone = async page => { await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, lone.title)).click(); await visible(page.getByText("Missing keys")).waitFor(); };
+  const own = async page => { await visible(page.getByRole("radio", { name: /^Something else/ })).click(); await visible(page.getByLabel("Your answer to Q1, required")).fill(OWN); };
+  const send = async page => { await visible(page.getByRole("button", { name: "Send your Q1 answer to the agent" })).click(); };
+  const gone = async page => { await page.waitForTimeout(300); if (await page.getByLabel("Your answer to Q1, required").filter({ visible: true }).count()) throw new Error("optimistic-answers: the question is still on screen after Send"); };
+  const failed = async page => { await visible(page.getByText(/^Not sent ·/)).waitFor({ timeout: 90_000 }); await visible(page.getByText(/^Not sent ·/)).scrollIntoViewIfNeeded(); await page.waitForTimeout(600); if (await page.getByText("Q1 not sent", { exact: true }).filter({ visible: true }).count()) throw new Error("optimistic-answers: the failure toast covers a card that already says Not sent"); if (await page.getByLabel("Your answer to Q1, required").filter({ visible: true }).inputValue() !== OWN) throw new Error("optimistic-answers: the words didn't come back"); };
+  for (const theme of ["light", "dark"]) {
+    await shoot(`opt-before-panel-${theme}`, TALL, theme, async page => { await panel(page); await own(page); });
+    await shoot(`opt-after-panel-${theme}`, TALL, theme, async page => { await panel(page); await own(page); await send(page); await gone(page); }, { ws: proxy("hold") });
+    await shoot(`opt-failed-panel-${theme}`, TALL, theme, async page => { await panel(page); await own(page); await send(page); await failed(page); }, { ws: proxy("fail") });
+  }
+  await shoot("opt-before-home-phone-dark", PHONE, "dark", async page => { await homePhone(page); await own(page); });
+  await shoot("opt-after-home-phone-dark", PHONE, "dark", async page => { await homePhone(page); await own(page); await send(page); await gone(page); }, { ws: proxy("hold") });
+  await shoot("opt-failed-home-phone-dark", PHONE, "dark", async page => { await homePhone(page); await own(page); await send(page); await failed(page); }, { ws: proxy("fail") });
+  // The chat's brief card: a lettered tap, and the card reads answered while the request is still held.
+  for (const theme of ["light", "dark"]) {
+    await shoot(`opt-chat-before-${theme}`, DESKTOP, theme, async page => { await openChat(page, card.title, card.prompt); await visible(page.getByRole("button", { name: /^Answer A: / })).waitFor(); });
+    await shoot(`opt-chat-after-${theme}`, DESKTOP, theme, async page => {
+      await openChat(page, card.title, card.prompt);
+      await visible(page.getByRole("button", { name: /^Answer A: / })).click();
+      await page.waitForTimeout(300);
+      if (await page.getByRole("button", { name: /^Answer A: / }).filter({ visible: true }).count()) throw new Error("optimistic-answers: the chat card still offers A after the tap");
+    }, { ws: proxy("hold") });
   }
 }
 

@@ -1,0 +1,1 @@
+- Answering is instant: send, copy or put an answer in chat and the question leaves Needs you, with every count. If the send fails, it comes back with your pick, words and images, the reason, and Retry.

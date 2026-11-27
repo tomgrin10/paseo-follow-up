@@ -10,6 +10,7 @@ import { flagFate, rowTitle, sectionOf, type InboxRow } from "./inbox";
 import { settled, summary } from "./model";
 import type { ListPr as Pr, ListWorkspace as Workspace } from "./list";
 import { isOpen as questionOpen } from "./questions";
+import { withSettledBrief } from "./optimistic-answers";
 import { taskSchedule } from "./task-trigger";
 import { agentFacts, nowOf, positionText, type NowWorkspace } from "./now";
 import { freshPriorities, priorityRow, type Priority, type PrioritySourceKind } from "./priorities";
@@ -287,7 +288,10 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
   const anyAgent = new Map<string, string>();
 
   const archived = new Set(input.tracked.filter(w => w.archived).map(w => w.id));
-  for (const row of rows) {
+  // answering-is-optimistic: a brief whose questions are all answered resolves here as the worker resolves it, so the
+  // row moves with the question the moment it is answered (shared/optimistic-answers.ts).
+  for (const raw of rows) {
+    const row = withSettledBrief(raw, raw.workspaceId ? tracked.get(raw.workspaceId) : undefined);
     if (row.workspaceId && !anyAgent.has(row.workspaceId)) anyAgent.set(row.workspaceId, row.agentId);
     const section = sectionOf(row, now);
     // briefs-from-closed-agents: a flag nobody can act on leaves the list; a closed agent's old ask folds into Older.

@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRpc } from "@getpaseo/plugin/client";
 import { getRpc } from "../shared/contracts";
@@ -8,6 +8,8 @@ import { acceptWorkspace, detailFailure } from "./live-copies";
 export { openRowCopy } from "./live-copies";
 import { workspaceKey } from "./keys";
 import type { Workspace } from "../shared/model";
+import { pendingAnswers, pendingKey, settlePendingAnswers, subscribePendingAnswers } from "./pending-answers";
+import { settledAnswers, withPendingAnswers } from "../shared/optimistic-answers";
 
 const none = () => () => {};
 
@@ -22,7 +24,12 @@ type GetReply = { workspace: Workspace | null; error: string | null };
 /** One read of a workspace; its list form also reaches every live store (acceptWorkspace), so no surface keeps an older one. */
 export async function readWorkspace(read: (input: { workspaceId: string }) => Promise<GetReply>, workspaceId: string): Promise<GetReply> {
   const reply = await read({ workspaceId });
-  if (reply.workspace) acceptWorkspace(reply.workspace);
+  if (reply.workspace) {
+    acceptWorkspace(reply.workspace);
+    // The worker's copy settles answers it recorded, or that were answered or withdrawn elsewhere (answering-is-optimistic).
+    const settled = settledAnswers(reply.workspace, pendingAnswers(), pendingKey);
+    if (settled.length) settlePendingAnswers(settled);
+  }
   return reply;
 }
 
@@ -37,7 +44,10 @@ export function useWorkspace(live: LiveStore | undefined, workspaceId: string, o
   useEffect(() => {
     if (enabled && listedAt && readAt && !isFetching && Date.parse(listedAt) > Date.parse(readAt)) void refetch();
   }, [enabled, listedAt, readAt, isFetching, refetch]);
-  const workspace = enabled ? query.data?.workspace ?? null : null;
+  // answering-is-optimistic: the full copy reads the developer's answers in flight as answered, as the list store does.
+  const pending = useSyncExternalStore(subscribePendingAnswers, pendingAnswers, pendingAnswers);
+  const read$ = enabled ? query.data?.workspace ?? null : null;
+  const workspace = useMemo(() => read$ && withPendingAnswers(read$, pending, pendingKey), [read$, pending]);
   return {
     workspace,
     /** Why there is no workspace to show: the read failed or found none (null while reading, or when disabled). */

@@ -89,6 +89,8 @@ export default function contribute(host: PluginClientContext) {
   const inbox = createInboxStore(host);
   // A brief's x (client/dismiss.tsx) updates the inbox rows at once, like Sign off.
   bindDismissInbox(inbox);
+  // answering-is-optimistic: rows read against the workspaces with the developer's answers overlaid.
+  const offSettle = inbox.settleWith(id => store.get(id), listener => store.subscribe(listener));
   const HeaderIcon = headerIcon(store);
   const headers = new Map<string, PluginButtonRegistration>();
   let stopped = false;
@@ -123,6 +125,7 @@ export default function contribute(host: PluginClientContext) {
     openAgent: agentId => client.openScreen({ screenId: OVERVIEW, params: { next: String(++nextToken), open: agentId } }),
     workspace: id => store.get(id), openPanel, row: agentId => inbox.rows().find(r => r.agentId === agentId) ?? null,
     noteDone: (agentId, cancel) => inbox.noteDone(agentId, cancel), endDone: agentId => inbox.endDone(agentId),
+    holdAnswered: agentId => inbox.holdAnswered(agentId),
   };
   const openItem = (key: string, extra: { question?: string } = {}) => client.openScreen({ screenId: OVERVIEW, params: { item: key, ...(extra.question ? { question: extra.question } : {}) } });
   const homeDeps = { sources, openSettings, openPanel, openLog, openQueue, openCatchUp, openStats, openHome: openOverview, openItem, briefDeps, searchKey, newKey };
@@ -217,7 +220,7 @@ export default function contribute(host: PluginClientContext) {
   return async () => {
     setReportFallback(null); setReportError(null); setNewFallback(null);
     stopped = true;
-    offActivity(); visibility.dispose(); removeDisplay(); store.stop(); inbox.stop();
+    offActivity(); visibility.dispose(); removeDisplay(); offSettle(); store.stop(); inbox.stop();
     for (const r of removers) void r();
     for (const button of headers.values()) button.remove();
     await paseoWorkspaces.stop();

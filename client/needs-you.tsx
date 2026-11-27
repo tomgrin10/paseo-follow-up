@@ -19,7 +19,7 @@ import { age } from "../shared/inbox";
 import { isDoneOnly, questionState } from "../shared/questions";
 import type { Brief } from "../shared/brief";
 import { useState, type ReactNode } from "react";
-import { usePendingAnswer } from "./pending-answers";
+import { clearPendingAnswer, confirmPendingAnswer, markSentHere, setPendingAnswer, usePendingAnswer } from "./pending-answers";
 import { useReviewerSettings } from "./reviewers";
 import { NoReviewLink } from "./review-mode";
 import { DismissX, RevealScope, useDismiss } from "./dismiss";
@@ -80,10 +80,13 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
   }, onError: fail });
   // A waiting answer (copied or put in the agent's chat) is already decided: Send delivers the recorded pick and note
   // in one click, then reads like any other Send (sent, queued for the agent, or unconfirmed).
-  const sendAnswer = useMutation({ mutationFn: (questionId: string) => {
+  // answering-is-optimistic: the row reads as sending (and leaves Needs you) the moment Send is pressed; a failure puts it back.
+  const sendAnswer = useMutation({ mutationFn: async (questionId: string) => {
     const a = w.questions.find(q => q.id === questionId)?.answer;
     if (!a) throw new Error(`${questionId} has no recorded answer`);
-    return answer({ workspaceId: w.id, questionId, choice: a.choice, words: a.words ?? undefined, action: "send" });
+    setPendingAnswer(w.id, questionId, { choice: a.choice, words: a.words ?? undefined }); markSentHere(w.id, questionId);
+    try { const out = await answer({ workspaceId: w.id, questionId, choice: a.choice, words: a.words ?? undefined, action: "send" }); confirmPendingAnswer(w.id, questionId); return out; }
+    catch (e) { clearPendingAnswer(w.id, questionId); throw e; }
   }, onSuccess: (result, questionId) => {
     const d = result.question.answer?.delivery;
     if (d?.state === "sent") toast.show(`Sent your ${questionId} answer to ${agentName(w)}`, { variant: "success" });
@@ -298,7 +301,9 @@ function QuestionAsk({ workspace: w, questionId, context, theme, compact, now, o
   const dismiss = useDismiss();
   const q = w.questions.find(x => x.id === questionId);
   if (!q) return null;
-  const state = meanwhile(w, q, pending);
+  // The open card's body says a failed send itself (Not sent · Retry, by the answer): the line above it stays on what
+  // the agent does, so the failure is said once (answering-is-optimistic renders).
+  const state = meanwhile(w, q, pending?.error ? null : pending);
   // "Q1 · title" (DESIGN.md): the chip leads so a long title wraps under itself, and the age stays on the right.
   const header = <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
     <View style={{ paddingTop: 2 }}><Icon name={questionState(q) === "stopped" ? "CirclePause" : q.need === "action" ? "Hand" : "MessageCircleQuestion"} size={compact ? 16 : 14} color={c.statusWarning} /></View>

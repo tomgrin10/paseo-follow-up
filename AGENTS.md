@@ -85,7 +85,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/send-decision.ts`, `shared/task-rows.ts`, `shared/send-words.ts`, `shared/task-status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/message-queue.ts`, `shared/queue.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/put-in-chat.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `server/scheduled-tasks.ts`, `shared/task-due.ts`, `shared/task-view.ts`, `shared/task-dup.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
 | What each agent is working on now (the agent line on the panel and Home rows; sync_workspace `milestone`, `workspace_now`); what a PR's checks are doing (`checksState`) | `shared/now.ts`, `shared/pr-status.ts`, `client/now-lines.tsx` | [workspaces](docs/workspaces.md#what-each-agent-is-working-on) |
 | Agent peek: an agent's current turn on hover (panel lines, Home rows) or a phone sheet; `TurnView` rows, "timeline already on screen" | `shared/turn.ts`, `shared/peek.ts`, `client/turn-view.tsx`, `client/on-screen.tsx`, `server/transcript.ts` | [client](docs/client.md#agent-peek) |
-| Needs-you inbox, brief, Home | `server/inbox.ts`, `server/brief-timeline.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `server/turn-timeline.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/home-arrange.ts`, `shared/sending.ts`, `shared/needs-block.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts`, `server/dismiss.ts`, `client/dismiss.tsx`, `shared/catch-up.ts`, `client/catch-up.tsx`, `client/more-context.tsx`, `client/question-context.tsx`, `shared/dictation.ts`, `client/dictation.tsx`, `server/context-requests.ts`, `shared/your-questions.ts` | [needs-you](docs/needs-you.md) |
+| Needs-you inbox, brief, Home | `server/inbox.ts`, `server/brief-timeline.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `server/turn-timeline.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/optimistic-answers.ts`, `shared/home.ts`, `shared/home-arrange.ts`, `shared/sending.ts`, `shared/needs-block.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts`, `server/dismiss.ts`, `client/dismiss.tsx`, `shared/catch-up.ts`, `client/catch-up.tsx`, `client/more-context.tsx`, `client/question-context.tsx`, `shared/dictation.ts`, `client/dictation.tsx`, `server/context-requests.ts`, `shared/your-questions.ts` | [needs-you](docs/needs-you.md) |
 | Summary (internal id `about`), Rename title with AI | `server/about.ts`, `server/transcript.ts`, `shared/about.ts`, `server/rename.ts`, `shared/rename.ts` | [ai-roles](docs/ai-roles.md) |
 | Dispatch (New before 2.4): start work from an issue, PR, link or words | `shared/dispatch.ts`, `shared/issue-workspace.ts`, `shared/linear-issues.ts`, `shared/new-view.ts`, `server/dispatch.ts`, `server/linear-issues.ts`, `client/new.tsx`, `client/action-row.tsx`, `client/new-entry.tsx`, `shared/new-name.ts`, `shared/new-settings.ts`, `client/new-settings.tsx` | [dispatch](docs/dispatch.md) |
 | Morning brief: the whole Linear queue (sweep, snapshot, changes since you last read it), the brief's Since block, the queue screen, raised issues in Needs you | `shared/linear-queue.ts`, `server/linear-queue.ts`, `shared/brief-since.ts`, `client/brief-since.tsx` | [morning-brief](docs/morning-brief.md) |
@@ -1773,6 +1773,31 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    to `TURN_ROWS` rows and `TURN_STEPS` steps per run, whatever its length. No peek where that agent's turn is already
    on screen (`timelineOnScreen`: Home's selected row, a surface's mark, the chat beside it). Guarded by
    `tests/agent-peek.test.ts`.
+138. **Answering is optimistic** (`answering-is-optimistic`). The moment the developer answers a question (Send, Done,
+   a lettered tap, Copy, Put in chat, a chat card's pick or Send answers, a waiting answer's Send), it reads as answered
+   on every surface at once: it leaves Needs you, every count drops (Home, the panel, the pill and header dot, the
+   sidebar), the chat card resolves and Catch up moves on, with no spinner on a card. One rule does it: the answer
+   goes in flight in `client/pending-answers.ts` before the RPC, and every surface reads its workspaces through one
+   overlay, `withPendingAnswers` (`shared/optimistic-answers.ts`), applied by the shared live store and `useWorkspace`,
+   which draws the answer exactly as the worker records it (`developerAnswer`'s delivery states: sending, copied,
+   in-chat), so nothing moves when the server's copy lands; an inbox row whose brief asked only answered questions
+   resolves the same way (`withSettledBrief`, read inside the inbox store's one view via `settleWith`), and a brief-only
+   chat answer holds its row (`holdAnswered`). A sent answer also drops its agent's flag, as the delivered message does
+   on the worker (rule #11, the developer's message clears it), so the pill and the sidebar badge go with the card;
+   Copy and Put in chat keep it (nothing sent yet). The panel's Activity draws its own overlaid copy while an
+   answer is in flight, not the worker's page. A reply
+   confirms the entry, kept overlaid until the client's copy shows it; the server's copy settles it (recorded, or
+   answered or withdrawn elsewhere: no error, the card shows the recorded answer). A failure (an RPC error, offline, a
+   timeout) drops the overlay: the question is back where it was with the pick, words, note and images, "Not sent ·
+   <reason>" with Retry on the card, and the toast says it with Retry (in flight again) and Open, unless that card is on screen
+   already saying it (`shownBy`: no toast covering the card that has its own Retry). A reload mid-send
+   keeps the answer in flight for `RELOAD_GRACE_MS`, then brings it back as not sent unless the server's copy has it.
+   The delay was never the worker: `follow.answer-question` records and replies without waiting on delivery
+   (invariant 36); the card waited for the reply and then a `follow.get` refetch, two relay round trips. 2026-11-27, the
+   developer on a phone: "When answering a question, it sometimes takes a couple of moments for it to register it
+   seems, I want the ux to be instant and optimistic, if the send fails handle it well." Guarded by
+   `tests/optimistic-answers.test.ts` (the overlay against the server's own `developerAnswer` on every count, the live
+   store, the real `QuestionBody` hidden in flight and restored on failure) and `tests/quick-actions.test.ts`.
 
 144. **The sidebar view is Paseo's sidebar plus Follow-up's line** (`sidebar-view-is-paseo-s-sidebar-plus-follow-up-s-line`).
    Home and the sidebar view arrange their rows with one model (`arrangeHome`, `shared/home-arrange.ts`) from one

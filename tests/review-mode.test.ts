@@ -209,7 +209,7 @@ test("a-no-review-repo-never-asks-for-review-or-merge: the moment the repository
 test("a-no-review-repo-never-asks-for-review-or-merge: nothing on the client draws an add-reviewers ask around the helpers", async () => {
   const src = async (f: string) => readFile(join("client", f), "utf8");
   const store = await src("inbox-store.ts");
-  assert.match(store, /const view = \(\) => shown \?\?= \{ rows: \(data\?\.rows \?\? \[\]\)\.map\(r => withoutWithdrawnAsks\(r\)\), overseer: data\?\.overseer \? withoutWithdrawnAsks/, "every row the inbox store hands out goes through withoutWithdrawnAsks");
+  assert.match(store, /const view = \(\) => shown \?\?= \{ rows: \(data\?\.rows \?\? \[\]\)\.map\(r => (?:\w+\()*withoutWithdrawnAsks\(r\)\)+, overseer: data\?\.overseer \? withoutWithdrawnAsks/, "every row the inbox store hands out goes through withoutWithdrawnAsks");
   assert.match(store, /rows: \(\) => \(enabled && data\?\.enabled \? view\(\)\.rows : \[\]\)/);
   assert.match(store, /overseer: \(\) => view\(\)\.overseer/);
   assert.match(store, /onNoReviewRepos\(\(\) => \{ shown = null; emit\(\); \}\)/, "a flip re-renders every inbox surface");
