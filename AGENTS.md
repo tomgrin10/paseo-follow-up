@@ -1781,7 +1781,10 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    overlay, `withPendingAnswers` (`shared/optimistic-answers.ts`), applied by the shared live store and `useWorkspace`,
    which draws the answer exactly as the worker records it (`developerAnswer`'s delivery states: sending, copied,
    in-chat), so nothing moves when the server's copy lands; an inbox row whose brief asked only answered questions
-   resolves the same way (`withSettledBrief`), and a brief-only chat answer holds its row (`holdAnswered`). A reply
+   resolves the same way (`withSettledBrief`, read inside the inbox store's one view via `settleWith`), and a brief-only
+   chat answer holds its row (`holdAnswered`). A sent answer also drops its agent's flag, as the delivered message does
+   on the worker (rule #11, the developer's message clears it), so the pill and the sidebar badge go with the card;
+   Copy and Put in chat keep it (nothing sent yet). A reply
    confirms the entry, kept overlaid until the client's copy shows it; the server's copy settles it (recorded, or
    answered or withdrawn elsewhere: no error, the card shows the recorded answer). A failure (an RPC error, offline, a
    timeout) drops the overlay: the question is back where it was with the pick, words, note and images, "Not sent ·

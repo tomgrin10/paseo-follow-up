@@ -57,12 +57,23 @@ const waitingToSend = (q: Q) => q.answer?.delivery.state === "copied" || q.answe
 
 /**
  * An inbox row as the server makes it once every question its open brief points at is answered or closed
- * (`questionsChanged`, server/inbox.ts): the brief resolves. Read against the overlaid workspace, so a row whose ask was
- * a question leaves Needs you with the question, before the worker's next inbox push.
+ * (`questionsChanged`, server/inbox.ts): the brief resolves. An answer that was sent (not copied or put in chat)
+ * reaches the agent as the developer's message, which clears the row's flag (shared/inbox.ts, rule #11), so the row
+ * stops asking too. Read against the overlaid workspace, so a row whose ask was a question leaves Needs you, the pill
+ * and every count with the question, before the worker's next inbox push.
  */
-export function withSettledBrief<R extends { brief?: { state: string; questionIds?: string[] } | null }>(row: R, w: { questions: readonly Q[] } | undefined): R {
+/** A sent answer not yet failed: the optimistic "sending" and the queue states before a failure. */
+const ON_ITS_WAY = new Set<string>(["sending", "queued", "retrying", "sent"]);
+export function withSettledBrief<R extends { agentId?: string; brief?: { state: string; questionIds?: string[] } | null; needs?: { since: string } | null; snooze?: unknown }>(row: R, w: { mainAgentId?: string | null; questions: readonly (Q & { askedBy?: string | null })[] } | undefined): R {
+  if (!w?.questions) return row;
+  // An answer on its way to this agent (Send) is the developer's message once delivered: the flag it answers clears.
+  const toThisAgent = (q: Q & { askedBy?: string | null }) => (q.askedBy ?? w.mainAgentId) === row.agentId;
+  const answering = row.needs && w.questions.some(q => !!q.answer && ON_ITS_WAY.has(q.answer.delivery.state) && toThisAgent(q) && Date.parse(q.answer.delivery.at ?? q.answer.at) >= Date.parse(row.needs!.since));
+  const cleared = answering ? { ...row, needs: null, snooze: null } : row;
   const b = row.brief;
-  if (!w || b?.state !== "open" || !b.questionIds?.length) return row;
-  const settled = b.questionIds.every(id => { const q = w.questions.find(x => x.id === id); return !!q && (!!q.answer || !!q.closed); });
-  return settled ? { ...row, brief: { ...b, state: "answered" } } : row;
+  if (b?.state !== "open" || !b.questionIds?.length) return cleared;
+  const asked = b.questionIds.map(id => w.questions.find(x => x.id === id));
+  if (!asked.every(q => !!q && (!!q.answer || !!q.closed))) return cleared;
+  const sent = asked.some(q => !!q?.answer && !waitingToSend(q));
+  return { ...cleared, brief: { ...b, state: "answered" }, ...(sent ? { needs: null, snooze: null } : {}) };
 }

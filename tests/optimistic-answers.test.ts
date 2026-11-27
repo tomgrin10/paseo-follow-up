@@ -15,6 +15,7 @@ import { developerAnswer } from "../server/questions";
 import { withPendingAnswers, settledAnswers, withSettledBrief, type InFlightAnswer } from "../shared/optimistic-answers";
 import { activeNeeds, needsYou } from "../shared/attention";
 import { buildHome, homeCounts } from "../shared/home";
+import { pillState } from "../shared/headline";
 import { listEntry, type ListWorkspace } from "../shared/list";
 import type { InboxRow } from "../shared/inbox";
 import type { Workspace } from "../shared/model";
@@ -92,6 +93,26 @@ test("the brief that asked the question resolves with it, as the worker resolves
   assert.equal(withSettledBrief(row(), answered).brief?.state, "answered");
   assert.equal(withSettledBrief(row(), ws()).brief?.state, "open", "still open while the question is");
   const r = row(); assert.equal(withSettledBrief(r, undefined), r);
+});
+
+test("a sent answer stops the row asking on the pill, Home and the sidebar, as the delivered message will", () => {
+  const sent = withSettledBrief(row(), withPendingAnswers(ws(), entry(), key));
+  assert.equal(sent.needs, null, "the developer's message clears the flag (shared/inbox.ts rule #11)");
+  assert.equal(pillState({ row: row(), items: [], recent: null, now: clock })?.mode, "flag", "the pill asks before the answer");
+  assert.equal(pillState({ row: sent, items: [], recent: null, now: clock }), null, "and is gone the moment it is sent");
+  assert.equal(homeCounts(buildHome({ rows: [sent], tracked: [], paseo: [], now: clock })).needs, 0);
+  // Copy and Put in chat send nothing yet: the row keeps its flag until the answer goes out.
+  for (const action of ["copy", "chat"] as const) assert.ok(withSettledBrief(row(), withPendingAnswers(ws(), entry({ action }), key)).needs, action);
+});
+
+test("a sent answer clears its agent's flag even when no brief named the question; an older one or a failure does not", () => {
+  const noAsk = row({ brief: { kind: "finished", source: "none", state: "open", ask: "", questionIds: [], at: new Date(clock).toISOString() } as never });
+  assert.equal(withSettledBrief(noAsk, withPendingAnswers(ws(), entry(), key)).needs, null);
+  assert.ok(withSettledBrief(noAsk, withPendingAnswers(ws(), entry({ action: "copy" }), key)).needs, "copied: nothing sent");
+  assert.ok(withSettledBrief(noAsk, withPendingAnswers(ws(), entry({ error: "offline" }), key)).needs, "failed: still asking");
+  const later = row({ ...noAsk, needs: { ...noAsk.needs!, since: new Date(clock + 60_000).toISOString() } });
+  assert.ok(withSettledBrief(later, withPendingAnswers(ws(), entry(), key)).needs, "a flag raised after the answer stays");
+  assert.ok(withSettledBrief(row({ ...noAsk, agentId: "helper" }), withPendingAnswers(ws(), entry(), key)).needs, "another agent's flag stays");
 });
 
 test("the server's copy settles what it has: recorded, answered or withdrawn elsewhere", () => {
