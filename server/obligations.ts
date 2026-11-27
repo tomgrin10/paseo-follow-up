@@ -1,3 +1,4 @@
+import { finishedTask } from "../shared/finished";
 import { randomUUID } from "node:crypto";
 import type { Obligation, Workspace } from "../shared/model";
 import { lifecycleOnly } from "../shared/follow-up";
@@ -46,7 +47,7 @@ function newTaskCheck(w: Workspace, input: Update): Obligation | undefined {
 
 export function updateObligation(w: Workspace, input: Update): Obligation {
   const { id, title, status, dependencyStage, enable_follow_up, communication } = input;
-  const existing = id ? w.obligations.find(o => o.id === id) : (communication ? w.obligations.find(o => o.communication && !["done", "waived"].includes(o.status) && communicationKey(o.communication) === communicationKey(communicationSchema.parse(communication))) : undefined) ?? newTaskCheck(w, input);
+  const existing = id ? w.obligations.find(o => o.id === id) : (communication ? w.obligations.find(o => o.communication && !finishedTask(o) && communicationKey(o.communication) === communicationKey(communicationSchema.parse(communication))) : undefined) ?? newTaskCheck(w, input);
   if (id && !existing) throw new Error("Obligation does not exist. Omit id to add one.");
   const afterPrs = input.afterPrs ?? existing?.afterPrs ?? [];
   const evidence = input.evidence ?? existing?.evidence ?? "";
@@ -64,7 +65,7 @@ export function updateObligation(w: Workspace, input: Update): Obligation {
   // Kept like the ask across blocked updates that leave it out; a new ask without need is read afresh.
   const need = ask ? input.need ?? (existing?.status === "blocked" && !input.ask && !input.question ? existing.need : undefined) : undefined;
   if (input.need && !ask) throw new Error("need goes with a blocked task's ask (or question).");
-  if (["done", "waived"].includes(status) && !(existing?.status === status ? evidence.trim() : input.evidence?.trim())) throw new Error("Completed or waived work requires result evidence.");
+  if (finishedTask({ status }) && !(existing?.status === status ? evidence.trim() : input.evidence?.trim())) throw new Error("Completed or waived work requires result evidence.");
   if (afterPrs.some(key => !w.prs.some(p => p.key === key))) throw new Error("Register dependency PRs before referencing them.");
   if (lifecycleOnly({ title, afterPrs })) throw new Error("PR approval, merging and deployment belong in Pull requests. Record a concrete follow-up action such as verifying behavior after deployment, with afterPrs and dependencyStage=deployed.");
   const destination = communication ? communicationSchema.parse({ ...existing?.communication, ...communication }) : existing?.communication;
@@ -82,12 +83,12 @@ export function updateObligation(w: Workspace, input: Update): Obligation {
   // RECHECK_DAYS from this update (an update is the agent looking at it). A finished task records when.
   const recheck = input.recheck === undefined ? undefined : /^\d{4}-\d{2}-\d{2}$/.test(input.recheck) ? Date.parse(`${input.recheck}T00:00:00Z`) : Date.parse(input.recheck);
   if (recheck !== undefined && !Number.isFinite(recheck)) throw new Error("recheck is a date: \"YYYY-MM-DD\" or an ISO time.");
-  const finished = ["done", "waived"].includes(status);
+  const finished = finishedTask({ status });
   const kept = existing?.recheckAt && Date.parse(existing.recheckAt) > now ? existing.recheckAt : undefined;
   // A task blocked on the developer gets none by default: the answer (or the question closing) is what moves it, and a
   // default date would hold that (shared/task-due.ts taskDue). Only a recheck the agent passes holds it.
   const recheckAt = finished ? undefined : recheck !== undefined ? new Date(recheck).toISOString() : ask ? undefined : kept ?? (afterPrs.length ? undefined : new Date(now + RECHECK_DAYS * 86_400_000).toISOString());
-  const finishedAt = finished ? (existing && ["done", "waived"].includes(existing.status) ? existing.finishedAt : undefined) ?? new Date(now).toISOString() : undefined;
+  const finishedAt = finished ? (existing && finishedTask(existing) ? existing.finishedAt : undefined) ?? new Date(now).toISOString() : undefined;
   const record = { title, status, afterPrs, evidence: evidence || (destination ? `Reply to ${destination.recipient}: ${destination.threadUrl}` : ""), enable_follow_up: followUp, dependencyStage: stage, category: "follow_up" as const, ...(destination ? { communication: destination } : {}), ...(trigger !== undefined ? { trigger } : {}) };
   // Who is working on it: set whenever status is working (the named agent, else the caller); kept as history otherwise.
   const worker = status === "working" ? input.workingAgentId ?? input.caller ?? existing?.workingAgentId : input.workingAgentId ?? existing?.workingAgentId;

@@ -1,3 +1,4 @@
+import { finishedTask } from "./finished";
 import { sendItems } from "./send-words";
 import { newestId } from "./sort";
 import type { ListWorkspace as Workspace } from "./list";
@@ -77,7 +78,7 @@ export function activity(w: Workspace): Activity[] {
     if (q.closed) rows.push({ key: `withdrawn:${q.id}`, at: q.closed.at, icon: "MessageCircleOff", tone: "muted", text: ref, detail: closedLine(q), took: null });
   }
   // Finished tasks live here, not in Tasks (the Tasks card's footer points here): when, and the agent's evidence.
-  for (const o of followUpObligations(w)) if ((o.status === "done" || o.status === "waived") && o.finishedAt)
+  for (const o of followUpObligations(w)) if (finishedTask(o) && o.finishedAt)
     rows.push({ key: `task:${o.id}`, at: o.finishedAt, icon: o.status === "done" ? "ListChecks" : "CircleSlash", tone: o.status === "done" ? "success" : "muted", text: `${o.status === "done" ? "Task done" : "Task waived"} · ${o.title}`, detail: o.evidence?.trim() || null, took: null });
   if (w.completion) rows.push({ key: "done", at: w.completion.declaredAt, icon: "CircleCheck", tone: "success", text: "Main agent declared Done", detail: null, took: null });
   return rows.filter(r => Number.isFinite(Date.parse(r.at))).sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || newestId(a.key, b.key));

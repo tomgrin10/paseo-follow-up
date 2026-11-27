@@ -1,3 +1,4 @@
+import { finishedTask } from "./finished";
 import type { Obligation, Workspace } from "./model";
 import { followUpObligations } from "./follow-up";
 
@@ -13,7 +14,7 @@ export const DUP_SIMILARITY = 0.5;
 /** At most this many candidates in the reply: about 20 tokens each. */
 export const DUP_MAX = 3;
 
-const open = (o: Obligation) => o.status !== "done" && o.status !== "waived";
+const open = (o: Obligation) => !finishedTask(o);
 /** Case, spacing and punctuation don't make a different task. The whole title: the exact-title rule compares this. */
 export const normTitle = (title: string) => title.toLowerCase().replace(/[^\p{L}\p{N}#]+/gu, " ").trim();
 /** The similarity score reads only the first 60 characters, what an agent names a task by. */

@@ -1,3 +1,4 @@
+import { finishedTask } from "../shared/finished";
 import { DEVELOPER, actorBy, type Actor } from "../shared/actor";
 import { randomUUID } from "node:crypto";
 import { blockedOnDeveloper, type Workspace } from "../shared/model";
@@ -203,7 +204,7 @@ export function syncTaskQuestions(w: Workspace, now: number): boolean {
     }
     if (open && (cover || open.question !== ask)) {
       open.closed = { at, by: null, reason: cover ? `Already ${cover.answer ? "answered" : "asked"} as ${cover.id}.`
-        : o.status === "done" || o.status === "waived" ? `The task was ${o.status === "done" ? "completed" : "waived"}.`
+        : finishedTask(o) ? `The task was ${o.status === "done" ? "completed" : "waived"}.`
         : o.status !== "blocked" ? "The task is no longer blocked." : ask ? "The task asks something else now." : "The task waits on something other than you." };
       open = undefined; changed = true;
     }

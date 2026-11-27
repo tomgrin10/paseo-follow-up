@@ -1,0 +1,1 @@
+- Agent status keeps recent history visible in busy workspaces with many withdrawn or removed questions and cancelled or superseded messages. Closed PRs are included in paged history too.
