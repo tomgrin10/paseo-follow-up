@@ -30,30 +30,37 @@ agents and anything without `PASEO_AGENT_ID`.
 
 | Event | Effect |
 | --- | --- |
-| SessionStart | Adds Follow-up's instructions for tracked agents (worded for the agent's PR workflow, contributor or main; in a workspace whose repositories are all No review, `workflow.noReview` in `scopes.json`, the agent merges its own PR once CI is green, see `mergeLine`; one team repository keeps the team wording), the native tools' guidance (`nativeExtras`, since native tools carry no MCP instructions), and Wait's guidance (`waitExtras`: `waitInstruction` when `FOLLOW_UP_WAIT=1`, or on Paseo 0.16 `backgroundWorkInstruction` when `FOLLOW_UP_BACKGROUND_WORK=1`). Root agents, tracked or not, also get one line on waiting for CI without polling (`checksLine`). Untracked Claude sessions with Wait get only Wait's guidance. On Paseo 0.17 the static parts go in the system prompt instead and the hook leaves them out (see [Static text in the system prompt](#static-text-in-the-system-prompt-paseo-017)). |
+| SessionStart | Adds Follow-up's instructions for tracked agents (worded for the agent's PR workflow, contributor or main; in a workspace whose repositories are all No review, `workflow.noReview` in `scopes.json`, the agent merges its own PR once CI is green, see `mergeLine`; one team repository keeps the team wording), the native tools' guidance (`nativeExtras`, since native tools carry no MCP instructions), and Wait's guidance (`waitExtras`: `waitInstruction` when `FOLLOW_UP_WAIT=1`, or on Paseo 0.16 `backgroundWorkInstruction` when `FOLLOW_UP_BACKGROUND_WORK=1`). Root agents, tracked or not, also get one line on waiting for CI without polling (`checksLine`). Untracked Claude sessions with Wait get only Wait's guidance. On Paseo 0.17 all of it goes in the system prompt instead and the hook leaves it out (see [Session text in the system prompt](#session-text-in-the-system-prompt-paseo-017)). |
 | UserPromptSubmit | Starts a turn marker. Repeats the context when it changed (Codex always repeats). Tells a demoted agent once that it lost the main role. For the Overseer, injects the digest. |
 | PostToolUse | Marks the turn dirty after shell or edit tools. Says once per session that native tools are detached after a reload. When a shell command polls GitHub for CI (`pollsGithub`), adds once per turn, never blocking, that the agent should call `wait_for_checks` and end its turn ([wait-for-checks.md](wait-for-checks.md)); tracked and untracked root agents. |
 | Stop | Blocks the stop once if a dirty turn didn't `sync_workspace` (read from `hook-state/sync-<agent>.json`, written by the RPC handler, so any tool spelling counts), or if a root agent (Claude Code or Codex) didn't call `needs_you` (`shouldNudge`, from the one decision below), unless the turn already asked the developer through another tool (PostToolUse records `askedAt` when a call's input is an ask, `isAskInput`; [one decision, one card](#another-plugins-ask)). Also blocks to name the agent's due tasks (`pickNudges` over `scopes.json`'s `due`: at most 3, each at most twice and once a day; nothing when none is due; [due by fact](workspaces.md)). Never blocks twice in one turn, or while background tasks run. |
 
-## Static text in the system prompt (Paseo 0.17)
+## Session text in the system prompt (Paseo 0.17)
 
 On a host whose session-open result takes `appendSystemPrompt` (Paseo 0.17.0+, detected by `features.checkoutWorktreeList`,
-which 0.17.0 first advertises; 0.16's schema is strict and would refuse the field), the worker puts the static parts
-of the SessionStart text in the session's system prompt (`withSystemPrompt`, `server/session-prompt.ts`) for Claude
-and for Codex from 0.121 (`codex --version`; older Codex throws on a new thread with plugin instructions). It names
-the parts in `FOLLOW_UP_SYSTEM_PROMPT` (`needsYou`, `action`, `overseer`, `wait`, `backgroundWork`, `checks`) and the
-hook leaves exactly those out, so the agent reads each once (`inPrompt`).
+which 0.17.0 first advertises; 0.16's schema is strict and would refuse the field), the worker puts all of a session's
+text in its system prompt (`withSystemPrompt`, `server/session-prompt.ts`): for Claude, for Codex from 0.121
+(`codex --version`; older Codex throws on a new thread with plugin instructions) and for every provider without the
+hook. One delivery path (invariant 147). It names the parts in `FOLLOW_UP_SYSTEM_PROMPT` (`needsYou`, `action`,
+`overseer`, `wait`, `backgroundWork`, `checks`, `workspace`) and the hook leaves exactly those out (`inPrompt`), so on
+this path the SessionStart hook adds nothing.
 
-- **What moves** is only what the hook surely adds from the launch env (`promptParts`): a native root agent's role texts
-  and `checksLine`, the Overseer's role texts, and Wait's guidance for any session. The workspace instructions stay
-  the hook's: they follow the role and the PR workflow, which change mid-session.
+- **The workspace instructions** (`workspace`, `shared/agent-text.mjs` `workspaceText`) follow the role and the PR
+  workflow, which can change mid-session. The worker records the hash of the text it put in the prompt
+  (`hook-state/prompt-<agent>.json`, `""` for a root agent with none yet). A change (enrolled, made main, demoted, the
+  workflow switched) reaches the agent once, through whichever comes first: its next Follow-up tool result, led by
+  "Follow-up's instructions for this session changed…" (`changedInstructions`, any provider), or the hook's next
+  prompt (Claude Code, Codex). Each records the new hash, so the other stays quiet, and Codex no longer gets the text
+  again every turn.
+- **Compaction and resume:** the system prompt survives both as it is, and SessionStart, which re-runs on each, adds
+  nothing (it used to re-add the workspace text: ~1.8k tokens for a main agent on every compaction, resume and plugin
+  reload). A setting changed mid-session (the inbox turned off) reaches the system prompt at the session's next open.
+- **The Stop hook's sync reminder** points at the instructions already in the prompt (`syncCall`, one line) instead of
+  re-sending them.
 - **Who gets what doesn't change**: `tests/session-prompt.test.ts` runs every role (main native and stdio, contributor,
   untracked root, the Overseer, a subagent, recovery, a background helper) on both paths and checks that the system
   prompt plus the hook equal what the hook alone added, each part once. Recovery and background agents get nothing
-  (invariant 9).
-- **Compaction:** the system prompt survives compaction and resume as it is; SessionStart still re-runs on compact and
-  re-adds only what stayed the hook's. A setting changed mid-session (the inbox turned off) reaches the system prompt
-  at the session's next open.
+  (invariant 9). `tests/tool-budget.test.ts` holds each role's injected text, per event, to a budget.
 - On an older host or provider, nothing changes: no `appendSystemPrompt`, no flag, the hook adds it all.
 
 ## Other providers
@@ -114,7 +121,7 @@ The worker sets these at `agent.session_open`:
 - `FOLLOW_UP_PROVIDER`.
 - `FOLLOW_UP_ROOT`.
 - `FOLLOW_UP_BRIEF`: the provider, when the nudge applies.
-- `FOLLOW_UP_SYSTEM_PROMPT`: Paseo 0.17, the static parts already in the system prompt (comma-separated).
+- `FOLLOW_UP_SYSTEM_PROMPT`: Paseo 0.17, the parts already in the system prompt (comma-separated), `workspace` included.
 - `FOLLOW_UP_OVERSEER`.
 - `FOLLOW_UP_RECOVERY`.
 - `FOLLOW_UP_CLI`: the bridge path.

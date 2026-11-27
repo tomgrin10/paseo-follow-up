@@ -7,7 +7,7 @@
  * Plain JS that imports only ./agent-text.mjs, so scripts/build.mjs can inline it into the hook (types:
  * turn-checks.d.mts). Internal helpers carry a `tc` prefix so the inlined copy can't collide with the file it lands in.
  */
-import { dueHeader, named, nudgeReason, stopReason, syncBookkeeping, turnEndPrefix } from "./agent-text.mjs";
+import { dueHeader, named, nudgeReason, stopReason, syncBookkeeping, syncCall, turnEndPrefix } from "./agent-text.mjs";
 
 const tcRecord = v => typeof v === "object" && v !== null && !Array.isArray(v);
 const tcAsks = v => tcRecord(v) && typeof v.question === "string" && v.question.trim().length > 0 && Array.isArray(v.options) && v.options.length > 0;
@@ -64,7 +64,7 @@ export const dueBlock = (lines, native) => named(dueHeader, native) + "\n" + lin
 export function turnEndMessage(d, native = true) {
   const parts = [
     d.due.length ? dueBlock(d.due, native) : null,
-    d.sync ? `${stopReason} ${syncBookkeeping} Call ${named("sync_workspace", native)} with a short summary; pass milestone when the milestone you're on changed.` : null,
+    d.sync ? `${stopReason} ${syncBookkeeping} ${named(syncCall, native)}` : null,
     d.nudge ? named(nudgeReason, native) : null,
   ].filter(Boolean);
   return `${turnEndPrefix} your turn ended with this still open. Handle it, then stop without repeating your reply.\n\n${parts.join("\n\n")}`;

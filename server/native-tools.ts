@@ -54,7 +54,11 @@ export function nativeToolsAvailable(request: Pick<PluginSessionOpenRequest, "pr
 export type Invoke = (method: string, input: Record<string, unknown>, context: AgentToolContext) => Promise<unknown>;
 /** The tool definitions for one session. `live` reads the agent's current role and the inbox setting on each call. */
 /** `workflows`: whether known repositories ship through Graphite, GitHub or both, for merge tools' wording. */
-export function nativeTools(flags: SessionFlags, live: (agentId: string) => Promise<Live>, invoke: Invoke, workflows: "graphite" | "github" | "mixed" | null = null): AgentToolDefinition[] {
+/**
+ * `lead`: text that goes before one call's result, once (server/session-prompt.ts changedInstructions: workspace
+ * instructions that changed since the session's system prompt). Any provider reads a tool result.
+ */
+export function nativeTools(flags: SessionFlags, live: (agentId: string) => Promise<Live>, invoke: Invoke, workflows: "graphite" | "github" | "mixed" | null = null, lead?: (agentId: string) => Promise<string | null>): AgentToolDefinition[] {
   const list = attachableTools(flags);
   const shapes = schemas(list, workflows);
   return list.map((tool, i) => ({
@@ -69,7 +73,9 @@ export function nativeTools(flags: SessionFlags, live: (agentId: string) => Prom
         const args = (input ?? {}) as Record<string, unknown>;
         validate(args, shapes[i].inputSchema);
         const { name, args: used, value } = await runTool(current, args, callable, (method: string, body: Record<string, unknown>) => invoke(method, { ...body, agentId: context.agent.id }, context), workflows);
-        return { text: JSON.stringify(used.detail === "full" ? value : compact(name, used, value)) };
+        const result = JSON.stringify(used.detail === "full" ? value : compact(name, used, value));
+        const before = lead ? await lead(context.agent.id).catch(() => null) : null;
+        return { text: before ? `${before}\n\n${result}` : result };
       } catch (error) { return { isError: true, text: (error as Error).message }; }
     },
   }));

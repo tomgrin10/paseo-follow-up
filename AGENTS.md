@@ -1839,7 +1839,11 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    into `hook-source.ts` and `mcp-source.ts`, so the copies in the data directory stay single files. No copy of a text
    or rule lives anywhere else, and nothing reads one out of another file's source. The provider never decides a check:
    the Stop hook (Claude Code, Codex) and the turn-end event (every other provider) pass the facts they can see, and
-   exactly one of them acts for any agent. 2026-11-27: the hook's nudge checked `provider === "claude"` and the event
+   exactly one of them acts for any agent. One delivery path: on Paseo 0.17 every provider's session text, the workspace
+   instructions included, is in its system prompt (the hook adds none of it, and nothing after a compaction or resume);
+   a changed workspace text reaches the agent once, in its next Follow-up tool result or the hook's next prompt. Rules
+   that matter only when a field is set live with that field (`update_obligation`'s trigger and communication rules).
+   Each role's injected text, per event, has a budget (`tests/tool-budget.test.ts`). 2026-11-27: the hook's nudge checked `provider === "claude"` and the event
    skipped hook providers, so a Codex root agent was never nudged to call `needs_you`; the texts lived in the hook,
    the bridge and `shared/brief.ts`, kept equal by tests and regex reads. Guarded by `tests/turn-end-decision.test.ts`
    (every provider kind), `tests/brief.test.ts` (the installed hook on Codex), `tests/generated-sources.test.ts` and
@@ -1965,7 +1969,7 @@ Guarded by `npm run check:notes` and `release:notes` (`scripts/release-notes.mjs
   hook (`server/agent-hook.mjs`), never through the bridge's `initialize` reply. New agent text goes in
   `shared/agent-text.mjs` (invariant 147), never in the hook or the bridge directly. Static text added to one goes in
   both: the worker names what it moved in `FOLLOW_UP_SYSTEM_PROMPT` and the hook leaves that out
-  ([docs/hooks.md](docs/hooks.md#static-text-in-the-system-prompt-paseo-017)).
+  ([docs/hooks.md](docs/hooks.md#session-text-in-the-system-prompt-paseo-017)).
 - **Forgetting `npm run prepare`.** Editing `server/mcp.mjs`, `server/agent-hook.mjs`, `server/overseer-prompt.md`
   or `server/wait-runner.sh` without regenerating means the packed plugin ships the old copy.
 - **Adding a tool in one place.** A new agent tool needs:
