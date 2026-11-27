@@ -1,5 +1,7 @@
 import { z } from "zod";
-import type { Batch, Obligation, Pr, Task } from "./model";
+import { prRowStatus, prReference } from "./pr-status";
+import type { ListPr } from "./list";
+import type { Batch, Obligation, Task } from "./model";
 import type { Question } from "./questions";
 import type { InboxRow } from "./inbox";
 
@@ -17,7 +19,7 @@ import type { InboxRow } from "./inbox";
  * 1. `follow-up`: work Follow-up handed the agent this turn (a repair or a task batch it is still on).
  * 2. `stated`: what the agent stated with sync_workspace `milestone` (the only source with a place: "2 of 4").
  * 3. `task`: the task it is working on (status working, workingAgentId = it, its live state working).
- * 4. `pr`: its one open PR's stage ("Shipping #77"), only when it owns exactly one.
+ * 4. `pr`: its one open PR's status ("#77 · In review"), only when it owns exactly one.
  * 5. `title`: a contributor's Paseo title (the main agent's title is the workspace's, so never for it).
  * Nothing: no work line, never a guess.
  */
@@ -67,12 +69,14 @@ export type AgentFacts = {
 /** The parts of a workspace the line reads: the stored workspace and its list form both fit. */
 export type NowWorkspace = {
   mainAgentId: string;
+  /** The workspace project repository, from discovery; unknown keeps PR references qualified. */
+  repo?: string | null;
   contributorAgentIds?: readonly string[];
   milestones?: Readonly<Record<string, StoredMilestone>>;
   batches: readonly (Pick<Batch, "state" | "recipientAgentId" | "sentAt" | "settledAt"> & { tasks: readonly Pick<Task, "kind" | "target" | "title">[] })[];
   obligations: readonly Pick<Obligation, "title" | "status" | "workingAgentId">[];
   taskAgents?: Readonly<Record<string, { title: string | null; state: "working" | "idle" | "closed" | "archived" }>>;
-  prs: readonly (Pick<Pr, "key" | "number" | "registeredAgentId"> & { snapshot: { state: string; checksPending?: boolean; failedChecks?: readonly string[] } | null })[];
+  prs: readonly ListPr[];
   questions?: readonly Pick<Question, "id" | "title" | "askedBy" | "mode" | "answer" | "closed">[];
   completion?: unknown;
 };
@@ -130,7 +134,12 @@ export function workOf(w: NowWorkspace, agent: AgentFacts): NowWork | null {
   const task = live ? w.obligations.find(o => o.status === "working" && o.workingAgentId === agent.agentId) : undefined;
   if (task) return { text: task.title, source: "task", done: [], next: [], position: null };
   const open = ownedPrs(w, agent).filter(isOpenPr);
-  if (open.length === 1) return { text: `Shipping #${open[0]!.number}`, source: "pr", done: [], next: [], position: null };
+  if (open.length === 1) {
+    const pr = open[0]!;
+    const ref = prReference(pr, w.repo);
+    const status = prRowStatus(pr);
+    return { text: pr.snapshot?.complete ? `${ref} · ${status.label}` : `Shipping ${ref}`, source: "pr", done: [], next: [], position: null };
+  }
   const title = agent.role === "contributor" ? (agent.title ?? w.taskAgents?.[agent.agentId]?.title ?? "").trim() : "";
   if (title) return { text: title, source: "title", done: [], next: [], position: null };
   return null;

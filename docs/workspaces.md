@@ -271,8 +271,18 @@ nothing is known, the state is the whole line.
 | 1 | Work Follow-up handed the agent and it hasn't settled (a sent repair or task batch, while it runs) | "Fixing CI on #412", "Checking the work is finished" |
 | 2 | What the agent stated: `sync_workspace` `milestone {now, done?, next?}` | "Capping the retry gap", 2 of 4 |
 | 3 | The task it is working on (status working, `workingAgentId`, its agent working per `taskAgents`) | "E2E for the 60 s window" |
-| 4 | Its one open PR, only when it owns exactly one | "Shipping #77" |
+| 4 | Its one open PR, only when it owns exactly one | "#77 · In review" |
 | 5 | A contributor's Paseo title (never the main agent's: that is the workspace) | "Retry tests" |
+
+`shared/pr-status.ts` holds `prRowStatus`, the exact shared PR wording used by the list row and agent line,
+and `prReference`, their shared reference formatter. The PR fallback uses the
+PR row's words (Conflicts, Checks failed, Checking, Changes requested, In review, Approved, Draft, thread counts,
+and Queued to merge). It keeps Shipping only without a complete status. A PR in the workspace project's own
+repository shows #N; another repository, or an unknown workspace repository, shows owner/repo#N. Discovery
+stores the project repository in `repo`, independently of owned PRs, so Home, the panel and `workspace_now`
+use the same facts. The list row uses this same reference on compact and wide layouts; Home’s compact chip
+keeps #N beside its qualified agent line, and its pending-check word is also Checking. Changes requested also
+appears on the PR row, matching its detail sheet.
 
 "2 of 4" comes only from the agent's own list: `done.length + 1` of `done + 1 + next`, no index to get wrong. Work
 Follow-up sent is the line with nothing added. Not sources: the to-do list's in-progress item (the micro step, and

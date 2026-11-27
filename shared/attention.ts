@@ -1,3 +1,5 @@
+import { MERGE_QUEUED_STATUSES as QUEUED, mergeQueued } from "./pr-status";
+export { mergeQueued } from "./pr-status";
 import { sendItems } from "./send-words";
 import { githubOffLine } from "./github-setup";
 import { batchView, FINISH_LINE, perSnapshot, stuckLine, unconfirmedRefs } from "./status";
@@ -138,7 +140,6 @@ export function quietFold<P extends Pr>(prs: readonly P[], isOpen: (key: string)
 
 const pendingSends = (w: Workspace) => w.batches.filter(b => !recoveryBatch(b) && b.state === "pending");
 const openBatches = (w: Workspace) => w.batches.filter(b => !recoveryBatch(b) && holdsQueue(b));
-const QUEUED = ["QUEUED_TO_MERGE", "WAITING_TO_MERGE", "REBASING", "HANDED_OFF_TO_EXTERNAL_MERGE_QUEUE"];
 
 /** Snapshot-only merge readiness. Pr controls add the browser's live "merging" read on top. */
 export function mergeReady(pr: Pr, w: Pick<Workspace, "prActions">, now = Date.now()): boolean {
@@ -149,7 +150,6 @@ export function mergeReady(pr: Pr, w: Pick<Workspace, "prActions">, now = Date.n
   if (isGithubFlow(s)) return mergeBlockers(pr).length === 0 && !recentlySubmitted;
   return !pr.error && !!s?.complete && s.state === "OPEN" && s.reviewDecision === "APPROVED" && !s.draft && !s.conflict && !s.failedChecks?.length && !s.checksPending && !queued && !recentlySubmitted;
 }
-export const mergeQueued = (pr: Pr) => isGithubFlow(pr.snapshot) ? !!pr.snapshot?.inMergeQueue : QUEUED.includes(pr.snapshot?.graphiteMergeStatus ?? "");
 /** Whether the workflow that ships this PR says it can merge now: Graphite's readiness, or GitHub's own verdict. */
 export const workflowReady = (pr: Pr) => isGithubFlow(pr.snapshot) ? mergeBlockers(pr).length === 0 : graphiteReady(pr.snapshot?.graphiteMergeStatus);
 

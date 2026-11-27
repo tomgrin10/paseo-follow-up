@@ -8,7 +8,7 @@ import { interruptionHold } from "../shared/status";
 import { backgroundCount, isLive } from "../shared/agent-load";
 
 export type History = { candidates: string[]; goal: string | null; complete: boolean; error: string | null };
-export type DiscoveredWorkspace = { id: string; title: string; mainAgentId: string; /** Set when mainAgentId is a live successor to this closed or gone main agent. */ replacesMainAgentId?: string; /** The replacement is the original main agent taking the workspace back (Workspace.handover). */ handBack?: boolean; /** The recorded main agent reads "closed" right now. */ mainClosed?: boolean; messageAt: string | null; projectId?: string | null; enable_default_tracking?: boolean; history?: History; contributorAgentIds?: string[]; submissions?: Submission[]; artifacts?: Artifact[]; /** In the active scope (see workspaceActive). Undefined means unknown, treated as active. */ active?: boolean };
+export type DiscoveredWorkspace = { id: string; title: string; mainAgentId: string; /** Set when mainAgentId is a live successor to this closed or gone main agent. */ replacesMainAgentId?: string; /** The replacement is the original main agent taking the workspace back (Workspace.handover). */ handBack?: boolean; /** The recorded main agent reads "closed" right now. */ mainClosed?: boolean; messageAt: string | null; repo?: string | null; projectId?: string | null; enable_default_tracking?: boolean; history?: History; contributorAgentIds?: string[]; submissions?: Submission[]; artifacts?: Artifact[]; /** In the active scope (see workspaceActive). Undefined means unknown, treated as active. */ active?: boolean };
 
 export { interruptionHold };
 
@@ -137,6 +137,7 @@ export function applyDiscovery(state: State, discovered: DiscoveredWorkspace[], 
       state.workspaces.push(w);
     }
     w.title = row.title;
+    if (row.repo !== undefined) w.repo = row.repo;
     if (row.active !== undefined) {
       if (row.active) delete w.dormant; else w.dormant = true;
       // Auto-send parked by the active-scope migration comes back once the workspace is active again.

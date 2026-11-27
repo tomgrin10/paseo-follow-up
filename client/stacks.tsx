@@ -1,3 +1,4 @@
+import { prReference, prRowStatus } from "../shared/pr-status";
 import { View } from "react-native";
 import { PagedRows } from "./paged-list";
 import { Pressable, Text } from "./text";
@@ -40,13 +41,12 @@ function statusColor(colors: Colors, pr: Pr) {
   return tone === "merged" ? mergedColor(colors) : tone === "approved" ? colors.statusSuccess : tone === "warning" ? (prTone(pr) === "danger" ? colors.statusDanger : colors.statusWarning) : colors.foregroundMuted;
 }
 
-export function PrRow({ pr, theme, first, last, showRepo, onOpen, compact, wide = false, hit }: { pr: Pr; theme: Theme; first: boolean; last: boolean; showRepo: boolean; onOpen: (key: string) => void; compact: boolean; wide?: boolean;
+export function PrRow({ pr, theme, first, last, workspaceRepo, onOpen, compact, wide = false, hit }: { pr: Pr; theme: Theme; first: boolean; last: boolean; workspaceRepo?: string | null; onOpen: (key: string) => void; compact: boolean; wide?: boolean;
   /** A section search hit (prFields: title, number, then hidden branch and checks). */
   hit?: ItemHit }) {
   const c = theme.colors; const t = text(c);
   const s = pr.snapshot;
-  const status = compactPrStatus(pr);
-  const label = mergeQueued(pr) ? "Queued to merge" : status.label;
+  const { label } = prRowStatus(pr);
   const line = c.border;
   const extras = [
     s?.state === "OPEN" && reviewersMissing(pr) ? "No reviewers" : null,
@@ -55,8 +55,10 @@ export function PrRow({ pr, theme, first, last, showRepo, onOpen, compact, wide 
   const titleText = s?.title ?? `${pr.repo} pull request`;
   const titleStyle = [t.body, s?.state !== "OPEN" && s ? { color: c.foregroundMuted } : null];
   const title = hit ? <Marked numberOfLines={2} text={titleText} ranges={s?.title ? hit.ranges[0] : undefined} theme={theme} style={titleStyle} /> : <Text numberOfLines={2} style={titleStyle}>{titleText}</Text>;
-  const number = hit ? <Marked text={`#${pr.number}`} ranges={hit.ranges[1]} theme={theme} style={null} /> : `#${pr.number}`;
-  return <Pressable accessibilityRole="button" accessibilityLabel={`Pull request ${pr.number}: ${s?.title ?? pr.stack}. ${label}. Open details`} onPress={() => onOpen(pr.key)}
+  const ref = prReference(pr, workspaceRepo);
+  const offset = ref.length - `#${pr.number}`.length;
+  const number = hit ? <Marked text={ref} ranges={hit.ranges[1]?.map(([start, end]) => [start + offset, end + offset])} theme={theme} style={null} /> : ref;
+  return <Pressable accessibilityRole="button" accessibilityLabel={`Pull request ${pr.number}: ${ref.startsWith("#") ? "" : `${pr.repo}. `}${s?.title ?? pr.stack}. ${label}. Open details`} onPress={() => onOpen(pr.key)}
     style={state => ({ flexDirection: "row", gap: 10, paddingHorizontal: 12, minHeight: compact ? 52 : 44, backgroundColor: state.pressed ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
     <View style={{ width: NODE, alignItems: "center" }}>
       <View style={{ width: 2, height: 10, backgroundColor: first ? "transparent" : line }} />
@@ -67,7 +69,7 @@ export function PrRow({ pr, theme, first, last, showRepo, onOpen, compact, wide 
     {wide ? <>
       <View style={{ flex: 1, minWidth: 0, paddingVertical: 8, gap: 2 }}>
         {title}
-        {hit?.via ? <ViaLine via={hit.via} theme={theme} compact={compact} /> : <Text numberOfLines={1} style={t.meta}>{showRepo ? `${pr.repo} ` : ""}{number}{extras.map(e => ` · ${e}`).join("")}</Text>}
+        {hit?.via ? <ViaLine via={hit.via} theme={theme} compact={compact} /> : <Text numberOfLines={1} style={t.meta}>{number}{extras.map(e => ` · ${e}`).join("")}</Text>}
       </View>
       <View style={{ width: 120, paddingTop: 8, alignItems: "flex-end" }}>
         <Text numberOfLines={1} style={[t.meta, { color: statusColor(c, pr), fontWeight: "600" }]}>{label}</Text>
@@ -75,7 +77,7 @@ export function PrRow({ pr, theme, first, last, showRepo, onOpen, compact, wide 
     </> : <View style={{ flex: 1, minWidth: 0, paddingVertical: 8, gap: 2 }}>
       {title}
       {hit?.via ? <ViaLine via={hit.via} theme={theme} compact={compact} /> : <Text numberOfLines={1} style={t.meta}>
-        <Text style={{ fontVariant: ["tabular-nums"] }}>{showRepo ? `${pr.repo.split("/")[1]} ` : ""}{number}</Text>
+        <Text style={{ fontVariant: ["tabular-nums"] }}>{number}</Text>
         {" · "}<Text style={{ color: statusColor(c, pr), fontWeight: "600" }}>{label}</Text>
         {extras.map(e => <Text key={e}>{` · ${e}`}</Text>)}
       </Text>}
@@ -84,7 +86,7 @@ export function PrRow({ pr, theme, first, last, showRepo, onOpen, compact, wide 
   </Pressable>;
 }
 
-function StackRows({ name, prs, theme, open, toggle, onOpen, compact, showRepo, settled, wide, hits }: { name: string; prs: Pr[]; theme: Theme; open: (key: string) => boolean; toggle: (key: string) => void; onOpen: (key: string) => void; compact: boolean; showRepo: boolean; settled: boolean; wide: boolean;
+function StackRows({ name, prs, theme, open, toggle, onOpen, compact, workspaceRepo, settled, wide, hits }: { name: string; prs: Pr[]; theme: Theme; open: (key: string) => boolean; toggle: (key: string) => void; onOpen: (key: string) => void; compact: boolean; workspaceRepo?: string | null; settled: boolean; wide: boolean;
   /** While searching: only these PRs show, merged ones in place (the fold is ignored). */
   hits: Map<Pr, ItemHit> | null }) {
   const c = theme.colors; const t = text(c);
@@ -108,7 +110,7 @@ function StackRows({ name, prs, theme, open, toggle, onOpen, compact, showRepo, 
     {/* A stack's rows page (client/paged-list.tsx); the rail's ends are the stack's own, so it runs on across a page break. */}
     <PagedRows items={items} resetKey={hits ? "search" : ""} theme={theme} compact={compact} noun="PRs" row={(item, i) => {
       const first = i === 0, last = i === items.length - 1 && !fold;
-      if (item.kind === "pr") return <PrRow key={item.pr.key} pr={item.pr} theme={theme} first={first} last={last} showRepo={showRepo} onOpen={onOpen} compact={compact} wide={wide} hit={hits?.get(item.pr)} />;
+      if (item.kind === "pr") return <PrRow key={item.pr.key} pr={item.pr} theme={theme} first={first} last={last} workspaceRepo={workspaceRepo} onOpen={onOpen} compact={compact} wide={wide} hit={hits?.get(item.pr)} />;
       const expanded = open(item.key), n = item.prs.length;
       const range = `#${item.prs[0]!.number} to #${item.prs.at(-1)!.number}`;
       return <Pressable key={item.key} accessibilityRole="button" aria-expanded={expanded} accessibilityState={{ expanded }} accessibilityLabel={`${expanded ? "Hide" : "Show"} ${n} PRs in review, ${range}, in ${name}`} onPress={() => toggle(item.key)}
@@ -149,7 +151,6 @@ export function StacksCard({ workspace: w, theme, compact, open, toggle, onOpen,
   const stacks = orderedStacks(w.prs);
   const active = stacks.filter(s => !s.prs.every(settledForDisplay));
   const settled = stacks.filter(s => s.prs.every(settledForDisplay));
-  const showRepo = new Set(w.prs.map(p => p.repo)).size > 1;
   const openCount = w.prs.filter(p => p.snapshot?.state === "OPEN").length;
   const inFlight = w.prActions.filter(a => a.state === "sending");
   // One slot for why the statuses below may be missing or behind: GitHub off (works-without-github), else the budget.
@@ -163,7 +164,7 @@ export function StacksCard({ workspace: w, theme, compact, open, toggle, onOpen,
   // Stacks page too (client/paged-list.tsx): a long-lived workspace keeps hundreds of settled ones. A search pages only
   // the stacks with a hit, so no page is empty.
   const stackRows = (list: typeof stacks, isSettled: boolean) => <PagedRows items={hits ? list.filter(s => s.prs.some(p => hits.has(p))) : list} size={STACKS_PER_PAGE} resetKey={search.query ?? ""} theme={theme} compact={compact} noun="stacks"
-    row={s => <StackRows key={s.name} name={s.name} prs={s.prs} theme={theme} open={open} toggle={toggle} onOpen={onOpen} compact={compact} showRepo={showRepo} settled={isSettled} wide={wide} hits={hits} />} />;
+    row={s => <StackRows key={s.name} name={s.name} prs={s.prs} theme={theme} open={open} toggle={toggle} onOpen={onOpen} compact={compact} workspaceRepo={w.repo} settled={isSettled} wide={wide} hits={hits} />} />;
   return <Card theme={theme} compact={compact} icon="GitPullRequest" title="Pull requests" count={openCount ? `${openCount} open` : undefined} right={search.button} search={search.header}>
     {hits && !hits.size && <NoMatchRow section="prs" query={search.query!} theme={theme} compact={compact} />}
     {!hits && inFlight.map(a => <View key={a.id} style={{ flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1, borderTopColor: c.border }}>

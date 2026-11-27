@@ -166,6 +166,8 @@ export const batchSchema = z.object({
 });
 export const workspaceSchema = z.object({
   id: idSchema, title: textSchema, goal: textSchema, mainAgentId: idSchema,
+  /** Workspace project repository from discovery, independent of its PRs (shared/now.ts). */
+  repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/).nullable().optional(),
   contributorAgentIds: z.array(idSchema).optional(),
   /** When discovery first saw the recorded main agent closed, cleared once it reads live again (see successorMainAgent). */
   mainClosedSince: z.string().optional(),

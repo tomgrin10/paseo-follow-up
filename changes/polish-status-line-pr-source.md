@@ -1,0 +1,1 @@
+- Agent lines and pull request rows share the same status words and name the repository for PRs outside the workspace’s own repository.

@@ -316,3 +316,9 @@ with `HARNESS_PASEO=0.16`. Desktop light/dark captures put the row menu near the
 run fails when host chrome covers an item or it is offscreen. `--menus-before` restores `client/` from
 `--menus-baseline-ref` (default `origin/main`) only in the isolated packed plugin and captures the old behavior without
 asserting it passes. PNGs are review artifacts and are not committed.
+
+`node scripts/screenshots.mjs --only pr-now` renders the PR fallback on Panel and Home, own and other repositories,
+in review and checks running, desktop and phone, light and dark. Its git project and PR data are fictional.
+
+Add `--pr-now-revision` to capture the checks-running panels for both repositories and themes, Home desktop
+in both themes, and Home phone dark (the gallery pair). The capture also checks the actual PR row agrees with the agent line.

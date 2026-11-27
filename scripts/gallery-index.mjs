@@ -8,7 +8,7 @@ import { join } from "node:path";
 const dir = process.argv[2] ?? "docs/screenshots/gallery";
 /** What each surface shows. A new surface needs a line here, or INDEX.md says so. */
 export const SURFACES = {
-  home: "Home: every workspace grouped by what it needs from you, with the selected workspace's question on the right (desktop); the list (phone).",
+  home: "Home: every workspace grouped by what it needs from you, with agent work and PR status lines; the morning brief on the right (desktop), and the list (phone).",
   "decision-card": "A decision card: the agent's question with lettered options, the recommendation and what the agent does meanwhile, in Home's detail pane.",
   sidebar: "Follow-up's list as Paseo's sidebar view (Paseo 0.16+), with a workspace's chat beside it.",
   panel: "The workspace panel beside the chat: status, Needs you, pull requests and activity (desktop); the larger view (phone).",
