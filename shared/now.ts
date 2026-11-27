@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { prRowStatus, prReference } from "./pr-status";
+import { checksState, prRowStatus, prReference } from "./pr-status";
 import type { ListPr } from "./list";
 import type { Batch, Obligation, Task } from "./model";
 import type { Question } from "./questions";
@@ -169,7 +169,7 @@ export function stateOf(w: NowWorkspace, agent: AgentFacts, now: number): { stat
   }
   if (agent.status === "closed") return { state: { kind: "closed", text: "Closed", since: null }, waitingOn: null, needs: null };
   if ((agent.backgroundWork ?? 0) > 0) return { state: { kind: "background", text: agent.backgroundWork === 1 ? "Its background job is running" : `${agent.backgroundWork} background jobs are running`, since: null }, waitingOn: null, needs: null };
-  const ci = ownedPrs(w, agent).filter(p => isOpenPr(p) && p.snapshot?.checksPending);
+  const ci = ownedPrs(w, agent).filter(p => isOpenPr(p) && !!p.snapshot && checksState(p.snapshot) === "running");
   if (ci.length) {
     const on = ci.length === 1 ? `#${ci[0]!.number}` : `${ci.length} PRs`;
     return { state: { kind: "waiting-ci", text: `Waiting on CI for ${on}`, since: null }, waitingOn: `CI on ${on}`, needs: null };

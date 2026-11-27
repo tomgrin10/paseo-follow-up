@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { openExternalUrl, useRpc, type PluginClientContext, type PluginTimelineItemProps } from "@getpaseo/plugin/client";
 import { deliveryStatus } from "../shared/queue";
 import { Icon, TextInput, copyText, useToast } from "@getpaseo/plugin/client/ui";
-import { BRIEF_KIND, briefCardAsk, BRIEF_VERSION, askedDecisions, cardPicks, notedCount, pickedCount, briefSchema, collapsedLine, outcomeLabel, extrasFit, hasOriginal, nothingNeededLine, isTight, pastRows, pastTone, selectsFirst, sendBar, shownBrief, pastAsk, liveBrief, newAnswerId, type Brief, type BriefDecision, type BriefMove } from "../shared/brief";
+import { BRIEF_KIND, briefCardAsk, BRIEF_VERSION, askedDecisions, cardPicks, decisionQuestion, notedCount, pickedCount, briefSchema, collapsedLine, outcomeLabel, extrasFit, hasOriginal, nothingNeededLine, isTight, pastRows, pastTone, selectsFirst, sendBar, shownBrief, pastAsk, liveBrief, newAnswerId, type Brief, type BriefDecision, type BriefMove } from "../shared/brief";
 import { needsYou } from "../shared/attention";
 import { age, briefOutlived } from "../shared/inbox";
 import { noReviewReposVersion, onNoReviewRepos } from "../shared/pr-workflow";
@@ -17,6 +17,7 @@ import { answerQuestionRpc, briefActionRpc, browserStatusRpc, inboxBriefRpc } fr
 import { ImageField, useImageAttachments, type ImageAttachments } from "./image-attach";
 import { errorText, mootNote } from "../shared/errors";
 import { PRIMARY_FORM } from "./dock";
+import { QuestionContextBlock } from "./question-context";
 import { OTHER, OTHER_LABEL, OWN_ANSWER_HINT, briefAnswerStatus, isDoneOnly, isOpen, isOther, TASK_DONE, type Question } from "../shared/questions";
 import type { ListQuestion, ListWorkspace } from "../shared/list";
 import { useDetailGate, useWorkspace } from "./workspace-data";
@@ -164,7 +165,12 @@ export function NoteLink({ icon, label, a11y, disabled, onPress, c, compact }: {
  * The card's body: decisions, error text, details, context, facts and links, and the agent's extra ask. Shared by the
  * open card and by a past card's read-only "Show full question", so a past question reads exactly as it was asked.
  */
-export function BriefBody({ b, c, compact, tight, embedded, height, mode, picks, onPick, busy, onSend, words = {}, onWords, onSendOther, notes = {}, notesOpen = {}, onNote, onNoteOpen, doneIds = [], img }: {
+export function BriefBody({ b, c, compact, tight, embedded, height, mode, picks, onPick, busy, onSend, words = {}, onWords, onSendOther, notes = {}, notesOpen = {}, onNote, onNoteOpen, doneIds = [], img, workspace, openAgent }: {
+  /**
+   * The brief's workspace (list form): a decision that is a tracked question draws that question's context under it,
+   * as QuestionBody does (one-answer-flow-for-every-question). Absent: the card has only its own snapshot.
+   */
+  workspace?: ListWorkspace; openAgent?: (agentId: string) => void;
   /** The card's pasted images (one model for its answer and note fields). Absent: read-only copies. */
   img?: ImageAttachments;
   /** one-done-button: decisions answered by the card's Done button (an action card), drawn without option rows. */
@@ -194,6 +200,7 @@ export function BriefBody({ b, c, compact, tight, embedded, height, mode, picks,
   return <>
     {b.decisions.map((d, i) => { const done = !readonly && doneIds.includes(d.id); return <View key={d.id} accessibilityRole={mode === "select" ? "radiogroup" : undefined} accessibilityLabel={mode === "select" ? d.question : undefined} style={{ gap: 8 }}>
       {(numbered || d.question.trim() !== b.ask.trim()) && <RichText style={{ color: c.foreground, fontSize: 14, lineHeight: 20, fontWeight: numbered ? "600" : "400" }}>{`${numbered ? `${i + 1}. ` : ""}${d.question}`}</RichText>}
+      {(() => { const q = workspace ? decisionQuestion(b, d.id, workspace.questions) : null; return q && workspace ? <QuestionContextBlock workspace={workspace} question={q} theme={{ colors: c }} compact={compact} open={!readonly && isOpen(q)} openAgent={openAgent} /> : null; })()}
       {d.options.length > 0 && <View style={{ gap: 6 }}>
         {!done && d.options.map(o => <OptionRow key={o.letter} option={o} recommended={d.recommend === o.letter} mode={mode} answerLabel={answerLabel} selected={readonly ? d.chosen === o.letter : picks[d.id] === o.letter} answered={readonly && !!d.chosen}
           sending={busy === `${d.id}:${o.letter}`} disabled={!!busy} tight={tight && !readonly} withNote={!!notesOpen[d.id] && !!notes[d.id]?.trim()}
@@ -275,6 +282,14 @@ function SendBar({ b, picks, noted = 0, busy, error, onSend, c, compact }: { b: 
   </View>;
 }
 
+/** Where the card's facts come from: the desktop footer, or on phones the line the header's ⓘ reveals under itself. */
+function SourceLine({ b, c }: { b: Pick<Brief, "sourceLine">; c: Colors }) {
+  return <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 6 }}>
+    <View style={{ paddingTop: 2 }}><Icon name="Info" size={12} color={c.foregroundMuted} /></View>
+    <Text accessibilityLiveRegion="polite" style={{ flex: 1, color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{b.sourceLine}</Text>
+  </View>;
+}
+
 /** "Show full question" / "Show original": a past card opens back up, read-only. */
 const CONTEXT_LINES = 4;
 /**
@@ -296,7 +311,7 @@ function Reveal({ label, openLabel, open, onPress, c, compact }: { label: string
  * A card that's no longer open keeps its question (1.4.0). Answered: the ask, each decision with what was picked, and
  * "Show full question" opens the original read-only. Superseded or signed off: the one muted line, plus "Show original".
  */
-function Past({ b, c, now, compact, height, pending = false, onResend, resending = false, questions = [] }: { b: Brief; c: Colors; now: number; compact: boolean; height: number; pending?: boolean; onResend?: () => void; resending?: boolean; questions?: readonly ListQuestion[] }) {
+function Past({ b, c, now, compact, height, pending = false, onResend, resending = false, questions = [], workspace }: { workspace?: ListWorkspace; b: Brief; c: Colors; now: number; compact: boolean; height: number; pending?: boolean; onResend?: () => void; resending?: boolean; questions?: readonly ListQuestion[] }) {
   const [expanded, setExpanded] = useState(false);
   const answered = b.state === "answered";
   // Its questions' answers as every surface reads them (briefAnswerStatus): copied or in the message box is "not sent
@@ -325,7 +340,7 @@ function Past({ b, c, now, compact, height, pending = false, onResend, resending
     {onResend && delivery.action && <Btn label={resending ? "Sending…" : delivery.action === "retry" ? "Retry" : "Try now"} icon="RotateCcw" primary={delivery.action === "retry"} onPress={onResend} disabled={resending} c={c} compact={compact} hint={delivery.action === "retry" ? "Sends the same answer again" : "Tries sending it now"} />}
   </View>;
   const body = expanded && <View style={{ gap: 10, paddingTop: 4 }}>
-    <BriefBody b={b} c={c} compact={compact} tight={false} embedded height={height} mode="readonly" picks={{}} onPick={() => undefined} busy={null} />
+    <BriefBody b={b} c={c} compact={compact} tight={false} embedded height={height} mode="readonly" picks={{}} onPick={() => undefined} busy={null} workspace={workspace} />
   </View>;
   if (!picked) return <View accessibilityLiveRegion="polite" accessibilityLabel={spoken} style={{ marginVertical: 10, gap: 6, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: c.border }}>
     <View style={{ flexDirection: "row", gap: 10, alignItems: answered ? "flex-start" : "center", minHeight: 24 }}>
@@ -434,7 +449,7 @@ function BriefCardBody({ item, theme, layout, agentId, deps, embedded = false, s
   // An add-reviewers card for a PR the agent merges itself isn't an ask: gone the moment the repository flips to No
   // review, back on Undo (invariant a-no-review-repo-never-asks-for-review-or-merge).
   if (b.state === "open" && !liveBrief(b)) return null;
-  if (shown.brief.state !== "open") return <Past b={shown.brief} c={c} now={now} compact={compact} height={height} onResend={b.answerId ? resend : undefined} resending={sending === "resend"} questions={workspace?.questions} />;
+  if (shown.brief.state !== "open") return <Past b={shown.brief} c={c} now={now} compact={compact} height={height} onResend={b.answerId ? resend : undefined} resending={sending === "resend"} questions={workspace?.questions} workspace={workspace} />;
   // Muted until the send lands: the server's answered brief then replaces this, green.
   if (marked) return <Past b={{ ...b, state: "answered", outcome: "Done", outcomeAt: marked }} pending={!sent} c={c} now={now} compact={compact} height={height} />;
 
@@ -581,6 +596,9 @@ function BriefCardBody({ item, theme, layout, agentId, deps, embedded = false, s
           {/* The x is always the card's last control, in its top-right corner, on every Needs-you item. */}
           {x}
         </View>
+        {/* A disclosure shows what it reveals next to itself (a-disclosure-reveals-beside-itself): on phones the ⓘ's
+            line is the element right after the header row, never the footer, which a tall card puts off screen. */}
+        {compact && why && <SourceLine b={b} c={c} />}
         {/* The ask role on phones (react-native-web ignores hitSlop, so the ⓘ above is a real 44 box); desktop keeps 19/26. */}
         {/* Bare: a section of the Needs you block, so the same size as its question titles. */}
         <RichText accessibilityRole="header" style={compact || bare ? text(c, compact).ask : { color: c.foreground, fontSize: 19, lineHeight: 26, fontWeight: "600", letterSpacing: -0.2 }}>{askText}</RichText>
@@ -589,7 +607,7 @@ function BriefCardBody({ item, theme, layout, agentId, deps, embedded = false, s
       <BriefBody b={b} c={c} compact={compact} tight={tight} embedded={embedded} height={height} mode={multi ? "select" : "send"} picks={picks}
         onPick={(decisionId, letter) => { if (!busy) pickStore.set(b.id, decisionId, letter); }} busy={busy} onSend={sendOne}
         words={words} onWords={(decisionId, t) => wordStore.set(b.id, decisionId, t)} onSendOther={sendOther}
-        notes={notes} notesOpen={notesOpen} onNote={(decisionId, t) => noteStore.set(b.id, decisionId, t)} onNoteOpen={(decisionId, open) => noteOpenStore.set(b.id, decisionId, open ? "1" : "")} doneIds={doneQ ? [doneQ.id] : []} img={img} />
+        notes={notes} notesOpen={notesOpen} onNote={(decisionId, t) => noteStore.set(b.id, decisionId, t)} onNoteOpen={(decisionId, open) => noteOpenStore.set(b.id, decisionId, open ? "1" : "")} doneIds={doneQ ? [doneQ.id] : []} img={img} workspace={workspace} openAgent={deps.openAgent} />
 
       {multi && <SendBar b={b} picks={sendable} noted={notedCount(sendable, openNotes)} busy={busy} error={error} onSend={sendAll} c={c} compact={compact} />}
 
@@ -608,10 +626,8 @@ function BriefCardBody({ item, theme, layout, agentId, deps, embedded = false, s
         {!tight && !!b.also.context && <RichText linkColor={c.foreground} numberOfLines={3} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 19 }}>{b.also.context}</RichText>}
       </View>}
     </SubmitScope>
-    {(!compact || why) && <View style={{ borderTopWidth: 1, borderTopColor: c.border, paddingHorizontal: pad, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 6 }}>
-      <Icon name="Info" size={12} color={c.foregroundMuted} />
-      <Text style={{ flex: 1, color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{b.sourceLine}</Text>
-    </View>}
+    {/* Desktop: where the card's facts come from is its footer, always shown. */}
+    {!compact && <View style={{ borderTopWidth: 1, borderTopColor: c.border, paddingHorizontal: pad, paddingVertical: 8 }}><SourceLine b={b} c={c} /></View>}
     {detail.workspace && sheet && <PrSheet workspace={detail.workspace} prKey={sheet.key} intent={sheet.intent} theme={theme} compact={compact} browserReady={browser.data?.ready ?? false} onClose={() => setSheet(null)} />}
   </RevealScope>;
 }

@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { View } from "react-native";
 import { Pressable, Text, copyable } from "./text";
-import { openExternalUrl, useRpc } from "@getpaseo/plugin/client";
+import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, ScrollView, TextInput, copyText, useToast } from "@getpaseo/plugin/client/ui";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { activityRpc, answerQuestionRpc } from "../shared/contracts";
@@ -23,12 +23,11 @@ import { Button, Card, CardRow, Chip, FoldRow, IconButton, SubmitScope, errorTex
 import { Spinner } from "./motion";
 import { DictationField, useCaret, type FieldPad } from "./dictation";
 import { NoteLink } from "./brief";
-import { QuestionMoreContext } from "./more-context";
+import { QuestionContextBlock } from "./question-context";
 import { PRIMARY_FORM } from "./dock";
 import { mergedColor, tint, withAlpha, type Colors } from "./theme";
 import { activityKey, overviewKey, workspaceKey } from "./keys";
-import { PrLinksProvider, RichText } from "./rich-text";
-import { prLinksByNumber } from "../shared/presentation";
+import { RichText } from "./rich-text";
 import { notice, openQuestion, runAction } from "./toasts";
 import { DismissX, useDismiss } from "./dismiss";
 import { putInChatOrCopy } from "../shared/put-in-chat";
@@ -256,28 +255,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   const state = meanwhile(w, q, null);
   const delivery = deliveryLine(w, q, now);
   const heading = answerHeading(q);
-  const pr = q.prKey ? w.prs.find(p => p.key === q.prKey) : null;
-  const task = q.taskId ? w.obligations.find(o => o.id === q.taskId) : null;
   const deliveryColor = delivery?.tone === "success" ? c.statusSuccess : delivery?.tone === "warning" ? c.statusWarning : c.foregroundMuted;
-  const context = (!!q.background || !!q.links?.length || pr || (task && !(inline && task.title.trim() === q.title.trim()))) && <View style={{ gap: 8 }}>
-    {!!q.background && <RichText selectable linkColor={c.foreground} numberOfLines={dense ? 3 : undefined} style={t.meta}>{q.background}</RichText>}
-    {!dense && q.links?.map((link, i) => <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-      <Icon name={link.url ? "Globe" : "FileText"} size={13} color={c.foregroundMuted} />
-      {link.url ? <Pressable accessibilityRole="link" accessibilityLabel={`Open ${link.label || link.url}`} onPress={() => { void openExternalUrl(link.url!).catch(() => undefined); }} hitSlop={4}
-        style={state => ({ flexShrink: 1, opacity: state.pressed ? 0.7 : 1 })}>
-        <Text numberOfLines={1} style={[t.meta, { color: c.foreground, textDecorationLine: "underline" }]}>{link.label || link.url}{link.label ? <Text style={{ color: c.foregroundMuted, textDecorationLine: "none" }}>{`  ${hostOf(link.url)}`}</Text> : null}</Text>
-      </Pressable> : <Text selectable numberOfLines={1} style={[t.meta, { flexShrink: 1, color: c.foreground }]}>{link.label ? `${link.label}  ` : ""}<Text style={{ color: c.foregroundMuted, fontFamily: "monospace", fontSize: 11 }}>{link.path}</Text></Text>}
-    </View>)}
-    {!dense && pr && <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-      <Icon name="GitPullRequest" size={13} color={pr.snapshot?.state === "MERGED" ? mergedColor(c) : c.foregroundMuted} />
-      {/* "#142" opens the PR (a-row-that-names-a-pr-opens-it-in-one-click). */}
-      <PrLinksProvider prs={prLinksByNumber([pr])}><RichText linkColor={c.foreground} numberOfLines={1} style={[t.meta, { flexShrink: 1 }]}>{`About #${pr.number}${pr.snapshot?.title ? ` · ${pr.snapshot.title}` : ""}`}</RichText></PrLinksProvider>
-    </View>}
-    {!dense && task && !(inline && task.title.trim() === q.title.trim()) && <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-      <Icon name="ListChecks" size={13} color={c.foregroundMuted} />
-      <RichText linkColor={c.foreground} numberOfLines={2} style={[t.meta, { flexShrink: 1 }]}>{`Task: ${task.title}`}</RichText>
-    </View>}
-  </View>;
   // Cmd+Enter (and Enter outside the answer field) does what Send does, only when Send is enabled.
   const submittable = !run.isPending && !img.blocked && (open ? !!answer || doneOnly : q.answer?.delivery.state === "copied" || q.answer?.delivery.state === "in-chat");
   // In the pill popover the answer field and actions stay pinned below a scrolling body.
@@ -313,10 +291,9 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
       <View style={{ paddingTop: 2 }}><Icon name={isDismissed(q) ? "X" : "MessageCircleOff"} size={12} color={c.foregroundMuted} /></View>
       <Text style={[t.meta, { flex: 1 }]}>{isDismissed(q) ? `${closedLine(q)} ${ago(q.closed.at, now)}. The agent wasn't messaged.` : `Withdrawn ${ago(q.closed.at, now)}: ${q.closed.reason}`}</Text>
     </View>}
-    {context}
-    {/* Read before choosing: More context sits under the question's own context, its answer with it. */}
-    {/* The question's quiet row: More context (Catch up's move bar has its own). Dismiss is the card's x, top right. */}
-    {open && moreContext && <QuestionMoreContext workspace={w} question={q} theme={theme} compact={compact} openAgent={openAgent} />}
+    {/* The question's own context (its note, links, PR, task), then More context: one block on every surface that
+        shows a question, the brief card in the chat included (one-answer-flow-for-every-question). */}
+    <QuestionContextBlock workspace={w} question={q} theme={theme} compact={compact} dense={dense} inline={inline} open={open} moreContext={moreContext} openAgent={openAgent} />
     {!!q.options.length && !doneOnly && <View accessibilityRole="radiogroup" accessibilityLabel={`Options for ${q.id}`} style={{ gap: 6 }}>
       {q.options.map(o => <OptionCard key={o.letter} theme={theme} compact={compact} dense={dense} letter={o.letter} label={o.label} consequence={o.consequence} recommended={q.recommend === o.letter}
         selected={(open ? choice : q.answer?.choice) === o.letter} disabled={!open || run.isPending} onPress={() => setChoice(o.letter)} />)}
@@ -411,10 +388,6 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
 /** A question's x: closes it as dismissed (follow.dismiss with "question:Qn"), sends the agent nothing, Undo in the toast. */
 export function QuestionDismissX({ workspaceId, questionId, theme, compact, disabled, onDismissed, dismiss }: { workspaceId: string; questionId: string; theme: Theme; compact: boolean; disabled?: boolean; onDismissed?: () => void; dismiss: ReturnType<typeof useDismiss> }) {
   return <DismissX theme={theme} compact={compact} label={`Remove ${questionId}`} disabled={disabled} onPress={() => dismiss({ workspaceId, key: `question:${questionId}` }, { onDismissed })} />;
-}
-
-function hostOf(url: string): string {
-  try { return new URL(url).host.replace(/^www\./, ""); } catch { return ""; }
 }
 
 /** The question dialog: a sheet on phones, a dialog on desktop. */

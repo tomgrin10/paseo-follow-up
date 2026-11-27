@@ -81,8 +81,8 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | Worker entry, RPC wiring, session attach, teardown | `index.server.ts`, `shared/contracts.ts`, `server/feeds.ts`, `server/rpc-timing.ts`, `server/teardown.ts`, `server/daemon.ts`, `server/shared-file.ts`, `server/directory.ts`, `server/request-trace.ts`, `server/store.ts`, `server/cow.ts`, `server/json-file-store.ts`, `server/write-behind.ts`, `server/list-cache.ts`, `shared/list.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
 | Discovery, ownership, main agent | `server/discovery.ts`, `server/turn-events.ts`, `server/workspace-agent.ts`, `server/background-agents.ts`, `server/submissions.ts`, `server/pr-owner.ts`, `server/exclusions.ts`, `server/history-cache.ts`, `server/recovery-handoff.ts`, `server/recovery-config.ts`, `shared/settings.ts` | [workspaces](docs/workspaces.md) |
 | Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/send-decision.ts`, `shared/task-rows.ts`, `shared/send-words.ts`, `shared/task-status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/message-queue.ts`, `shared/queue.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/put-in-chat.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `server/scheduled-tasks.ts`, `shared/task-due.ts`, `shared/task-view.ts`, `shared/task-dup.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
-| What each agent is working on now (the agent line on the panel and Home rows; sync_workspace `milestone`, `workspace_now`) | `shared/now.ts`, `shared/pr-status.ts`, `client/now-lines.tsx` | [workspaces](docs/workspaces.md#what-each-agent-is-working-on) |
-| Needs-you inbox, brief, Home | `server/inbox.ts`, `server/brief-timeline.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `server/turn-timeline.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/sending.ts`, `shared/needs-block.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts`, `server/dismiss.ts`, `client/dismiss.tsx`, `shared/catch-up.ts`, `client/catch-up.tsx`, `client/more-context.tsx`, `shared/dictation.ts`, `client/dictation.tsx`, `server/context-requests.ts`, `shared/your-questions.ts` | [needs-you](docs/needs-you.md) |
+| What each agent is working on now (the agent line on the panel and Home rows; sync_workspace `milestone`, `workspace_now`); what a PR's checks are doing (`checksState`) | `shared/now.ts`, `shared/pr-status.ts`, `client/now-lines.tsx` | [workspaces](docs/workspaces.md#what-each-agent-is-working-on) |
+| Needs-you inbox, brief, Home | `server/inbox.ts`, `server/brief-timeline.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `server/turn-timeline.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/sending.ts`, `shared/needs-block.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts`, `server/dismiss.ts`, `client/dismiss.tsx`, `shared/catch-up.ts`, `client/catch-up.tsx`, `client/more-context.tsx`, `client/question-context.tsx`, `shared/dictation.ts`, `client/dictation.tsx`, `server/context-requests.ts`, `shared/your-questions.ts` | [needs-you](docs/needs-you.md) |
 | Summary (internal id `about`), Rename title with AI | `server/about.ts`, `server/transcript.ts`, `shared/about.ts`, `server/rename.ts`, `shared/rename.ts` | [ai-roles](docs/ai-roles.md) |
 | Dispatch (New before 2.4): start work from an issue, PR, link or words | `shared/dispatch.ts`, `shared/issue-workspace.ts`, `shared/linear-issues.ts`, `shared/new-view.ts`, `server/dispatch.ts`, `server/linear-issues.ts`, `client/new.tsx`, `client/action-row.tsx`, `client/new-entry.tsx`, `shared/new-name.ts`, `shared/new-settings.ts`, `client/new-settings.tsx` | [dispatch](docs/dispatch.md) |
 | Morning brief: the whole Linear queue (sweep, snapshot, changes since you last read it), the brief's Since block, the queue screen, raised issues in Needs you | `shared/linear-queue.ts`, `server/linear-queue.ts`, `shared/brief-since.ts`, `client/brief-since.tsx` | [morning-brief](docs/morning-brief.md) |
@@ -631,7 +631,20 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    developer's own answer, never a note Send can't send. The brief card's decisions follow the same shape. 2026-11-17:
    the panel showed an "Add a note (optional)" field before any pick, so writing your own answer took typing and then
    finding Something else, while the pill's popover hid the field until Something else. Guarded by
-   `tests/own-answer.test.ts`.
+   `tests/own-answer.test.ts`. **A question reads the same wherever it is shown**: its note, links, PR line, task line
+   and More context are one block, `QuestionContextBlock` (`client/question-context.tsx`), which `QuestionBody` draws
+   and the chat's brief card draws under each decision that is a tracked question (`decisionQuestion`,
+   `shared/brief.ts`), open and in a past card's read-only copy ("Show full question", "Hide original"). No surface
+   draws a question's context its own way. 2026-11-27, the developer: "when the question pops up in the timeline, it
+   doesn't show the links, in the sidebar it does, so it looks weird"; the timeline card drew only each question's
+   text and options, so "(page below)" had no page below. Guarded by `tests/question-reads-the-same.test.ts`.
+   **A disclosure reveals beside itself** (`a-disclosure-reveals-beside-itself`): a control that shows something shows
+   it next to itself. On phones the brief card's ⓘ reveals where the card's facts come from (`SourceLine`) as the
+   element right after the header row, never as the footer; desktop keeps the footer, always shown. Details, Show more,
+   Show full question, an option's chevron and Add note already open in place. 2026-11-27, the developer on a phone:
+   tapping the ⓘ "does nothing": the line was the card's footer, off screen below a three-question card, and only the
+   icon's tint changed. Guarded by `tests/disclosure-beside-itself.test.ts` (the real `BriefCard` under the native
+   stand-in).
 
 42. **Home announces every newer stable in Tell me mode** (`update-notice-every-stable`). Major, minor and patch
    releases count, including a beta to its stable release. Prereleases stay in Settings → General. First installs,
@@ -1685,6 +1698,17 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    scroll remeasure it only while open. No menu relies on a plugin's local z-index or its fixed overlay's rectangle.
    On the sidebar, that rectangle could include the host footer while the host clipped and painted over the menu.
    Guarded by `tests/floating-surface.test.ts` and `scripts/screenshots.mjs --only menu-bounds`.
+
+136. **Checks say what they are doing** (`checks-say-what-they-are-doing`). One helper, `checksState`
+   (`shared/pr-status.ts`), says what a PR's checks are doing: failed, running (a check in progress, `checksRunning`),
+   not started (a required check hasn't reported and nothing runs) or passed, and every surface that describes checks
+   reads it: the agent line (`shared/now.ts`), the PR row and chip, the panel's live line, the stack rail, the PR
+   sheet, the brief's facts, merge holds and the agent tools' `checks` (`not_started`). A required check that hasn't
+   reported, with nothing running, is never "running" or "Waiting on CI": the row says "Checks not started" and the
+   agent line says nothing about CI. `checksPending` stays the merge gate only (a missing required check still blocks a
+   merge; `mergeBlockers` names it "Required checks not started"). A snapshot stored before `checksRunning` reads as
+   before until its next read. 2026-11-27: the panel's agent line read "Waiting on CI for #9602", an upstream fork PR
+   whose required checks never start. Guarded by `tests/checks-state.test.ts` and `INVARIANTS`.
 
 ## Bugs
 

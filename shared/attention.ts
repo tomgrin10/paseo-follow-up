@@ -1,4 +1,4 @@
-import { MERGE_QUEUED_STATUSES as QUEUED, mergeQueued } from "./pr-status";
+import { MERGE_QUEUED_STATUSES as QUEUED, checksState, mergeQueued } from "./pr-status";
 export { mergeQueued } from "./pr-status";
 import { sendItems } from "./send-words";
 import { githubOffLine } from "./github-setup";
@@ -410,7 +410,8 @@ function holdReason(p: Pr): string {
   if (!s?.complete || p.error) return "status unknown";
   if (s.conflict) return "conflicts";
   if (s.failedChecks?.length) return "checks failed";
-  if (s.checksPending) return "checks running";
+  if (checksState(s) === "running") return "checks running";
+  if (checksState(s) === "not-started") return "checks not started";
   if (s.draft) return "a draft";
   if (s.threads?.length) return "open threads";
   if (s.reviewDecision !== "APPROVED") return "not approved yet";
@@ -516,7 +517,7 @@ export function liveLine(w: Workspace, now = Date.now()): { icon: LiveIcon; text
   const failing = w.prs.filter(p => p.snapshot?.state === "OPEN" && p.snapshot.failedChecks?.length);
   // Red, in the rows' words ("Checks failed"): a failed check is a repair, not something waiting on the developer.
   if (failing.length) return { icon: "failing", text: failing.length === 1 ? `Checks failed on #${failing[0]!.number}` : `Checks failed on ${failing.length} PRs`, since: null };
-  if (w.prs.some(p => p.snapshot?.state === "OPEN" && p.snapshot.checksPending)) return { icon: "waiting", text: "Checks are running", since: null };
+  if (w.prs.some(p => p.snapshot?.state === "OPEN" && checksState(p.snapshot) === "running")) return { icon: "waiting", text: "Checks are running", since: null };
   if (w.prs.some(p => p.snapshot?.state === "OPEN")) return { icon: "waiting", text: "Waiting on review and merges", since: null };
   return { icon: "idle", text: "Waiting for the main agent to declare Done", since: null };
 }

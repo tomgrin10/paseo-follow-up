@@ -281,7 +281,7 @@ nothing is known, the state is the whole line.
 
 `shared/pr-status.ts` holds `prRowStatus`, the exact shared PR wording used by the list row and agent line,
 and `prReference`, their shared reference formatter. The PR fallback uses the
-PR row's words (Conflicts, Checks failed, Checking, Changes requested, In review, Approved, Draft, thread counts,
+PR row's words (Conflicts, Checks failed, Checking, Checks not started, Changes requested, In review, Approved, Draft, thread counts,
 and Queued to merge). It keeps Shipping only without a complete status. A PR in the workspace project's own
 repository shows #N; another repository, or an unknown workspace repository, shows owner/repo#N. Discovery
 stores the project repository in `repo`, independently of owned PRs, so Home, the panel and `workspace_now`
@@ -294,7 +294,9 @@ Follow-up sent is the line with nothing added. Not sources: the to-do list's in-
 not every provider keeps one), a model call, and `sync_workspace`'s `summary` (a receipt).
 
 **The state**: a pending permission ("Wants your OK · …"), an open stop question ("Asking you: …"), compacting,
-working (since the turn started), a background job, waiting on CI for its PR,
+working (since the turn started), a background job, waiting on CI for its PR (only while a check is actually
+running: `checksState`, invariant 136; a required check that never started says nothing here, and the PR row reads
+"Checks not started"),
 idle (since its last activity), or closed. Unknown stays unknown: no made-up "Idle".
 
 **Where it comes from.** The stated work is stored per agent on the workspace record (`milestones`), so the lists

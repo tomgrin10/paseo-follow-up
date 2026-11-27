@@ -1,4 +1,4 @@
-import { prReference, prRowStatus } from "../shared/pr-status";
+import { checksState, prReference, prRowStatus } from "../shared/pr-status";
 import { View } from "react-native";
 import { PagedRows } from "./paged-list";
 import { Pressable, Text } from "./text";
@@ -28,7 +28,7 @@ function Node({ pr, colors }: { pr: Pr; colors: Colors }) {
   const color = toneColor(colors, tone);
   const ring = { width: NODE, height: NODE, borderRadius: NODE / 2, alignItems: "center" as const, justifyContent: "center" as const };
   if (tone === "pending") {
-    if (s?.checksPending) return <View style={[ring, { borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.surface0 }]}><Spinner color={colors.foregroundMuted} size={9} label="Checks running" /></View>;
+    if (s && checksState(s) === "running") return <View style={[ring, { borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.surface0 }]}><Spinner color={colors.foregroundMuted} size={9} label="Checks running" /></View>;
     return <View style={[ring, { borderWidth: 1.5, borderColor: colors.foregroundMuted, backgroundColor: colors.surface0 }]} />;
   }
   if (tone === "draft") return <View style={[ring, { borderWidth: 1.5, borderStyle: "dashed", borderColor: colors.foregroundMuted, backgroundColor: colors.surface0 }]} />;

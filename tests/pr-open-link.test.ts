@@ -75,7 +75,7 @@ test("pr-open-link: every surface that draws Needs-you rows renders the link bes
   assert.match(brief, /<PrLinksProvider prs=\{prs\}><BriefCardBody/, "brief cards (the done brief too) link the PRs they name");
   const home = await readFile(join(import.meta.dirname, "../client/home.tsx"), "utf8");
   assert.match(home, /<PrLinksProvider prs=\{w \? prLinksByNumber\(w\.prs\) : undefined\}>\{tail\.steps\.map/, "Home's Recent steps link the PRs the agent names");
-  const questions = await readFile(join(import.meta.dirname, "../client/questions.tsx"), "utf8");
+  const questions = await readFile(join(import.meta.dirname, "../client/question-context.tsx"), "utf8");
   assert.match(questions, /<PrLinksProvider prs=\{prLinksByNumber\(\[pr\]\)\}><RichText[^>]*>\{`About #\$\{pr\.number\}/, "a question's \"About #142\" links #142");
 });
 

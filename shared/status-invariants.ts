@@ -23,6 +23,7 @@ import { cadence, movingReason, OBSERVATION_FRESH_MS, POLL_IDLE_MS, RUNNING_POLL
 import { staleUpdatePhase, type UpdatePhase } from "./updates";
 import { foldedAsk, needsYouBlock, onceViolation } from "./needs-block";
 import { compactPrStatus, prLink, prPresentation } from "./presentation";
+import { checksState } from "./pr-status";
 import { agentMerges } from "./pr-workflow";
 import { mergeScope } from "./merge-click";
 import { reviewersScope } from "./reviewers-click";
@@ -42,6 +43,19 @@ const inFlight = (w: Workspace) => w.batches.some(b => ["sending", "sent"].inclu
 const lines = (w: Workspace, now: number) => [liveLine(w, now).text, agentCard(w, now)?.line ?? "", batchView(w, now)?.line ?? "", ...needsYou(w, now).flatMap(i => [i.title, "blocker" in i ? i.blocker ?? "" : ""])];
 
 export const INVARIANTS: Invariant[] = [
+  {
+    id: "checks-say-what-they-are-doing",
+    why: "2026-11-27: the panel's agent line read \"Waiting on CI for #9602\", an upstream fork PR whose required checks never start. checksPending (a required check missing or running) is the merge gate; display read it as running. One helper (checksState) says what the checks are doing, and a required check that hasn't reported, with nothing running, is never \"running\".",
+    check(w, now) {
+      const open = w.prs.filter(p => p.snapshot?.state === "OPEN" && p.snapshot.complete && !p.error);
+      for (const p of open) {
+        if (checksState(p.snapshot!) !== "not-started") continue;
+        if (/running|checking/i.test(prPresentation(p).label) || /running|checking/i.test(compactPrStatus(p).label)) return `#${p.number}: its required checks never started, but its row says they are running`;
+      }
+      if (open.some(p => checksState(p.snapshot!) === "not-started") && !open.some(p => checksState(p.snapshot!) === "running") && /running/i.test(liveLine(w, now).text)) return "no check runs, but the live line says checks are running";
+      return null;
+    },
+  },
   {
     id: "finished-items-are-history",
     why: "Closed unanswered questions were treated as undelivered answers, exhausting the live budget and hiding every recent-history glance. A terminal record stays in history even when a task still references it.",

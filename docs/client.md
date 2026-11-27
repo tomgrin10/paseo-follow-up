@@ -82,6 +82,7 @@ Nothing polls while the app is hidden.
 | `client/pr-sheet.tsx`, `client/pr-controls.tsx` | One PR's sheet, with merge and reviewer controls. |
 | `client/reviewers.tsx` | Reviewer lists and the picker. |
 | `client/needs-you.tsx` | The workspace's one Needs you block: the asks (question cards, the brief), then the decision rows (Send repairs, Merge, Resume, Retry, Check). |
+| `client/question-context.tsx` | A question's own context, `QuestionContextBlock`: its note, links, PR line, task line and More context. `QuestionBody` draws it, and so does the chat's brief card under each decision that is a tracked question (`decisionQuestion`), so a question reads the same in the chat as on the panel (`one-answer-flow-for-every-question`). |
 | `client/questions.tsx` | The question dialog and answer form (`QuestionBody`), the one answer flow every question surface draws; its field's role comes from `answerDraft` (`one-answer-flow-for-every-question`). Send, then Put in chat with Copy as an icon on Paseo 0.16 (Copy keeps its label on 0.15). |
 | `client/put-in-chat.ts` | Paseo 0.16's composer controls, feature-detected (`hasComposers`, `useChatComposer`); the insert rule is `shared/put-in-chat.ts`. |
 | `client/tasks.tsx` | Agent's tasks (tasks-are-the-agent-s): one folded line ("6 open · 2 due · 1 stale"), opened a row per open task saying what moves it (`shared/task-view.ts`), stale and due first with the agent's note, a row opening in place, and the "Send on a schedule…" sheet (the trigger editor). |

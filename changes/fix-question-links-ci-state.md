@@ -1,0 +1,2 @@
+- A question in the chat now shows its note, links and task, the same as in the panel.
+- A PR whose required checks never started says "Checks not started" instead of "Waiting on CI".
