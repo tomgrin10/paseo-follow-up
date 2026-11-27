@@ -95,7 +95,7 @@ test("headline, live line and pill read the same state", () => {
   // The line says why repairs wait, never "sends when the agent is idle" while it is idle.
   assert.equal(liveLine({ ...w, enable_auto_sends: true }, clock).text, "1 repair queued · going out now");
   assert.equal(liveLine({ ...w, enable_auto_sends: true, runtimeBusy: true }, clock).text, "1 repair queued · sends when the main agent's turn ends, so it isn't interrupted");
-  assert.equal(liveLine({ ...w, enable_auto_sends: true, sendWait: "unloaded" }, clock).text, "1 repair queued · the agent is idle; Follow-up doesn't wake it");
+  assert.equal(liveLine({ ...w, enable_auto_sends: true, sendWait: "stale" }, clock).text, "1 repair queued · you haven't messaged this agent lately, so it waits for you");
 });
 
 test("done workspaces read as shipped and sort into Done", () => {

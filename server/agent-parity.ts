@@ -54,6 +54,7 @@ export const RPC_TOOLS: readonly RpcTool[] = [
   { name: "follow_settings", rpc: "follow.follow-settings", kind: "read", input: none },
   { name: "set_follow_settings", rpc: "follow.set-follow-settings", kind: "planned", before: { rpc: "follow.follow-settings" },
     input: z.strictObject({ enable_follow_every: z.boolean().optional(), enable_auto_sends_default: z.boolean().optional(), activeWindowDays: z.number().int().min(1).max(60).optional(),
+      maxAutoSends: z.number().int().min(1).max(10).optional(),
       workspace: z.strictObject({ workspaceId: id, follow: z.boolean().optional(), enable_auto_sends: z.boolean().optional() }).optional(), ...confirm }) },
   { name: "project_settings", rpc: "follow.project-settings", kind: "read", input: none },
   { name: "set_project_tracking", rpc: "follow.set-project-tracking", kind: "planned", before: { rpc: "follow.project-settings" },

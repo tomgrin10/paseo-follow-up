@@ -22,7 +22,7 @@ import { PASEO_UNREACHABLE, deliveryOf, type NewQueueItem, type QueueItem, type 
 import { recordSnapshot } from "./deployment-anchor";
 import { pruneUnsent } from "./batch-archive";
 import { holdSuperseded, liftHold } from "../shared/status";
-import { agentAnswered, changedNotGone, conditionId, holdsQueue, inProgressHolds, IN_PROGRESS_MAX_MS, isCapped, MAIN_WAIT, movedOnReason, personHeld, personPart, QUIET_WAIT, readSince, repairWait, sendDecision, settleUnacknowledged, stillApplies, stuckRepair, UNACKNOWLEDGED_MS, type MainWait } from "../shared/send-decision";
+import { agentAnswered, DEFAULT_MAX_AUTO_SENDS, runningAutoTurns, changedNotGone, conditionId, holdsQueue, inProgressHolds, IN_PROGRESS_MAX_MS, isCapped, MAIN_WAIT, movedOnReason, personHeld, personPart, QUIET_WAIT, readSince, repairWait, sendDecision, settleUnacknowledged, stillApplies, stuckRepair, UNACKNOWLEDGED_MS, type MainWait } from "../shared/send-decision";
 import { isRepair } from "../shared/task-rows";
 export { settleUnacknowledged, UNACKNOWLEDGED_MS, NO_PROGRESS_CAP, repairWait, QUIET_WAIT } from "../shared/send-decision";
 
@@ -37,7 +37,7 @@ export interface Runtime {
   /** Live state of the agents working tasks name (Workspace.taskAgents). Undefined: unknown, so every line naming an agent says "Agent unavailable". */
   taskAgents?: Workspace["taskAgents"];
   guarded?: boolean; guardedInterruptionId?: string;
-  /** The main agent's runtime is loaded (see isLoaded). Undefined means unknown. */
+  /** The main agent's runtime is loaded (see isLoaded). Undefined means unknown. Never gates a send (Q177): a send resumes it. */
   mainLoaded?: boolean;
   /** The main agent had a user message within the active window. Undefined means unknown. */
   mainRecent?: boolean;
@@ -370,11 +370,14 @@ export class Engine {
       }
       let current = findWorkspace(await this.store.snapshot(), original.id);
       // Persist the holds that live only in this refresh, so every surface can say why repairs wait (shared/status.ts).
-      const sendWait = this.autoSendsHeld() ? "setup" : runtime.mainLoaded === false || runtime.mainRecent === false ? "unloaded" : null;
+      // Q177: whether Paseo has the main agent loaded never decides an Auto-send (a send resumes it); the active window
+      // does (stale), and so does the limit on Follow-up-started turns (invariant 133).
+      let sendWait: Workspace["sendWait"] = this.autoSendsHeld() ? "setup" : runtime.mainRecent === false ? "stale" : null;
+      const pending = current.batches.find(b => b.state === "pending" && !isRecovery(b));
+      if (!sendWait && pending && !pending.automatic && sendDecision({ ...current, sendWait: null }, this.now(), { settleMs: this.settleMs, batch: pending }).send && !await this.turnFree(current.id, pending)) sendWait = "limit";
       if ((current.sendWait ?? null) !== sendWait) { await this.store.mutateWorkspace(original.id, w => { w.sendWait = sendWait; }); current = findWorkspace(await this.store.snapshot(), original.id); }
       // The refresh's runtime state is persisted above, so this reads the same inputs as every surface's line
-      // (shared/send-decision.ts). It never loads an idle agent (sendWait "unloaded") or sends the Done check.
-      const pending = current.batches.find(b => b.state === "pending" && !isRecovery(b));
+      // (shared/send-decision.ts). It never sends past the active window or the limit, or sends the Done check.
       if (pending && sendDecision(current, this.now(), { settleMs: this.settleMs, batch: pending }).send)
         await this.dispatch(current.id, pending.id, true).catch(async (error: unknown) => {
           // A refusal is the line's reason until the next try (one per settle window), never swallowed.
@@ -439,6 +442,25 @@ export class Engine {
       await this.store.mutateWorkspace(row.id, w => applyDiscovery({ ...current, workspaces: current.workspaces.map(x => x.id === w.id ? w : x) }, [row], this.now()));
     }
     return true;
+  }
+  /**
+   * Invariant 133: a free Auto-send turn for this batch. Turns running (runningAutoTurns) plus older batches already
+   * waiting for one (sendWait "limit", still pending elsewhere) stay under the limit, so turns go oldest first.
+   */
+  private async turnFree(workspaceId: string, batch: Batch): Promise<boolean> {
+    const state = await this.store.snapshot();
+    const limit = state.maxAutoSends ?? DEFAULT_MAX_AUTO_SENDS;
+    const now = this.now();
+    const live = state.workspaces.filter(w => w.enable_tracking && !w.archived && !w.dormant);
+    const ahead = live.filter(w => w.id !== workspaceId && w.sendWait === "limit" && w.enable_auto_sends &&
+      w.batches.some(b => b.state === "pending" && !isRecovery(b) && !b.automatic && b.createdAt < batch.createdAt)).length;
+    // In flight: Follow-up's queue still moves it. Without a queue (never in the daemon) a dispatched batch counts until it's out.
+    const inFlight = (w: { id: string }, b: { id: string; state: string }) => {
+      if (!this.queue) return b.state === "pending" || b.state === "sending";
+      const item = this.queue.get(repairItemId(w.id, b.id));
+      return !!item && ["queued", "sending", "uncertain"].includes(item.state);
+    };
+    return runningAutoTurns(live, now, inFlight) + ahead < limit;
   }
   async activate(workspaceId: string): Promise<Workspace> {
     if (this.stopped || !this.gateway.discover) throw new Error("Workspace tracking is unavailable");
@@ -577,7 +599,13 @@ export class Engine {
     // Already queued: a Send (or a due auto-send) tries it now instead of waiting out its retry time.
     if (queued && !["sent", "cancelled"].includes(queued.state)) { if (!automatic || queued.nextAt) await this.queue.retry(id); }
     else this.queue.enqueue({ ...this.repairItem(current, batch, automatic), ...(automatic ? {} : { nextAt: new Date(this.now()).toISOString() }) });
-    if (batch.refusal) await this.store.mutateWorkspace(workspaceId, w => { const b = w.batches.find(b => b.id === batchId); if (b?.refusal) delete b.refusal; });
+    // Invariant 133: an Auto-send takes a turn until its turn ends; the developer's Send takes none.
+    if (batch.refusal || !!batch.automatic !== automatic) await this.store.mutateWorkspace(workspaceId, w => {
+      const b = w.batches.find(b => b.id === batchId);
+      if (!b) return;
+      if (b.refusal) delete b.refusal;
+      if (automatic) b.automatic = true; else if (b.automatic) delete b.automatic;
+    });
     return findWorkspace(await this.store.snapshot(), workspaceId);
   }
   private repairItem(w: Workspace, b: Batch, automatic: boolean): NewQueueItem {
@@ -656,11 +684,12 @@ export class Engine {
         case "uncertain": b.state = "uncertain"; b.result = "Delivery wasn't confirmed. Follow-up reads the agent's chat before sending it again, so it never arrives twice."; break;
         case "failed":
           if (item.gone) { b.state = "pending"; b.result = ""; b.recipientAgentId = null; w.goneAgent = { agentId: item.gone, at, reason: item.reason ?? "" }; w.runtimeReason = GONE_REASON; }
-          else { b.state = "uncertain"; b.result = "Follow-up couldn't confirm the agent got it. Check the agent's chat, then retry."; }
+          // It waits on the developer now, so it no longer holds an Auto-send turn (invariant 133).
+          else { b.state = "uncertain"; b.result = "Follow-up couldn't confirm the agent got it. Check the agent's chat, then retry."; delete b.automatic; }
           break;
         case "cancelled":
           if (isRecovery(b) && b.state !== "cancelled") { b.state = "blocked"; b.result = item.reason ?? "Recovery couldn't start."; }
-          else if (["pending", "sending"].includes(b.state)) { b.state = "pending"; b.refusal = { reason: item.reason ?? "it couldn't go out", at }; }
+          else if (["pending", "sending"].includes(b.state)) { b.state = "pending"; b.refusal = { reason: item.reason ?? "it couldn't go out", at }; delete b.automatic; }
           break;
       }
     });

@@ -37,10 +37,41 @@ export type SendDecision = {
 };
 
 /**
- * The idle wait in one sentence, said the same on every surface (Needs you, Home, the panel, the inbox). Say it once
- * (Q51): never the agent's title, which is usually the row's own title.
+ * Past the active window (Settings → Following → Advanced, `activeWindowDays`): the developer hasn't messaged the main agent in that
+ * long, so a repair waits for their Send (Q177). Loaded or not never decides this: that is Paseo's detail.
  */
-export const IDLE_REASON = "the agent is idle; Follow-up doesn't wake it";
+export const STALE_REASON = "you haven't messaged this agent lately, so it waits for you";
+/** Invariant 133: as many Follow-up-started turns as the limit already run; it goes, oldest first, as one ends. */
+export const LIMIT_REASON = "waits until another workspace's repair finishes";
+/** The most Follow-up-started turns running at once, machine-wide (Settings → Following → Advanced, `maxAutoSends`). */
+export const DEFAULT_MAX_AUTO_SENDS = 2;
+export const MAX_AUTO_SENDS_RANGE = { min: 1, max: 10 } as const;
+/** After a send, how long the turn counts before Paseo has reported it running (the next refresh reads mainBusy). */
+export const TURN_START_MS = 30_000;
+/**
+ * Invariant 133: an Auto-send's turn is running. It took a turn when it was dispatched (`Batch.automatic`) and holds it
+ * only while Follow-up itself is moving it or the main agent works on it:
+ * - not out yet (pending, sending, uncertain): only while Follow-up's queue still has it in flight (`inFlight`: queued,
+ *   sending, or uncertain while it reconciles the chat). A batch that waits on the developer (a failed send's "check the
+ *   agent's chat, then retry", a refusal, a hold) is the developer's, never a turn: two of them would otherwise stop
+ *   Auto-send everywhere at the default limit;
+ * - out (sent): until the batch is acknowledged (it leaves `sent`) or the main agent's turn ends (no main-agent wait,
+ *   past TURN_START_MS since the send's last activity).
+ * The developer's Send, a ride-along and the messages an agent asked for (time triggers, wait_for_checks) never set
+ * `automatic`, so they never count.
+ */
+export type InFlight = (w: Pick<Workspace, "id">, b: Pick<Batch, "id" | "state">) => boolean;
+export function autoTurnRunning(w: Pick<Workspace, "id" | "mainBusy" | "runtimeBusy" | "backgroundBusy" | "enable_tracking" | "archived" | "dormant">, b: Pick<Batch, "id" | "automatic" | "state" | "sentAt" | "activityAt">, now: number, inFlight: InFlight): boolean {
+  if (!b.automatic || !w.enable_tracking || w.archived || w.dormant) return false;
+  if (["pending", "sending", "uncertain"].includes(b.state)) return inFlight(w, b);
+  if (b.state !== "sent") return false;
+  if (mainWait(w)) return true;
+  const at = Date.parse(b.activityAt ?? b.sentAt ?? "");
+  return Number.isFinite(at) && now - at < TURN_START_MS;
+}
+/** Invariant 133: Auto-send turns running now, across every workspace. */
+export const runningAutoTurns = (ws: readonly Workspace[], now: number, inFlight: InFlight) =>
+  ws.reduce((n, w) => n + w.batches.filter(b => !recoveryBatch(b) && autoTurnRunning(w, b, now, inFlight)).length, 0);
 const iso = (ms: number) => new Date(ms).toISOString();
 /** The reason the settle gives: why "in a minute" and not now (Tom, 2026-11-12: "sending in a moment? why not now?"). */
 export const SETTLE_REASON = "waits a minute so new changes join the same message";
@@ -109,12 +140,14 @@ export function sendDecision(w: Workspace, now: number, o: { settleMs?: number; 
   if (openBatch) return wait("follow-up", "waits for the last message to finish");
   if (w.dormant) return wait("you", "waits until the workspace is active again");
   if (w.sendWait === "setup") return wait("follow-up", "sends once setup finishes");
-  if (w.sendWait === "unloaded") return wait("you", IDLE_REASON);
+  // "unloaded" is what releases before Q177 stored for the same wait; a refresh rewrites it.
+  if (w.sendWait === "stale" || w.sendWait === "unloaded") return wait("you", STALE_REASON);
   if (prUnread) return wait("follow-up", `waits until GitHub answers for #${prUnread.number}${prUnread.error ? ` (${prUnread.error})` : ""}, so the message isn't based on stale PRs`);
   // A refused send is retried once per settle window, never every refresh.
   if (b.refusal && now - Date.parse(b.refusal.at) < settleMs) return wait("follow-up", `didn't send: ${b.refusal.reason} · tries again shortly`, iso(Date.parse(b.refusal.at) + settleMs));
   const due = Date.parse(b.createdAt) + settleMs;
   if (now < due) return { send: false, waitingOn: null, reason: SETTLE_REASON, eta: iso(due), canSendNow };
+  if (w.sendWait === "limit" && !b.automatic) return wait("follow-up", LIMIT_REASON);
   return { send: true, waitingOn: null, reason: "going out now", eta: iso(now), canSendNow };
 }
 

@@ -77,7 +77,8 @@ test("every refresh does what the line said before it", async t => {
     await f.engine.tick();
     const line = await f.line(), sent = f.sends.length > 0;
     // Past the settle, "sending now" means this refresh sent; anything else names what it waits on.
-    assert.equal(sent, name === "idle", `${name}: sent=${sent}`);
+    // Q177: an unloaded agent is sent to like any other (the send resumes it).
+    assert.equal(sent, name === "idle" || name === "unloaded", `${name}: sent=${sent}`);
     if (!sent) assert.ok(!says(line), `${name}: "${line}" while nothing sent`);
     assert.deepEqual(violations(await f.get(), f.now()), [], name);
   }

@@ -226,7 +226,7 @@ Queued with when it retries, Retrying, Failed with **Retry**, Not sent) and clea
   or queued to go out on its own (clock glyph), never Running's spinner. `sendingOf` gives each row its line (count,
   then when and why, never the workspace's or agent's title), and Send now only where the server would take the
   developer's Send and the send doesn't wait on them; a send that waits on the developer is a Needs-you item only
-  (invariant `sending-never-waits-on-you`), said once: "Send · The agent is idle; Follow-up doesn't wake it", or with
+  (invariant `sending-never-waits-on-you`), said once: "Send · You haven't messaged this agent lately, so it waits for you", or with
   Auto off "Send · 2 tasks ready · auto-send is off here", never the row's title. Send now is outlined: filled is only for what waits on the developer.
   A queued message after a send the agent never acknowledged says "no reply to the last message, so they go again";
   a refused send says it tries again shortly. `autoSendHold` is the one machine-wide hold line (the resource

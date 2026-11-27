@@ -14,12 +14,15 @@ loaded for an hour.
 - **Read from disk instead.** `server/transcript.ts` reads an unloaded agent's recent steps from the provider
   transcript on disk, read-only: the last 512 KB, never credentials.
 - **The active window.** `server/agent-load.ts` defines it (`workspaceActive`, `activeWindowMs`; default
-  `DEFAULT_ACTIVE_WINDOW_DAYS` = 3 days) and `conversationGone`. Dormant workspaces get no observation, and auto-send never
-  targets an unloaded or long-unused agent.
-- **Requested messages arrive.** A time trigger or `wait_for_checks` verdict is the exception: sending resumes
-  the agent even when its runtime was unloaded (`closed`), including after an hour idle. A running turn waits;
-  an archived workspace, archived agent or gone agent cancels. Nudges, repairs, briefs and auto-sends keep the
-  normal rule. See invariants 1, 71 and 121.
+  `DEFAULT_ACTIVE_WINDOW_DAYS` = 3 days, Settings → Following → Advanced) and `conversationGone`. Dormant workspaces
+  get no observation, and Auto-send never targets a main agent the developer hasn't messaged within the window. Loaded
+  or not doesn't decide a send (Q177): a send resumes an unloaded agent, which is the point of sending.
+- **A few Auto-send turns at a time.** At most `maxAutoSends` (default 2, Settings → Following → Advanced) turns
+  Auto-send started run at once, machine-wide, so resuming many agents never floods Paseo (invariant 133). The rest
+  wait, oldest first.
+- **Requested messages arrive.** A time trigger or `wait_for_checks` verdict resumes the agent even when its runtime
+  was unloaded (`closed`), including after an hour idle, outside the window and the limit. A running turn waits; an
+  archived workspace, archived agent or gone agent cancels. See invariants 1, 71, 121 and 133.
 - **Ask only when needed.** Provider subagents are asked about only when a send is due or awaiting
   acknowledgment, or completion is being checked.
 - **Finding what woke an agent.** Every wake goes through a timeline or subagent read: `paseo.agents.ref(id).timeline`

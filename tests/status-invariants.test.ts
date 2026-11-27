@@ -90,7 +90,7 @@ const merged = (deployment: "latched" | "unconfirmed" | "none") => pr({
 
 const AGENTS: Record<string, Partial<Workspace>> = {
   idle: {}, running: { runtimeBusy: true }, background: { backgroundBusy: true }, unavailable: { runtimeReason: "Agent state unavailable; refresh will retry" },
-  gone: { goneAgent: { agentId: "main-agent", at: at(0), reason: "No conversation found" } as Workspace["goneAgent"] }, unloaded: { sendWait: "unloaded" }, setup: { sendWait: "setup" }, dormant: { dormant: true } as Partial<Workspace>,
+  gone: { goneAgent: { agentId: "main-agent", at: at(0), reason: "No conversation found" } as Workspace["goneAgent"] }, stale: { sendWait: "stale" }, limit: { sendWait: "limit" }, setup: { sendWait: "setup" }, dormant: { dormant: true } as Partial<Workspace>,
 };
 const BATCHES: Record<string, Batch[]> = {
   none: [], "repairs-queued": [batch("repairs", "pending")], "repairs-settling": [batch("repairs", "pending", { createdAt: at(5_000) })], "repairs-sent": [batch("repairs", "sent")],
@@ -154,7 +154,7 @@ test("regression wks_4b27f268: the same workspace once Done reads Done everywher
 });
 
 test("regression 2026-11-10 critique: repairs queued for an idle agent Follow-up won't wake are yours to send", () => {
-  const w = workspace({ enable_auto_sends: true, sendWait: "unloaded", prs: [pr()], batches: [batch("repairs", "pending")] });
+  const w = workspace({ enable_auto_sends: true, sendWait: "stale", prs: [pr()], batches: [batch("repairs", "pending")] });
   assert.deepEqual(violations(w, clock), []);
   assert.equal(trackedGroup(w, clock), "needs");
   assert.ok(needsYou(w, clock).some(i => i.kind === "send" && !i.finish), "a Send for the queued repair");
