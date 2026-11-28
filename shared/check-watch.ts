@@ -41,7 +41,7 @@ export type WatchedPr = {
   key: string; repo: string; number: number; error: string | null;
   snapshot: {
     url: string; state: "OPEN" | "MERGED" | "CLOSED"; head: string; conflict: boolean; complete: boolean; observedAt: string;
-    failedChecks: string[]; otherFailedChecks?: string[]; checksPending: boolean; checksRunning?: boolean;
+    failedChecks: string[]; otherFailedChecks?: string[]; checksPending: boolean; checksRunning?: boolean; checksHead?: string | null;
   } | null;
 };
 export type VerdictKind = "passed" | "failed" | "merged" | "closed" | "conflict" | "expired" | "gone";
@@ -76,6 +76,7 @@ export function verdictText(kind: VerdictKind, pr: WatchedPr, extra: { failed?: 
  * an older read may predate the agent's push. Never throws.
  *
  * - merged, closed, a merge conflict: at once.
+ * - check results read for a commit other than the head (`checksHead`): nothing yet, keep waiting.
  * - a required check failed: at once (the agent has to fix it whatever else runs); other failures once nothing runs.
  * - all finished and none failed: "passed", once checks were seen running on this head or the head has been quiet
  *   WATCH_SETTLE_MS (`quietSince`: when the PR's content last changed, or null when unknown).
@@ -92,6 +93,8 @@ export function watchVerdict(watch: CheckWatch, pr: WatchedPr | undefined, now: 
   if (s.state === "MERGED") return end("merged", pr);
   if (s.state === "CLOSED") return end("closed", pr);
   if (s.conflict) return end("conflict", pr);
+  // checks-belong-to-the-current-head: results read for another commit say nothing about this head; keep waiting.
+  if (s.checksHead && s.checksHead !== s.head) return keep();
   const running = s.checksRunning ?? s.checksPending;
   if (s.failedChecks.length) return end("failed", pr, { failed: [...s.failedChecks, ...(s.otherFailedChecks ?? [])], running });
   if (running) return watch.runningHead === s.head ? keep() : keep({ ...watch, runningHead: s.head });

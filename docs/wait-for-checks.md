@@ -56,6 +56,13 @@ and the developer decides when those go out.
 - **A waited-for failure is sent once** (`a-waited-for-failure-is-sent-once`). When the agent waiting is the main agent,
   Auto-send is on and a repair batch carrying this PR's checks task is queued or out, the repair is the one message and
   the watch ends quietly (`coveredByRepair`). With Auto-send off, or a contributor waiting, the watch sends it.
+- **Checks belong to the current head** (`checks-belong-to-the-current-head`, invariant 152). A pass, a failure or a
+  conflict is reported only for results read for the PR's head at a read asked after the wait began. The full read and
+  the probe ask for the rollup's commit (`commits(last:1){commit{oid}}`) beside `headRefOid`; when they differ (after
+  a push GitHub's commit list can still end at the old head) `parsePr` reads the checks as not reported yet
+  (`checksRunning`, `checksPending`, `checksHead` naming the other commit), so the message, Needs you and the PR row
+  all keep waiting, and the commit catching up is a change the probe sees. `observedAt` is when the query was sent,
+  not answered, so a read in flight across the agent's push predates the watch. Guarded by `tests/checks-head.test.ts`.
 - **The tool call owns its own verdict.** While the call answers, its watches are `answering` and passes skip them, so a
   verdict in the reply isn't also messaged. A worker that stops mid-call clears the flag on load.
 
