@@ -143,6 +143,9 @@ row) for quick moves without opening it. `rowMenu()` in `shared/row-menu.ts` lis
 4. Open chat, and Ask the Overseer about this (it pre-fills the omnibox and doesn't send).
 5. Copy branch name, Rename title with AI…, Rewrite summary, Make <agent> the main agent, Stop
    following… (which asks first), and Archive workspace….
+6. Report a bug…: the Report sheet, already about that workspace (invariant 154,
+   [report-issue.md](report-issue.md#about-a-workspace)). Last, in its own section, on every row with a workspace,
+   so the panel's ⋯ has it too.
 
 Archive workspace… is on any row whose workspace Paseo lists (tracked or not) when the host's Paseo API has
 `workspaces.archive`; a row Follow-up calls ready to archive (Home's "N to archive") leads with it, first in triage,

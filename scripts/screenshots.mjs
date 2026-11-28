@@ -27,6 +27,7 @@ import { promisify } from "node:util";
 import { openSync, existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { assertNoRealNames } from "./real-names.mjs";
 import { createServer } from "node:net";
@@ -1481,6 +1482,53 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   if (only.includes("feeds")) return checkFeeds({ seeded, call, cli, home });
   if (argv.includes("--whats-new-review")) return whatsNewReview({ shoot, seeded, plugin, home, cli, call });
   const billing = WORKSPACES.find(w => w.key === "billing");
+  // Review evidence for Report a bug… (invariant 154; not README images): the panel's ⋯ with the
+  // entry, the row menu on a phone, the sheet already about the workspace; desktop and phone, light and dark. Each shot
+  // fails on any horizontal overflow (bounded's own check).
+  if (argv.includes("--report-panel-review")) {
+    const panelOpen = async page => {
+      await openChat(page, "Billing retries", billing.prompt);
+      await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+      await page.getByRole("button", { name: "More actions for this workspace" }).first().waitFor();
+    };
+    const entry = page => page.getByRole("menuitem", { name: "Report a bug…" }).filter({ visible: true }).first();
+    const noOverflow = async page => {
+      const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      if (over > 0) throw new Error(`horizontal overflow: ${over}px`);
+    };
+    const sheet = vp => async page => {
+      await panelOpen(page);
+      await page.getByRole("button", { name: "More actions for this workspace" }).first().click();
+      await entry(page).click();
+      await page.getByText("About Billing retries", { exact: true }).last().waitFor();
+      if (vp !== DESKTOP) { await page.setViewportSize(vp); await page.getByText("About Billing retries", { exact: true }).last().waitFor(); }
+      await noOverflow(page);
+    };
+    for (const sc of ["light", "dark"]) {
+      await shoot(`report-panel-more-${sc}`, DESKTOP, sc, async page => {
+        await panelOpen(page);
+        await page.getByRole("button", { name: "More actions for this workspace" }).first().click();
+        await entry(page).waitFor(); await entry(page).hover(); await noOverflow(page);
+      });
+      await shoot(`report-panel-sheet-${sc}`, DESKTOP, sc, sheet(DESKTOP));
+      await shoot(`report-panel-sheet-phone-${sc}`, PHONE, sc, sheet(PHONE));
+      // The dry run the agent shows before any yes (scripts/report-preview.ts: the real Reporter, fictional data, offline).
+      const { stdout: preview } = await exec("npx", ["tsx", "scripts/report-preview.ts", sc], { cwd: fileURLToPath(new URL("..", import.meta.url)), maxBuffer: 8 << 20 });
+      for (const [tag, vp] of [["", DESKTOP], ["-phone", PHONE]]) for (const part of ["top", "workspace"]) await shoot(`report-panel-dryrun${tag}-${part}-${sc}`, vp, sc, async page => {
+        if (vp !== DESKTOP) await page.setViewportSize(vp);
+        await page.setContent(preview); await noOverflow(page);
+        // "workspace": the This workspace section at the top of the view, the only part the workspace adds.
+        if (part === "workspace") await page.evaluate(() => [...document.querySelectorAll("p")].find(p => p.textContent === "This workspace")?.scrollIntoView({ block: "start" }));
+      });
+      await shoot(`report-panel-menu-phone-${sc}`, PHONE, sc, async page => {
+        // Opening a chat sizes the page for desktop: open the panel there, then narrow it to the phone and open ⋯.
+        await panelOpen(page); await page.setViewportSize(PHONE);
+        await page.getByRole("button", { name: "More actions for this workspace" }).filter({ visible: true }).first().click();
+        await entry(page).scrollIntoViewIfNeeded(); await entry(page).waitFor(); await noOverflow(page);
+      });
+    }
+    return;
+  }
   // Review evidence for Rename title with AI (not README images): the row menu item, the panel's More button and menu, the
   // dialog suggesting, ready, edited and failed, the toast with Undo and the Undo link; desktop and phone, dark and light.
   if (argv.includes("--rename-review")) {

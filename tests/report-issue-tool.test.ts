@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { actionTools, callableTools } from "../server/mcp.mjs";
 import { nativeTools } from "../server/native-tools";
-import { MAX_DESCRIPTION, reportToolDescription, reportToolProperties } from "../server/report-issue";
+import { MAX_DESCRIPTION, reportToolDescription, reportToolPropertiesFor } from "../server/report-issue";
 import { reportPrompt } from "../server/report-issue-adapter";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -17,7 +17,7 @@ test("report-issue-costs-no-standing-context: the bridge's tuple is the module's
   assert.ok(tuple, "report_issue is an action tool");
   assert.equal(tuple[1], reportToolDescription("Follow-up"));
   assert.ok(tuple[1].length <= MAX_DESCRIPTION, `${tuple[1].length} chars`);
-  assert.deepEqual(Object.keys(tuple[3]).sort(), Object.keys(reportToolProperties).sort());
+  assert.deepEqual(Object.keys(tuple[3]).sort(), Object.keys(reportToolPropertiesFor("workspace_id")).sort());
   assert.deepEqual(tuple[4], []);
 });
 

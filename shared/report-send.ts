@@ -50,7 +50,15 @@ export function pickerRows(t: SendTargets): { pinned: PickerRow[]; agents: Picke
 }
 
 /** What Send goes to before the developer picks: today's rule, unchanged. */
-export function defaultChoice(t: SendTargets): string | null { return t.defaultId ?? (t.newAgentWorkspace ? NEW_AGENT : null); }
+/**
+ * The default pick: the best agent, else a new agent. A report about a workspace (`about`) starts a new agent in that
+ * workspace instead, so the agent the workspace depends on isn't pulled into diagnosing Follow-up; with no workspace
+ * to start one in, the best agent as usual.
+ */
+export function defaultChoice(t: SendTargets, about: string | null = null): string | null {
+  if (about && t.newAgentWorkspace?.id === about) return NEW_AGENT;
+  return t.defaultId ?? (t.newAgentWorkspace ? NEW_AGENT : null);
+}
 
 /**
  * A report's new workspace: "<Kind>: <first words>", at most 60 characters, cut at a word with "…". The words are the
@@ -69,3 +77,14 @@ export function reportWorkspaceTitle(kind: ReportKind, text: string, error?: str
   const words = (space > room / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:.!?-]+$/, "");
   return `${prefix}${words}…`;
 }
+
+/**
+ * The workspace a report is about (the row menu's Report a bug…), while it applies: only for a bug
+ * ("if needed": an idea or feedback isn't about one workspace's state) and until the developer removes it. Its id goes
+ * with Send, and the agent reads that workspace's Follow-up state locally; the public issue gets only structural rows.
+ */
+export function reportAbout(request: { about?: string | null }, kind: "bug" | "feature" | "feedback", removed: boolean): string | null {
+  return request.about && kind === "bug" && !removed ? request.about : null;
+}
+/** The About line's words: what goes where, in one breath. */
+export const ABOUT_LINE = "The agent reads this workspace's Follow-up state. The issue gets only its counts and states, never its titles or text.";

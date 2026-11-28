@@ -341,7 +341,7 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    `report-issue-never-carries-secrets`). `report_issue`'s description is one line of at most 150 chars; its procedure
    comes back from the first call, and nothing is added to hooks or instructions. The dry run only reads; filing needs
    `confirm` with the plan id (and `screenshot_consent` when there are screenshots). Everything an issue carries goes
-   through one Redactor. Guarded by `tests/report-issue.test.ts` and `tests/report-issue-redact.test.ts`
+   through one Redactor. A report about one workspace files only its structure (invariant 154). Guarded by `tests/report-issue.test.ts` and `tests/report-issue-redact.test.ts`
    ([docs/report-issue.md](docs/report-issue.md)).
 12. **A rename is always undoable and never wakes an agent** (`rename-is-always-undoable`,
    `rename-never-wakes-an-agent`). Rename title with AI renames only on the developer's Rename (or an agent's confirmed
@@ -1972,6 +1972,20 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    `tests/placeholder-fit.test.ts` (the real `Field` and `QueryField` under the native stand-in, widths 40-360 at font
    scales 0.85-2) and `scripts/screenshots.mjs --only search-wrap` (Home at 360 and 390, normal and large font, light
    and dark; every visible placeholder measured against its room; writes `search-wrap.json`).
+
+154. **A workspace report files only structure** (`a-workspace-report-files-only-structure`). Report a bug… (the last
+   item of the shared row menu, so the panel's ⋯, Home and the sidebar all have it) opens the one Report sheet with an
+   "About <workspace>" line (bugs only, removable) and a new agent in that workspace as the default Send to; Send
+   carries the workspace id and the prompt tells the agent to pass `workspace_id` to `report_issue`. The agent gets
+   Follow-up's view of that workspace locally to diagnose (status, PRs, tasks, questions, agents, recent warnings
+   naming it). The public issue gets one "This workspace" section built from structure only (states, counts, timings,
+   check and conflict states, error codes; `workspaceSection`, `server/report-issue-adapter.ts`), never a title, goal,
+   summary, task or question text, branch or repository name, id or transcript, and that workspace's own text and id
+   join the report's redaction list, so a quote in a field or a log line is replaced too. The shared module knows only
+   one optional hook (`subject: { param, read }`). 2026-11-28, the developer: "add an option to report a bug straight
+   from the follow up panel ... that will also attach the agent data if needed from that workspace"; reports go to a
+   public repository and workspaces are often work. Guarded by `tests/report-from-panel.test.ts` (a workspace seeded
+   with work-looking text: none of it, nor its id, reaches the body).
 
 ## Bugs
 

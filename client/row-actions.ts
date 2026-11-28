@@ -9,6 +9,7 @@ import { rowMenu, type LaterChoice, type RowMenuItem } from "../shared/row-menu"
 import type { Workstream } from "../shared/home";
 import { aboutKey } from "./about";
 import { openRename } from "./rename";
+import { openReportSheet } from "./report-issue";
 import { bindToast, runAction } from "./toast-store";
 import type { HomeSources } from "./home-data";
 
@@ -97,6 +98,7 @@ export function useRowMenu(host: RowMenuHost) {
         case "unpin": return runAction({ label: "Unpin", run: async () => { await deps().setPinned!(workspaceId, false); }, success: `Unpinned ${s.title}`, failure: `Couldn't unpin ${s.title}` }, `pin:${workspaceId}`);
         case "copy_branch": return runAction({ label: "Copy branch", run: () => copyText(arg), success: "Branch name copied", failure: "Couldn't copy here" });
         case "rewrite_summary": return runAction({ label: "Rewrite summary", run: async () => cache.setQueryData(aboutKey(workspaceId), await about({ workspaceId, open: true, refresh: true })), success: "Summary rewritten" }, `about:${workspaceId}`);
+        case "report": return runAction({ label: "Report a bug", run: async () => openReportSheet({ kind: "bug", workspaceId, about: workspaceId, aboutTitle: s.title }), success: null });
         case "rename_ai": return runAction({ label: "Rename title with AI", run: async () => openRename({ workspaceId, title: s.title }), success: null });
         case "make_main": return runAction({ label: "Make main agent", run: async () => { await control({ workspaceId, mainAgentId: arg }); after(); }, success: `${s.agent ?? "That agent"} is now the main agent` }, `main:${workspaceId}`);
         case "stop_following": return runAction({ label: "Stop following", run: async () => { await setFollow({ workspace: { workspaceId, follow: false } }); after(); }, success: `Stopped following ${s.title}` }, `follow:${workspaceId}`);

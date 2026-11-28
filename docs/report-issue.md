@@ -111,6 +111,8 @@ directly; it doesn't need to hand a prompt to itself), `follow.report-issue-link
 - **`/report-issue`** in an agent's composer: with words, they go straight to that agent; without, the sheet opens
   with that agent picked.
 - **Error toasts:** every Follow-up error toast gets **Report this**, which opens the sheet with the error attached.
+- **The row menu:** **Report a bug…**, last in the menu the panel's ⋯, Home rows and the sidebar
+  share. The sheet opens as a bug, already about that workspace ([About a workspace](#about-a-workspace)).
 - **The sheet** (`ReportSheet`, a Paseo Modal: a dialog on desktop, a bottom sheet on phones): Bug / Idea / Feedback,
   one text box, **Send to**, the trust line, then Send. Sent shows who got it ("Started <title>" for a new agent or
   workspace) with Open the chat. With nowhere to send it (no workspace at all), Open on GitHub opens the prefilled
@@ -132,14 +134,37 @@ The picker (`pickerRows`, `shared/report-send.ts`) pins the new rows first, then
 2. **A new agent in <workspace>** ("Starts there, with the default model").
 3. The agents: the default first (the agent the sheet opened for, then that workspace's, then main agents).
 
-The default pick is unchanged: the best agent, else a new agent; a new workspace is never picked for the developer.
+The default pick is the best agent, else a new agent; a report about a workspace picks a new agent in it
+([About a workspace](#about-a-workspace)); a new workspace is never picked for the developer.
 On desktop the agents scroll inside the picker (about three and a half rows) under the pinned rows. On phones they
 don't scroll by themselves: Paseo's bottom sheet coordinates one scrollable, its body, so the sheet scrolls and the
 new rows come first (`pickerScrolls`, invariant `sheet-content-scrolls-with-the-sheet`).
 
+### About a workspace
+
+Invariant 154 (`a-workspace-report-files-only-structure`). Opened from the row menu, the sheet shows "About
+<workspace>" above the text box: the agent reads that workspace's Follow-up state to diagnose, and the issue gets only
+counts and states. It applies to a bug only (switching to Idea or Feedback drops it); × removes it and leaves "Include
+<workspace>" to bring it back. Send to defaults to a new agent in that workspace (`defaultChoice` with `about`), so the
+main agent the workspace depends on isn't pulled into diagnosing Follow-up; the developer can still pick any agent. Send
+carries `workspaceId`, and the prompt asks the agent to pass `workspace_id` on every `report_issue` call.
+
+The shared module has one optional hook for this, `subject: { param, read }` (`ReportPluginConfig`): the tool takes
+`param` (Follow-up: `workspace_id`) and `read(id)` returns three parts. Follow-up's is `workspaceSubject`
+(`server/report-issue-adapter.ts`):
+
+| Part | Where it goes | What it holds |
+| --- | --- | --- |
+| `local` | the first call's reply only, for the agent | title, goal, status, PRs (repo, number, title, state, checks, conflict, review, error), tasks, open questions, the last batches, agents (from the directory, never loaded), recent `[follow-up]` warnings naming the workspace |
+| `section` | "This workspace" in the bug's diagnostics, redacted again | status kind, following, Auto-send, hold, repairs wait, PR counts by state and draft, checks, conflicts and reviews of open PRs, workflow, refresh errors as codes, last PR read, tasks by status, question counts, batches by state, agent count by provider and the main agent's status, Done age, warning count by code |
+| `privateTitles` | this report's redaction list | the workspace's id, title, goal, Done summary, repository, PR titles and branches, task titles and evidence, question text and background |
+
+So a quote in a field, or a log line in the recent-errors block, is replaced as well. The section is built from
+structure only: nothing in it reads free text. A feature request or feedback carries no section (bugs only).
+
 An agent does the same with `report_send` (planned: the dry run shows `follow.report-issue-targets`' answer and the
 target; `confirm` runs the sheet's Send). Exactly one target: `agentId`, `newAgentWorkspaceId` or
-`newWorkspaceProjectId`. An agent reporting for itself uses `report_issue` instead.
+`newWorkspaceProjectId`; `workspaceId` names the workspace the report is about. An agent reporting for itself uses `report_issue` instead.
 
 The repository has issue forms for people filing by hand: `.github/ISSUE_TEMPLATE/bug_report.yml`,
 `feature_request.yml` and `config.yml`.

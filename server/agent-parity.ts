@@ -162,7 +162,7 @@ export const RPC_TOOLS: readonly RpcTool[] = [
   // Report an issue's Send: to an agent, a new agent in a workspace, or a new workspace (server/report-send.ts). The dry
   // run shows the targets the sheet offers; an agent reporting for itself files with report_issue instead.
   { name: "report_send", rpc: "follow.report-issue-send", kind: "planned", before: { rpc: "follow.report-issue-targets", input: () => ({}) },
-    input: z.strictObject({ kind: reportKindSchema.optional(), text: z.string().max(8000).optional(), error: z.string().max(2000).nullable().optional(), agentId: id.optional(), newAgentWorkspaceId: id.optional(), newWorkspaceProjectId: id.optional(), ...confirm }),
+    input: z.strictObject({ kind: reportKindSchema.optional(), text: z.string().max(8000).optional(), error: z.string().max(2000).nullable().optional(), agentId: id.optional(), newAgentWorkspaceId: id.optional(), newWorkspaceProjectId: id.optional(), workspaceId: id.nullable().optional(), ...confirm }),
     guard: (a, caller) => {
       if (a.confirm) return null;
       if (!a.kind || a.text === undefined) return "report_send: give kind (bug, feature or feedback) and text (the developer's words).";

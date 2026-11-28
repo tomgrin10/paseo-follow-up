@@ -4,7 +4,7 @@ import { Pressable, Text } from "./text";
 import { openExternalUrl, useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
 import { Icon, Modal, ScrollView } from "@getpaseo/plugin/client/ui";
 import { reportLinkRpc, reportSendRpc, reportTargetsRpc } from "../shared/contracts";
-import { NEW_AGENT, NEW_WORKSPACE, PICKER_MAX, defaultChoice, pickerScrolls, newAgentLines, pickerRows, targetLines, type PickerRow, type SendTargets } from "../shared/report-send";
+import { ABOUT_LINE, NEW_AGENT, NEW_WORKSPACE, PICKER_MAX, reportAbout, defaultChoice, pickerScrolls, newAgentLines, pickerRows, targetLines, type PickerRow, type SendTargets } from "../shared/report-send";
 import { errorText } from "../shared/errors";
 import { BRAND_ICONS } from "./brand-icons";
 import { Button, SubmitScope, text } from "./kit";
@@ -19,7 +19,9 @@ import { Field } from "./field";
  * interviews them, dry-runs follow_report_issue and shows the exact issue before filing it.
  */
 export type ReportKind = "bug" | "feature" | "feedback";
-export type ReportRequest = { kind?: ReportKind; error?: string | null; at?: number; agentId?: string; workspaceId?: string };
+export type ReportRequest = { kind?: ReportKind; error?: string | null; at?: number; agentId?: string; workspaceId?: string;
+  /** The workspace the report is about (the row menu's Report a bug…) and its title, for the About line. */
+  about?: string; aboutTitle?: string };
 
 const slot = createHostSlot<ReportRequest>();
 /**
@@ -78,13 +80,16 @@ export function ReportSheet({ request, theme, layout, openAgent, onClose }: { re
   const [choosing, setChoosing] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: "edit" });
   const [targets, setTargets] = useState<SendTargets | null>(null);
+  const [aboutRemoved, setAboutRemoved] = useState(false);
+  const about = reportAbout(request, kind, aboutRemoved);
+  const aboutName = request.aboutTitle || "this workspace";
   const readTargets = useRpc(reportTargetsRpc); const send = useRpc(reportSendRpc); const link = useRpc(reportLinkRpc);
   useEffect(() => {
     let live = true;
     readTargets({ workspaceId: request.workspaceId, agentId: request.agentId }).then(r => { if (live) setTargets(r); }).catch(() => { if (live) setTargets({ agents: [], defaultId: null, newAgentWorkspace: null }); });
     return () => { live = false; };
   }, [request.workspaceId, request.agentId]);
-  const chosen = picked ?? (targets ? defaultChoice(targets) : null);
+  const chosen = picked ?? (targets ? defaultChoice(targets, about) : null);
   const rows = targets ? pickerRows(targets) : { pinned: [], agents: [] };
   const chosenRow = [...rows.pinned, ...rows.agents].find(r => r.id === chosen) ?? null;
   const nowhere = !!targets && !targets.agents.length && !targets.newAgentWorkspace && !targets.newWorkspace;
@@ -94,7 +99,7 @@ export function ReportSheet({ request, theme, layout, openAgent, onClose }: { re
     if (empty || phase.kind === "sending" || !chosen) return;
     setPhase({ kind: "sending" });
     try {
-      const r = await send({ kind, text: words, error, ...(chosen === NEW_AGENT ? { newAgentWorkspaceId: targets!.newAgentWorkspace!.id } : chosen === NEW_WORKSPACE ? { newWorkspaceProjectId: targets!.newWorkspace!.projectId } : { agentId: chosen }) });
+      const r = await send({ kind, text: words, error, ...(about ? { workspaceId: about } : {}), ...(chosen === NEW_AGENT ? { newAgentWorkspaceId: targets!.newAgentWorkspace!.id } : chosen === NEW_WORKSPACE ? { newWorkspaceProjectId: targets!.newWorkspace!.projectId } : { agentId: chosen }) });
       setPhase({ kind: "sent", ...r });
     } catch (e) { setPhase({ kind: "failed", message: errorText(e) }); }
   };
@@ -139,6 +144,18 @@ export function ReportSheet({ request, theme, layout, openAgent, onClose }: { re
         </View>
         <Pressable accessibilityRole="button" accessibilityLabel="Remove the error" hitSlop={8} onPress={() => setError(null)}><Icon name="X" size={14} color={c.foregroundMuted} /></Pressable>
       </View>}
+      {about ? <View style={{ flexDirection: "row", gap: 8, alignItems: "flex-start", backgroundColor: c.surface2, borderRadius: 8, padding: 10 }}>
+        <Icon name="Folder" size={14} color={c.foregroundMuted} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text numberOfLines={1} style={t.body}>About {aboutName}</Text>
+          <Text style={t.meta}>{ABOUT_LINE}</Text>
+        </View>
+        <Pressable accessibilityRole="button" accessibilityLabel={`Don't include ${aboutName}`} hitSlop={compact ? 14 : 8} onPress={() => setAboutRemoved(true)}
+          style={{ minWidth: compact ? 28 : 16, minHeight: compact ? 28 : 16, alignItems: "center", justifyContent: "center" }}><Icon name="X" size={14} color={c.foregroundMuted} /></Pressable>
+      </View> : request.about && kind === "bug" && aboutRemoved ? <Pressable accessibilityRole="button" onPress={() => setAboutRemoved(false)} hitSlop={8}
+        style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", minHeight: compact ? 44 : 0 }}>
+        <Icon name="Plus" size={14} color={c.foregroundMuted} /><Text style={t.meta}>Include {aboutName}</Text>
+      </Pressable> : null}
       <Field value={words} onChangeText={setWords} multiline autoFocus={!compact} placeholder={placeholder} placeholderTextColor={c.foregroundMuted} accessibilityLabel="Describe it"
         style={{ minHeight: compact ? 132 : 112, borderWidth: 1, borderColor: c.border, borderRadius: 8, backgroundColor: c.surface0, paddingHorizontal: 12, paddingVertical: 10, color: c.foreground, fontSize: compact ? 14 : 13, lineHeight: compact ? 20 : 18, textAlignVertical: "top" }} />
       {nowhere ? <View style={{ flexDirection: "row", gap: 10, padding: 12, borderRadius: 8, backgroundColor: c.surface2 }}>

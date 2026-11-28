@@ -1,0 +1,1 @@
+- Report a bug about a workspace from its ⋯ menu. The agent that files it looks at that workspace to diagnose, and the public issue gets only counts and states, never names or text.

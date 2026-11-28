@@ -38,6 +38,7 @@ export const ROW_ACTIONS = {
   unpin: { tool: "pin_workspace", note: "pinned=false." },
   make_main: { tool: "make_main_agent" },
   stop_following: { tool: "set_follow_settings" },
+  report: { tool: "report_issue", note: "workspace_id=<id>; the developer's report goes to an agent through report_send with workspaceId, as the sheet's Send does." },
   archive: { exempt: "Paseo's own archive_workspace tool archives a workspace for an agent; this item sends Paseo that same request." },
 } as const satisfies Record<string, { tool: string; note?: string } | { exempt: string }>;
 export type RowActionId = keyof typeof ROW_ACTIONS;
@@ -218,6 +219,9 @@ export function rowMenu(input: RowMenuInput): RowMenuSection[] {
       confirm: `Stop following ${s.title}? Follow-up keeps its history, and you can follow it again in Settings → Following.` },
     !archiveFirst && archiveItem,
   ]);
+
+  // 6. Report a bug about this workspace (invariant 154): the Report sheet, already about it. Last, out of the way.
+  add("report", [!!s.workspaceId && { key: "report", action: "report", label: "Report a bug…", icon: "Bug" }]);
   return sections;
 }
 
