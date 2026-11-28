@@ -232,7 +232,9 @@ export class DaemonDirectory {
   // Lifecycle events. Each patches what it knows; anything it can't know (titles, message times) waits for the
   // next due re-read.
   turnStarted(agent: HookAgent, turnId: string | null): void {
-    this.patch(agent.id, a => { a.status = "running"; a.activeTurn = { id: turnId }; if (agent.title) a.title = agent.title; });
+    // A turn runs only on an agent Paseo unarchived (a prompt unarchives it, with no event of its own).
+    this.archived.delete(agent.id);
+    this.patch(agent.id, a => { a.status = "running"; a.activeTurn = { id: turnId }; a.archivedAt = null; if (agent.title) a.title = agent.title; });
     this.dirty = true;
   }
   turnEnded(agent: HookAgent, outcome: { kind: string }): void {

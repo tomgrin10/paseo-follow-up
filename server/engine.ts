@@ -20,6 +20,7 @@ import type { MessageQueue, Resolution, Target } from "./message-queue";
 import type { ImageRef } from "../shared/images";
 import { PASEO_UNREACHABLE, deliveryOf, type NewQueueItem, type QueueItem, type QueueItemInput } from "../shared/queue";
 import { recordSnapshot } from "./deployment-anchor";
+import { askRefusal } from "../shared/reopen";
 import { pruneUnsent } from "./batch-archive";
 import { holdSuperseded, liftHold } from "../shared/status";
 import { agentAnswered, DEFAULT_MAX_AUTO_SENDS, runningAutoTurns, changedNotGone, conditionId, holdsQueue, inProgressHolds, IN_PROGRESS_MAX_MS, isCapped, MAIN_WAIT, movedOnReason, personHeld, personPart, QUIET_WAIT, readSince, repairWait, sendDecision, settleUnacknowledged, stillApplies, stuckRepair, UNACKNOWLEDGED_MS, type MainWait } from "../shared/send-decision";
@@ -68,6 +69,8 @@ export interface Gateway {
   rowBadges?(): Promise<boolean>;
   /** A tick begins: the gateway may list agents once for it (a-send-lists-agents-at-most-once-per-tick). */
   tickStarted?(): void;
+  /** Of these archived workspaces, the ids Paseo shows live again (shared/reopen.ts paseoShowsLive). */
+  reopenable?(ws: readonly Workspace[]): Promise<string[]>;
 }
 
 /**
@@ -267,7 +270,8 @@ export class Engine {
       this.lastDiscovery = { rows: rowsKey, state: await this.store.snapshot(), at: fresh ? this.now() : lastDiscovery!.at };
     }
     // Dormant workspaces stay listed but cost nothing: no PR or agent observation until they're active again.
-    const current = await this.store.snapshot();
+    let current = await this.store.snapshot();
+    if (this.gateway.reopenable && current.workspaces.some(w => w.enable_tracking && w.archived) && await this.reopenArchived(current)) current = await this.store.snapshot();
     const active = current.workspaces.filter(w => w.enable_tracking && !w.archived && !w.dormant);
     // The developer's Refresh of a dormant workspace still reads its PRs (only its PRs: no agent observation, repairs or
     // sends). Before 2.0.1-beta.2 it read nothing, so a stale PR error there outlived every Refresh.
@@ -425,6 +429,21 @@ export class Engine {
     if (this.checkWatches) await this.checkWatches.evaluate(affected).catch(error => console.warn(`[follow-up] couldn't check the waits for checks: ${error instanceof Error ? error.message : String(error)}`));
     if (this.scheduledTasks && !this.stopped) await this.scheduledTasks.evaluate(affected).catch(error => console.warn(`[follow-up] couldn't send the scheduled tasks: ${error instanceof Error ? error.message : String(error)}`));
   }
+  /**
+   * Archived is Paseo's state, never a latch (invariant 111, shared/reopen.ts): a tracked workspace Follow-up reads as
+   * archived that Paseo shows live again (unarchived, or its main agent unarchived by a prompt) is followed again,
+   * whatever path missed it (a turn start lost to a reload, an unarchive in Paseo's sidebar).
+   */
+  private async reopenArchived(state: State): Promise<boolean> {
+    const archived = state.workspaces.filter(w => w.enable_tracking && w.archived);
+    if (!archived.length || !this.gateway.reopenable) return false;
+    const ids = await this.gateway.reopenable(archived).catch(() => [] as string[]);
+    for (const id of ids) await this.store.mutateWorkspace(id, w => { if (w.archived) { w.archived = false; w.updatedAt = new Date(this.now()).toISOString(); } });
+    if (ids.length) this.reopened?.(ids.map(id => findWorkspace(state, id).mainAgentId));
+    return ids.length > 0;
+  }
+  /** Main agents whose workspace the engine reopened: the worker reopens their Needs-you rows. */
+  reopened: ((agentIds: string[]) => void) | null = null;
   /**
    * A nudge's discovery (a-nudge-costs-its-workspace): only the nudged workspaces and their dirty agents (the kept turn
    * read, else a read of that agent), each applied with a one-workspace mutation. 2026-11-13 (run Y, the CI live shape): every turn end's nudge ran
@@ -997,12 +1016,19 @@ export function ownedWorkspace(state: State, agentId: string, workspaceId?: stri
   requireTracking(w, agentId);
   return w;
 }
-export function agentWorkspace(state: State, agentId: string, access: "read" | "write" = "write", workspaceId?: string, scope: "owner" | "pr" = "owner"): Workspace {
+/**
+ * The workspace an agent's tool acts on. A write in a workspace Follow-up reads as archived is refused with why and
+ * what to call (askRefusal, invariant 111): it would record a task, question or PR no surface shows. The worker
+ * reopens a workspace Paseo shows live before this runs (callerWorkspaceId); `reopens` is enroll_workspace's own path.
+ */
+export function agentWorkspace(state: State, agentId: string, access: "read" | "write" = "write", workspaceId?: string, scope: "owner" | "pr" = "owner", reopens = false): Workspace {
   const w = relatedWorkspace(state, agentId, workspaceId);
   const recovery = w?.batches.some(b => b.recipientAgentId === agentId && isRecovery(b) && (access === "read" || ["sending", "sent", "uncertain"].includes(b.state) || b.state === "blocked" && !b.settledAt));
   const contributor = scope === "pr" && w?.enable_tracking && !w.archived && w.contributorAgentIds?.includes(agentId);
   if (!w || (w.mainAgentId !== agentId && !recovery && !contributor)) throw accessError(w, agentId, access, workspaceId);
   if (access === "write") requireTracking(w, agentId);
+  const refused = access === "write" && !reopens ? askRefusal(w) : null;
+  if (refused) throw new Error(refused);
   return w;
 }
 

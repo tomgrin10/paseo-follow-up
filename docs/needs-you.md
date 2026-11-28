@@ -30,6 +30,13 @@
   plain finish doesn't flag (F7's settle sees "running"), its row sits in Working with `backgroundWork`, and
   `liveFlag` hides an older "finished" until the work ends (shown again after, not erased). Invariant
   `background-work-is-running` in `rowViolations`. On 0.15 the field is absent and nothing changes.
+- **An archived row reopens on live activity** (invariant 111, `shared/reopen.ts`). Archiving an agent or its
+  workspace sets the row's `goneAt`, which hides it and every later flag. Paseo unarchives an agent when it is prompted
+  and sends no event, so the agent's own activity reopens the row (the `reopen` event, whatever the archive's age; a
+  flag from before a 7-day keep that ran out goes): a turn start, a turn end once Paseo shows the agent unarchived (a
+  turn the archive itself ended leaves it archived), a `needs_you` call, and the engine reopening the workspace.
+  `needs_you` from a workspace Paseo still has archived records the ask, reopens the row so the brief reaches Needs
+  you, and says so in its `note` (`ARCHIVED_NEEDS_YOU_NOTE`).
 - **Briefs from closed agents** (`flagFate`, invariant `briefs-from-closed-agents`). Home decides at render, from facts
   it already holds, what a flag nobody may be waiting on does; nothing is stored or deleted, so `inbox_list` still lists
   it. A flag **drops** when its workspace is archived (tracked `archived`) or gone from Paseo's workspace list (the row's

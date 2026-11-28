@@ -31,6 +31,8 @@ import { GONE_REASON } from "./queue";
 import { taskSchedule } from "./task-trigger";
 import { taskDue } from "./task-due";
 import { taskViewRows } from "./task-view";
+import { askRefusal } from "./reopen";
+export { reopenViolations } from "./reopen";
 
 /**
  * Status invariants: what must hold for any workspace, whatever path changed it. Pure, no IO, and never throwing:
@@ -64,6 +66,16 @@ export const INVARIANTS: Invariant[] = [
       if (live.questions.some(q => q.closed)) return "a closed question is still live";
       if (live.batches.some(finishedBatch)) return "a finished batch is still live";
       if (live.prActions.some(finishedPrAction)) return "a finished PR action is still live";
+      return null;
+    },
+  },
+  {
+    id: "an-ask-from-a-live-agent-reaches-the-developer",
+    why: "2026-11-25: an archived, Done workspace's agent was unarchived and given new scope in chat; its needs_you kind=decision calls reached nobody and answered ok. A workspace Follow-up reads as archived refuses every write tool with why and what to call (askRefusal); one it follows accepts them. reopenViolations checks the other half: a workspace Paseo shows live is never read as archived, nor its main agent's row gone.",
+    check(w) {
+      const refused = askRefusal(w);
+      if (w.archived && !refused) return `${w.id} is archived but a write tool would record an ask there and answer ok`;
+      if (!w.archived && refused) return `${w.id} is followed but write tools refuse it as archived`;
       return null;
     },
   },

@@ -12,6 +12,19 @@
   - Track and interactive session startup must not scan transcripts or wait for a daemon-wide refresh. Persist
     activation before returning, and leave history and external status to background work.
   - A regression test blocks the global refresh to keep successful activation from timing out again.
+- **Archived is Paseo's state, never a latch** (invariant 111, `an-ask-from-a-live-agent-reaches-the-developer`,
+  `shared/reopen.ts`). `workspace.archived` marks a workspace archived; it is followed again as soon as Paseo shows it
+  live (`paseoShowsLive`): listed and not mid-archive, or, with its record still archived, its main agent unarchived in
+  it. Paseo unarchives an agent when anyone prompts it, leaves the workspace record archived and sends no event for
+  either, so every path that can see it reopens: the main agent's turn start (`turnStarted` in
+  `server/turn-events.ts`, which also ends a Done, so new scope makes the workspace working again), any of its tool
+  calls (`reopenForCaller` in `index.server.ts`, before `callerWorkspaceId` and `needs_you`), and the engine's pass over
+  archived workspaces each tick (`Engine.reopenArchived` through `PaseoGateway.reopenable`, from the directory's rows
+  only). `observe` reads such a workspace as live, so it isn't archived again. Reopening also clears the main agent's
+  Needs-you row (`Inbox.reopen`). While Paseo still has the workspace archived, every write tool (`agentWorkspace`
+  with `write`: `ask_question`, `update_obligation`, `register_pr`, ...) refuses with why and what to call
+  (`archivedAskError`: `needs_you` kind=decision, and ask the developer to unarchive it), never an ok that records an
+  ask nobody sees; `enroll_workspace` still reopens it with a new goal. Tests: `tests/archived-asks.test.ts`.
 - **Dormant.** A workspace with no user message within the active window (Settings → Following, `activeWindowDays`)
   is dormant. It stays listed but gets no PR or agent observation until it's active again.
 - **PR submission discovery** (`server/submissions.ts`):

@@ -23,9 +23,10 @@ export function agentTrackedWorkspace(state: State, agentId: string): Workspace 
 
 /**
  * A turn started: a newer main-agent turn lifts the stopped turn's automatic hold (holdSuperseded), a turn in an owned
- * workspace ends its Done, and a turn in a dormant workspace makes it active again. Returns the workspaces to nudge.
+ * workspace ends its Done, the main agent's turn reopens its archived workspace, and a turn in a dormant workspace
+ * makes it active again. Returns the workspaces to nudge.
  */
-export async function turnStarted(store: Store, agent: { id: string; workspaceId: string | null }, turnId: string | null): Promise<{ lifted: string[]; owned: string | null; woken: string | null }> {
+export async function turnStarted(store: Store, agent: { id: string; workspaceId: string | null }, turnId: string | null): Promise<{ lifted: string[]; owned: string | null; woken: string | null; reopened: string | null }> {
   const saved = await store.snapshot();
   const turn = { agentId: agent.id, turnId };
   const owned = agentTrackedWorkspace(saved, agent.id);
@@ -35,8 +36,12 @@ export async function turnStarted(store: Store, agent: { id: string; workspaceId
   const lifted: string[] = [];
   for (const w of held) await store.mutateWorkspace(w.id, current => { if (current.enable_tracking && holdSuperseded(current, turn)) { liftHold(current); lifted.push(current.id); } });
   if (owned && (owned.completion || owned.declaration)) await store.mutateWorkspace(owned.id, w => { w.completion = null; w.declaration = null; });
+  // A turn runs only on an agent Paseo unarchived (a prompt unarchives it, and Paseo sends no event for that): the main
+  // agent's turn reopens the workspace Follow-up read as archived (invariant 111, shared/reopen.ts).
+  const reopened = owned?.archived && owned.mainAgentId === agent.id ? owned.id : null;
+  if (reopened) await store.mutateWorkspace(reopened, w => { if (w.archived && w.mainAgentId === agent.id) { w.archived = false; w.updatedAt = new Date().toISOString(); } });
   if (waking) await store.mutateWorkspace(waking.id, w => { delete w.dormant; });
-  return { lifted, owned: owned?.id ?? null, woken: waking?.id ?? null };
+  return { lifted, owned: owned?.id ?? null, woken: waking?.id ?? null, reopened };
 }
 
 /**

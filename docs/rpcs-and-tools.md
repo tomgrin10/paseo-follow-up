@@ -44,6 +44,11 @@ is missing from AGENTS.md or docs/, so add a line here when you add one.
 
 ## Core tools (the workspace's own bookkeeping)
 
+No core tool answers ok without acting (invariant 111). A write in a workspace Paseo still has archived is refused
+with why and what to call (`archivedAskError`, `shared/reopen.ts`); one Paseo shows live again is reopened first. Other
+paths that change nothing say so too: tracking off or opted out ("Tracking is inactive"), not the main agent (the access
+error), the inbox off (`needs_you` errors), a dismissed ask restated (`needs_you`'s `note`).
+
 | Tool | RPC | Use |
 | --- | --- | --- |
 | `workspace_status` | `follow.agent-status` | The workspace's goal, PRs, tasks and work queue. `detail=full` adds evidence. Finished items (merged or closed PRs, done or waived tasks, settled questions, batches and PR actions) are a count plus the newest few in both details (`history`); `history=<kind>` with `offset`/`limit` pages one kind; `detail=full live=<kind>` pages live evidence when budget pressure compacts it (see [Bounded answers](#bounded-answers)). Includes the PR workflow, `nextMessage` (recipient, tasks, exact text, reason, eta: Preview's agent form), `heldTasks` and `githubWait` (while GitHub's budget is low, when Follow-up checks this workspace's PRs again; null otherwise). |
@@ -57,7 +62,7 @@ is missing from AGENTS.md or docs/, so add a line here when you add one.
 | `ask_question`, `record_answer`, `withdraw_question` | `follow.ask-question`, `follow.record-answer`, `follow.withdraw-question` | Questions for the developer (`server/questions.ts`). |
 | `set_spec` | `follow.set-spec` | The agent's spec link. The developer's own link wins over it. |
 | `link_item`, `unlink_item` | `follow.link-item`, `follow.unlink-item` | Links what the work is about (a Linear key is confirmed with Linear first; a PR is refused), or removes one for good ([linked-items.md](linked-items.md)). Main and contributors. |
-| `needs_you` | `follow.needs-you` | The end-of-turn brief: what the developer must do next. |
+| `needs_you` | `follow.needs-you` | The end-of-turn brief: what the developer must do next. From a workspace Follow-up read as archived it reopens the workspace when Paseo shows it live, else the ask still reaches Needs you and the reply's `note` says the workspace is archived (invariant 111). |
 | `declare_done` | `follow.done` | Declares the goal fulfilled and returns any blockers. |
 | `wait_for_checks` | `follow.wait-for-checks` | Waits for a PR's checks without polling: answers at once from the caller's own workspace read, then sends one message after the turn when the checks on the current head finish (or it merges, closes or conflicts). Every root agent (main, contributors, untracked); not recovery. PRs Follow-up can't see get the way on (Paseo's `subscribe_change_request` on 0.17+) ([wait-for-checks.md](wait-for-checks.md)). |
 | `context_reply` | `follow.context-reply` | Answers the developer's question (Your questions, More context) with the `requestId` the ask carried; only the agent it was asked of may answer ([needs-you.md](needs-you.md#your-questions)). Main agents and contributors get it (`/ask` can ask a contributor); recovery sessions don't. |

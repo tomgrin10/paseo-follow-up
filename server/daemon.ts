@@ -36,6 +36,7 @@ import { traceDaemon } from "./request-trace";
 import type { TurnTimeline } from "./turn-timeline";
 import { PASEO_UNREACHABLE, deliveryReceipt } from "../shared/queue";
 import type { Delivered } from "./message-queue";
+import { paseoShowsLive } from "../shared/reopen";
 type RecoveryAgentOptions = Partial<PluginBeforeRequests["agent.create"]["config"]> & { workspaceId: string; labels: Record<string, string>; idempotencyKey: string; env: Record<string, string>; /** Paseo 0.16 (features.backgroundAgents): no tab, no notification, no sidebar row. */ background?: boolean };
 
 /**
@@ -495,6 +496,17 @@ export class PaseoGateway implements Gateway {
   /** Settings → Agents → Wait for background jobs (index.server.ts sets it). Unset or unreadable: on (Unknown is not off). */
   waitForJobs?: () => Promise<boolean>;
   private async waitsForJobs(): Promise<boolean> { try { return (await this.waitForJobs?.()) ?? true; } catch { return true; } }
+  /**
+   * The archived workspaces Paseo shows live again (paseoShowsLive): listed, or with their main agent unarchived. From
+   * the directory's rows only (no daemon request beyond its due re-read), so the engine's pass over archived workspaces
+   * costs nothing per workspace. Invariant 111.
+   */
+  async reopenable(ws: readonly Workspace[]): Promise<string[]> {
+    if (!ws.length) return [];
+    const rows = await this.directory.read();
+    const index = agentIndex(rows.agents);
+    return ws.filter(w => paseoShowsLive(w.id, rows.workspaces.find(row => row.id === w.id), index.byId.get(w.mainAgentId))).map(w => w.id);
+  }
   async observe(w: Workspace, fresh = false): Promise<Runtime> {
     const [rows, compacting, pauses] = await Promise.all([this.directory.read(fresh ? { fresh: "agents" } : {}), this.compacting(w.mainAgentId), this.guard.read()]);
     const { agents, workspaces } = rows;
@@ -505,7 +517,10 @@ export class PaseoGateway implements Gateway {
     if (taskIds.length) this.directory.lookup(taskIds);
     const taskAgents = taskIds.length ? taskAgentStates(taskIds, this.directory.withArchived(taskIds, taskIds.flatMap(id => index.byId.get(id) ?? []))) : {};
     const workspace = workspaces.find(row => row.id === w.id);
-    if (!workspace || workspace.archivingAt) return { taskAgents, busy: false, reason: "Workspace is archived", archived: true };
+    if (workspace?.archivingAt) return { taskAgents, busy: false, reason: "Workspace is archived", archived: true };
+    // An archived workspace record whose main agent Paseo unarchived (the developer prompted it) is live again
+    // (paseoShowsLive, invariant 111); only Paseo's list of unarchived agents is read for it.
+    if (!workspace && !paseoShowsLive(w.id, workspace, index.byId.get(w.mainAgentId))) return { taskAgents, busy: false, reason: "Workspace is archived", archived: true };
     const a = index.byId.get(w.mainAgentId) ?? await this.connect(client => this.directory.live(client, w.mainAgentId));
     if (!a || a.archivedAt || a.workspaceId !== w.id) return { taskAgents, busy: false, reason: "Main agent is unavailable or moved to another workspace", archived: false };
     const recoveryIds = new Set(w.batches.filter(b => b.tasks.every(t => t.kind === "inventory")).flatMap(b => [b.recipientAgentId, ...b.recoveryHandoffs.map(h => h.fromAgentId)]));
@@ -515,7 +530,7 @@ export class PaseoGateway implements Gateway {
     const guarded = this.guard.waiting(pauses, { agentIds: [w.mainAgentId, ...scoped.map(agent => agent.id)], workspaceId: w.id, excludedAgentIds: [...recoveryIds].filter((id): id is string => !!id) });
     const guardedInterruptionId = this.guard.ownsInterruption(pauses, w.mainAgentId, w.interruption)?.id;
     const context = { guardedInterruptionId, mainTurnId: turnIdOf(a.activeTurn), mainTitle: a.title?.trim() || null };
-    if (guarded || !pauses && workspace.labels?.some(label => /^(Paused|Paused by Session Guard)$/i.test(label))) return { taskAgents, ...context, guarded: true, busy: false, mainBusy: "guard", reason: "Waiting for Session Guard to resume this workspace", archived: false };
+    if (guarded || !pauses && workspace?.labels?.some(label => /^(Paused|Paused by Session Guard)$/i.test(label))) return { taskAgents, ...context, guarded: true, busy: false, mainBusy: "guard", reason: "Waiting for Session Guard to resume this workspace", archived: false };
     if (compacting) return { taskAgents, busy: true, mainBusy: "compacting", reason: "Smart Session is compacting the main agent", archived: false };
     const mainLoaded = isLoaded(a), mainRecent = recentlyUsed(a, this.windowMs, this.now());
     if (conversationGone(a.lastError)) return { taskAgents, busy: false, reason: a.lastError ?? "Conversation not found", archived: false, gone: a.lastError ?? "Conversation not found", mainLoaded, mainRecent };

@@ -152,6 +152,7 @@ import { updatesViewSchema, type UpdatesView } from "./shared/updates";
 import { PLUGIN_NAME, releaseNotesViewSchema, type ReleaseNote, type ReleaseNotesView } from "./shared/changelog";
 import { BRIEF_KIND, BRIEF_VERSION, prState, prStates, validateNeedsYou, type NeedsYouRecord } from "./shared/brief";
 import { foldedAsk } from "./shared/needs-block";
+import { ARCHIVED_NEEDS_YOU_NOTE, paseoShowsLive } from "./shared/reopen";
 import { ImageStore } from "./server/image-store";
 import type { ImageRef, ImageUpload } from "./shared/images";
 import { imageSupport, trustHarnessImageProviders } from "./server/image-support";
@@ -513,6 +514,8 @@ export default function contribute(server: PluginServerContext) {
   };
   // Hooks run in the background; an inbox failure never blocks the rest of Follow-up.
   const inboxHook = (work: () => Promise<void>) => void (async () => { await ready; if (!stopped && !loadError) { await work(); feeds.inbox(); } })().catch(error => { inboxError = error instanceof Error ? error.message : String(error); });
+  // A workspace the engine reopened (Paseo shows it live again) shows its main agent's Needs-you row again (invariant 111).
+  engine.reopened = agentIds => { for (const id of agentIds) inboxHook(async () => { await inbox.reopen(id); }); };
   let unlock: (() => Promise<void>) | null = null;
   let stopped = false;
   /** Each agent's latest started turn, so a turn end can tell it was already replaced (holdOnTurnEnd). */
@@ -711,9 +714,26 @@ export default function contribute(server: PluginServerContext) {
   void (async () => { await ready; if (stopped || loadError) return; void inbox.refreshDirectory().catch(() => undefined); if (governor.allowsExtras()) void usage.refresh(); await inbox.start().catch(error => { inboxError = error instanceof Error ? error.message : String(error); }); void inboxLoop(); })();
   const changed = (w: Workspace) => { w.completion = null; w.declaration = null; w.updatedAt = new Date().toISOString(); };
 
+  /**
+   * Archived is Paseo's state, never a latch (invariant 111, shared/reopen.ts): a main agent calling a tool from a
+   * workspace Follow-up reads as archived reopens it when Paseo shows it live (the agent itself unarchived: a prompt
+   * did it). True when the workspace is (now) followed; false when Paseo still has it archived.
+   */
+  const reopenForCaller = async (agent: { id: string; workspaceId?: string | null; archivedAt?: string | null }): Promise<boolean> => {
+    const record = (await store.snapshot()).workspaces.find(w => w.id === agent.workspaceId);
+    if (!record?.archived || !record.enable_tracking || record.mainAgentId !== agent.id) return !record?.archived;
+    const rows = await gateway.directory.read().catch(() => null);
+    if (!paseoShowsLive(record.id, rows?.workspaces.find(row => row.id === record.id), agent)) return false;
+    await store.mutateWorkspace(record.id, w => { if (w.archived) { w.archived = false; w.updatedAt = new Date().toISOString(); } });
+    await inbox.reopen(agent.id).catch(() => false);
+    feeds.inbox();
+    void engine.nudge(record.id);
+    return true;
+  };
   const callerWorkspaceId = async (agentId: string, paseo: PluginHandlerContext["paseo"], allowHandoff = true) => {
     const agent = (await paseo.agents.ref(agentId).refresh())?.agent;
     if (!agent?.workspaceId) throw new Error(`Cannot locate the caller's workspace: expected agent in a recorded workspace, received agent ${agentId}.`);
+    await reopenForCaller(agent);
     const record = (await store.snapshot()).workspaces.find(w => w.id === agent.workspaceId);
     if (record?.contributorAgentIds?.includes(agentId) && !record.batches.some(b => b.recipientAgentId === agentId && !b.settledAt && b.tasks.every(t => t.kind === "inventory")) && (!await isWorkspaceRoot(agent, async id => (await paseo.agents.ref(id).refresh())?.agent) || isRecovery(agent.labels))) throw new Error("PR registration requires an available root agent in this tracked workspace.");
     if (allowHandoff) {
@@ -853,7 +873,8 @@ export default function contribute(server: PluginServerContext) {
     const workspace = await paseo.workspaces.ref(agent.workspaceId).refresh();
     if (!workspace) throw new Error("Workspace is unavailable.");
     return store.mutate(state => {
-      const w = agentWorkspace(state, agentId, "write", agent.workspaceId!);
+      // enroll_workspace states a new goal: it follows the workspace again even while Paseo has it archived.
+      const w = agentWorkspace(state, agentId, "write", agent.workspaceId!, "owner", true);
       if (w) {
         if (w.goal !== goal) changed(w);
         w.goal = goal; w.title = workspace.name; w.archived = false;
@@ -2104,8 +2125,12 @@ export default function contribute(server: PluginServerContext) {
     if (!/^[\w-]+$/.test(agentId)) throw new Error("Unsupported agent identity.");
     const agent = (await paseo.agents.ref(agentId).refresh())?.agent;
     if (!agent?.workspaceId) throw new Error("Cannot locate the caller's workspace.");
+    // Invariant 111: the main agent's ask from a workspace Follow-up read as archived reopens it when Paseo shows it
+    // live; where Paseo still has it archived, the ask still reaches Needs you and the reply says so.
+    const followed = !isRecovery(agent.labels) && await reopenForCaller(agent);
     const saved = await store.snapshot();
     const tracked = saved.workspaces.find(w => w.id === agent.workspaceId && w.enable_tracking && !w.archived);
+    const stillArchived = !followed && saved.workspaces.some(w => w.id === agent.workspaceId && w.enable_tracking && w.archived && w.mainAgentId === agentId);
     // F2: root agents only. Contributors and recovery sessions report to the main agent; subagents to their parent.
     if (isRecovery(agent.labels) || tracked && tracked.mainAgentId !== agentId) throw new Error("needs_you is for the workspace's main agent. Report to the main agent instead.");
     if (!await isWorkspaceRoot(agent, async id => (await paseo.agents.ref(id).refresh())?.agent)) throw new Error("needs_you is for root agents. Report to your parent agent instead.");
@@ -2135,7 +2160,7 @@ export default function contribute(server: PluginServerContext) {
       const { questions: _refs, ...rest } = call;
       call = { ...rest, ...(linked.decisions.length ? { decisions: linked.decisions } : {}) };
       if (!linked.decisions.length) delete call.decisions;
-    } else if (call.questions?.length) throw new Error("questions point at a tracked workspace's open questions, and this workspace isn't tracked.");
+    } else if (call.questions?.length) throw new Error(stillArchived ? "questions point at a tracked workspace's open questions, and Paseo has this workspace archived. Leave questions out and state the ask in ask and decisions; ask the developer to unarchive the workspace." : "questions point at a tracked workspace's open questions, and this workspace isn't tracked.");
     // dismissing-anything-in-needs-you-sends-the-agent-nothing: an ask the developer dismissed, stated again with nothing
     // new to decide, isn't flagged again: the turn ends quiet, and the call says why.
     const gone = await inbox.dismissedAsk(agentId);
@@ -2146,8 +2171,11 @@ export default function contribute(server: PluginServerContext) {
     const temporary = `${needsYouPath(agentId)}.${randomUUID()}`;
     await writeFile(temporary, JSON.stringify(record), { mode: 0o600 });
     await rename(temporary, needsYouPath(agentId));
+    // The caller is running, so its Needs-you row is live: an archived (gone) row would hide the brief this turn makes.
+    if (!restated && call.kind !== "done") { await inbox.reopen(agentId).catch(() => false); feeds.inbox(); }
     return { ok: true as const, briefId: `brief:${turn?.turnId ?? record.at}`,
       ...(restated ? { note: DISMISSED_ASK_NOTE }
+        : stillArchived && call.kind !== "done" ? { note: ARCHIVED_NEEDS_YOU_NOTE }
         : dismissed.length ? { note: `The developer dismissed ${dismissed.join(", ")}: ${dismissed.length === 1 ? "it no longer matters, so it was" : "they no longer matter, so they were"} left off the card. Don't raise ${dismissed.length === 1 ? "it" : "them"} again.` } : {}) };
   });
   // Replies once the answer is recorded; the send runs after (Inbox.briefAction), so a dormant agent's slow resume never
@@ -2284,14 +2312,15 @@ export default function contribute(server: PluginServerContext) {
     server.on("agent.turn_started", async event => { await ready; if (stopped || loadError || !overseer) return; await overseer.turnStarted(event.agent.id).catch(() => undefined); }),
     // A newer main-agent turn supersedes the failed turn's automatic hold (shared/status.ts holdSuperseded).
     // A turn writes only the workspace it is about (server/turn-events.ts, a-send-never-clones-the-whole-state): a
-    // superseded hold lifts, the owned workspace's Done ends, and a dormant workspace becomes active again.
+    // superseded hold lifts, the owned workspace's Done ends, the main agent's archived workspace reopens (invariant
+    // 111), and a dormant workspace becomes active again.
     server.on("agent.turn_started", async event => {
       if (event.turnId) startedTurns.set(event.agent.id, event.turnId);
       await ready;
       if (stopped || loadError) return;
-      const { lifted, owned, woken } = await turnStarted(store, event.agent, event.turnId ?? null);
+      const { lifted, owned, woken, reopened } = await turnStarted(store, event.agent, event.turnId ?? null);
       if (owned) gateway.markDirty(event.agent.id);
-      for (const id of new Set([...lifted, ...(woken ? [woken] : [])])) void engine.nudge(id);
+      for (const id of new Set([...lifted, ...(woken ? [woken] : []), ...(reopened ? [reopened] : [])])) void engine.nudge(id);
     }),
     server.on("agent.turn_ended", async (event, { paseo }) => { seen(paseo); inboxHook(() => inbox.turnEnded(event.agent, event.outcome, event.turnId)); }),
     server.on("agent.permission_requested", async (event, { paseo }) => { seen(paseo); inboxHook(async () => { await inbox.permissionRequested(event.agent, event.request); await writeBriefState(); }); }),
