@@ -5,7 +5,7 @@ import { View } from "react-native";
 import { Pressable, Text } from "./text";
 import { useQuery } from "@tanstack/react-query";
 import { useRpc, type PluginButtonContentProps, type PluginButtonIconProps, type PluginButtonRegistration, type PluginClientContext } from "@getpaseo/plugin/client";
-import { Icon, ScrollView } from "@getpaseo/plugin/client/ui";
+import { Icon } from "@getpaseo/plugin/client/ui";
 import { browserStatusRpc } from "../shared/contracts";
 import { activeNeeds, needsYou, type NeedItem } from "../shared/attention";
 import { briefQuestionIds, echoedItems, HEADLINE_ICON, todoLine, HEADLINE_TONE, pillState, todoLabel, withoutBriefQuestions, type PillState } from "../shared/headline";
@@ -214,18 +214,11 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
         <Button theme={props.theme} compact={touch} grow={touch} icon="ArrowRight" title="Sign off & next"
           onPress={() => done(() => { void deps.inbox.signOff([agentId]); deps.openNext(agentId); })} />
       </View>
-      {touch
-        // Phones: one row that scrolls sideways, never a second line of chips.
-        ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <Text style={t.meta}>Later</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ gap: 6, paddingRight: 8 }}>
-            {laterChoices(new Date()).map(([id, title]) => <Chip key={id} title={title.replace(/^In 1 hour$/, "1 hour")} theme={props.theme} compact onPress={() => done(() => void deps.inbox.snooze([agentId], snoozeUntil(id, new Date())))} />)}
-          </ScrollView>
-        </View>
-        : <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
-          <Text style={[t.meta, { marginRight: 2 }]}>Later</Text>
-          {laterChoices(new Date()).map(([id, title]) => <Chip key={id} title={title} theme={props.theme} compact={touch} onPress={() => done(() => void deps.inbox.snooze([agentId], snoozeUntil(id, new Date())))} />)}
-        </View>}
+      {/* Later's choices wrap onto a second line where they don't fit (nothing-hides-past-the-edge), phones included. */}
+      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: touch ? 8 : 6 }}>
+        <Text style={[t.meta, { marginRight: 2 }]}>Later</Text>
+        {laterChoices(new Date()).map(([id, title]) => <Chip key={id} title={touch ? title.replace(/^In 1 hour$/, "1 hour") : title} theme={props.theme} compact={touch} onPress={() => done(() => void deps.inbox.snooze([agentId], snoozeUntil(id, new Date())))} />)}
+      </View>
     </View>}
 
     {/* 3. The workspace's own items, only when there are some. */}

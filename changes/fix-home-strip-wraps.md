@@ -1,0 +1,1 @@
+- On a phone, Home's status counts wrap onto a second line when they don't fit, so the last one is never cut off at the edge. The Later choices in the pill wrap the same way.
