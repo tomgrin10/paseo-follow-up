@@ -21,6 +21,14 @@ export function subscribeDisplay(listener: (values: Display) => void) { listener
 let latest: Display | null = null;
 listeners.add(values => { latest = values; });
 export const displayValues = (): Display | null => latest;
+/**
+ * The Display document as it arrives (the feed's push or a read), for Home's order (client/home-view.ts): one
+ * follow.display-feed per client, the Display store's (invariant 142). A late follower gets the last document at once.
+ */
+type DisplayDoc = { status: string; values?: unknown };
+let latestDoc: DisplayDoc | null = null;
+const docFollowers = new Set<(doc: DisplayDoc) => void>();
+export function followDisplayDoc(follower: (doc: DisplayDoc) => void) { docFollowers.add(follower); if (latestDoc) follower(latestDoc); return () => { docFollowers.delete(follower); }; }
 
 /** R2's measurement, where it's cheap to look: how often agents stated what they need on a flagged turn. */
 export function briefShareText(stats: { days: number; total: number; tool: number; structured: number; fallback: number } | undefined): string {
@@ -156,8 +164,9 @@ export function contributeDisplay(client: PluginClientContext, item: PluginSideb
       // Retain the last valid preference through temporary disconnects.
     } finally { pending = false; }
   };
-  const apply = (result: { status: string; values?: unknown }) => {
+  const apply = (result: DisplayDoc) => {
       if (!disposed && result.status === "ready") {
+        latestDoc = result; for (const follower of docFollowers) follower(result);
         const parsed = displayPreferences.schema.safeParse(result.values);
         if (parsed.success) { sidebar.set(parsed.data.showSidebar); for (const listener of listeners) listener(parsed.data); }
       }
@@ -175,7 +184,7 @@ export function contributeDisplay(client: PluginClientContext, item: PluginSideb
   return () => {
     disposed = true; feed?.stop();
     if (timer) clearInterval(timer); offVisible();
-    listeners.delete(update);
+    listeners.delete(update); latestDoc = null;
     sidebar.dispose();
   };
 }
