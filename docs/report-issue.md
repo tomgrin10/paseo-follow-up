@@ -155,7 +155,7 @@ The shared module has one optional hook for this, `subject: { param, read }` (`R
 
 | Part | Where it goes | What it holds |
 | --- | --- | --- |
-| `local` | the first call's reply only, for the agent | title, goal, status, PRs (repo, number, title, state, checks, conflict, review, error), tasks, open questions, the last batches, agents (from the directory, never loaded), recent `[follow-up]` warnings naming the workspace |
+| `local` | the first call's reply only, for the agent | title, goal, status, then what `workspace_status` would carry as short rows (`agentView`, fitted to `REPORT_LOCAL_ROOM` so the whole reply stays under `TOOL_BUDGET`): live PRs (repo, number, title, state, checks, conflict, review, error), tasks, questions and batches whole, finished ones the newest few with counts in `history`; live agents from the directory (never loaded), the main first, at most `PAGE.toolPage`, with closed and archived ones as counts (`agentsFinished`); recent `[follow-up]` warnings naming the workspace |
 | `section` | "This workspace" in the bug's diagnostics, redacted again | status kind, following, Auto-send, hold, repairs wait, PR counts by state and draft, checks, conflicts and reviews of open PRs, workflow, refresh errors as codes, last PR read, tasks by status, question counts, batches by state, agent count by provider and the main agent's status, Done age, warning count by code |
 | `privateTitles` | this report's redaction list | the workspace's id, title, goal, Done summary, repository, PR titles and branches, task titles and evidence, question text and background |
 

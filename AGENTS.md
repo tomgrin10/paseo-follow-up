@@ -107,7 +107,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | UI | `index.client.tsx`, `client/`, `client/row-badges.tsx`, `shared/row-badges.ts`, `client/host-slot.tsx`, `client/field.tsx`, `shared/placeholder-fit.ts`, `client/keyboard.tsx`, `client/scroll-allowlist.ts`, `client/split.tsx`, `shared/split.ts`, `client/pane-allowlist.ts`, `client/search-key.ts`, `shared/search-key.ts`, `client/search-focus.ts`, `shared/search-focus.ts`, `shared/home-keys.ts` | [client](docs/client.md) |
 | Chat card for agents and workspaces an agent creates | `shared/created.ts`, `server/created-items.ts`, `client/created.tsx` | [client](docs/client.md#created-agent-and-workspace-cards) |
 | Pasted images in every field whose words reach an agent (caps, the store, who takes them, the one component) | `shared/images.ts`, `server/image-store.ts`, `server/image-support.ts`, `client/image-attach.tsx`, `client/unsent-images.ts` | [client](docs/client.md#pasted-images), [rpcs-and-tools](docs/rpcs-and-tools.md#pasted-images) |
-| Shared copy and errors, scale bounds, paged lists | `shared/presentation.ts`, `shared/errors.ts`, `shared/tool-result.ts`, `shared/scale.ts`, `shared/paged.ts`, `shared/history.ts`, `shared/finished.ts`, `client/paged-list.tsx` | [client](docs/client.md) |
+| Shared copy and errors, scale bounds, paged lists | `shared/presentation.ts`, `shared/errors.ts`, `shared/tool-result.ts`, `shared/scale.ts`, `shared/paged.ts`, `shared/history.ts`, `shared/finished.ts`, `server/bounded-reply.ts`, `client/paged-list.tsx` | [client](docs/client.md) |
 | Tests, checks and README screenshots | `tests/`, `scripts/`, `scripts/screenshots.mjs`, `button-visibility.test.mjs` | [testing](docs/testing.md) |
 | Report an issue (shared module, Follow-up's adapter, the sheet) | `server/report-issue/index.ts`, `server/report-issue/redact.ts`, `server/report-issue/render.ts`, `server/report-issue/github.ts`, `server/report-issue/diagnostics.ts`, `server/report-issue-adapter.ts`, `server/report-send.ts`, `shared/report-send.ts`, `client/report-issue.tsx`, `scripts/fake-github.d.mts` | [report-issue](docs/report-issue.md) |
 | Releases | `changes/`, `CHANGELOG.md`, `scripts/release-notes.mjs`, `scripts/publish-npm.mjs`, `scripts/release-body.mjs`, `scripts/backfill-release-notes.mjs`, `scripts/check-release-note.mjs`, `.github/workflows/` | [releasing](docs/releasing.md) |
@@ -984,6 +984,17 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    2026-11-26: a busy workspace's `workspace_status` summary was ~207k characters, 98% of it merged
    PRs, and the agent couldn't read its own status. Guarded by `tests/bounded-tools.test.ts` and the same
    `pagedReplyVerdict` (`follow.agent-status` summary and full on the live-sized seed).
+   **Every tool, not only `workspace_status`** (`every-tool-reply-is-bounded`): any reply that embeds a workspace's
+   data reuses this bounding, never its own lists. A report's local view is `agentView` reshaped (fitted with its
+   `budget` to `REPORT_LOCAL_ROOM`; closed and archived agents are counts, `finishedAgent`), and `AgentActions.run`
+   passes every action's reply through `boundReply` (`server/bounded-reply.ts`), so a stored workspace inside one
+   comes as `workspace_status`'s summary. 2026-11-28 (2.6.0-beta.6): `report_issue` with `workspace_id` returned
+   168,664 characters live (401 PRs, 345 agents, 174 tasks), and the scan then found `answer_question`,
+   `dismiss_question`, `run_recovery`, `set_workspace_spec` and `set_task_trigger` returning the whole workspace on
+   confirm (~1 MB on the live-sized seed). Guarded by `tests/tool-replies-budget.test.ts`: every bridge tool and action
+   whose RPC contract's output reaches a workspace list is found by scanning the contracts and measured on the
+   live-sized seed as sent; every other tool is measured or names why it carries no workspace, so a new one fails
+   until classified; and `tests/report-subject-budget.test.ts`.
 64. **A PR summary says the worst** (`a-pr-summary-says-the-worst`). A chip or line that sums up a workspace's PRs
    says the worst of its open PRs, never the first one's: Home's PR chip names the first open PR in stack order with
    the worst state and, at failing checks, counts the PRs failing ("#1058+125 ✗ 4", read aloud "Pull request #1058 and
@@ -1972,18 +1983,6 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    `tests/placeholder-fit.test.ts` (the real `Field` and `QueryField` under the native stand-in, widths 40-360 at font
    scales 0.85-2) and `scripts/screenshots.mjs --only search-wrap` (Home at 360 and 390, normal and large font, light
    and dark; every visible placeholder measured against its room; writes `search-wrap.json`).
-155. **Nothing hides past the edge** (`nothing-hides-past-the-edge`). A row of chips that doesn't fit its width wraps
-   onto its own lines on every device; no client view scrolls sideways, where what lies past the edge is cut with
-   nothing saying more is there (`tests/strip-wraps.test.ts` sweeps the client for a sideways `ScrollView` or
-   `FlatList`; one is allowed only with a visible sign of more, named with why). Home's phone status strip
-   (`StatusStrip`, `client/home-chrome.tsx`) and the pill's Later choices (`client/pill.tsx`) wrap. This widens invariant
-   8's no-overflow rule, which only checked the page: a strip that scrolls inside the page never overflows it.
-   2026-11-28, the search-wrap renders of 2.6.0-beta.5: Home's phone strip ran off the right edge ("4 W" at 360 wide
-   with a large font, "1 Qui" at 390), a sideways scroller with its indicator hidden. Guarded by
-   `tests/strip-wraps.test.ts` (the real `StatusStrip` under the native stand-in) and `scripts/screenshots.mjs --only
-   strip-wrap` (Home on a phone at 360 and 390, normal and large font, light and dark: every strip chip inside the
-   viewport; writes `strip-wrap.json`).
-
 154. **A workspace report files only structure** (`a-workspace-report-files-only-structure`). Report a bug… (the last
    item of the shared row menu, so the panel's ⋯, Home and the sidebar all have it) opens the one Report sheet with an
    "About <workspace>" line (bugs only, removable) and a new agent in that workspace as the default Send to; Send
@@ -1996,7 +1995,21 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    one optional hook (`subject: { param, read }`). 2026-11-28, the developer: "add an option to report a bug straight
    from the follow up panel ... that will also attach the agent data if needed from that workspace"; reports go to a
    public repository and workspaces are often work. Guarded by `tests/report-from-panel.test.ts` (a workspace seeded
-   with work-looking text: none of it, nor its id, reaches the body).
+   with work-looking text: none of it, nor its id, reaches the body). The local view is bounded like
+   `workspace_status` (invariant 63, `every-tool-reply-is-bounded`); bounding changes only what the agent reads, never
+   the public section or the redaction list, which still takes every title of the workspace.
+
+155. **Nothing hides past the edge** (`nothing-hides-past-the-edge`). A row of chips that doesn't fit its width wraps
+   onto its own lines on every device; no client view scrolls sideways, where what lies past the edge is cut with
+   nothing saying more is there (`tests/strip-wraps.test.ts` sweeps the client for a sideways `ScrollView` or
+   `FlatList`; one is allowed only with a visible sign of more, named with why). Home's phone status strip
+   (`StatusStrip`, `client/home-chrome.tsx`) and the pill's Later choices (`client/pill.tsx`) wrap. This widens invariant
+   8's no-overflow rule, which only checked the page: a strip that scrolls inside the page never overflows it.
+   2026-11-28, the search-wrap renders of 2.6.0-beta.5: Home's phone strip ran off the right edge ("4 W" at 360 wide
+   with a large font, "1 Qui" at 390), a sideways scroller with its indicator hidden. Guarded by
+   `tests/strip-wraps.test.ts` (the real `StatusStrip` under the native stand-in) and `scripts/screenshots.mjs --only
+   strip-wrap` (Home on a phone at 360 and 390, normal and large font, light and dark: every strip chip inside the
+   viewport; writes `strip-wrap.json`).
 
 ## Bugs
 

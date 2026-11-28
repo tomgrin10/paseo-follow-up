@@ -1,0 +1,2 @@
+- Reporting a bug about a busy workspace works again: the agent gets a short view of that workspace (open work in full, finished work as the newest few and a count) instead of a reply too big to read.
+- Answering, dismissing or scheduling through an agent no longer returns the whole workspace's history.
