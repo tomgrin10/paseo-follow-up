@@ -55,7 +55,9 @@ export const AccessibilityInfo = { isReduceMotionEnabled: async () => false, isS
 export const Keyboard = { addListener: () => sub, dismiss() {}, isVisible: () => false, metrics: () => undefined };
 export const AppState = { currentState: "active", addEventListener: () => sub };
 export const AppRegistry = { registerComponent() {} };
-export const Dimensions = { get: () => ({ width: 390, height: 844, scale: 3, fontScale: 1 }), addEventListener: () => sub };
-export const useWindowDimensions = () => ({ width: 390, height: 844, scale: 3, fontScale: 1 });
+// The system font size (Android Settings → Display → Font size): a test sets globalThis.__nativeFontScale.
+const fontScale = () => globalThis.__nativeFontScale ?? 1;
+export const Dimensions = { get: () => ({ width: 390, height: 844, scale: 3, fontScale: fontScale() }), addEventListener: () => sub };
+export const useWindowDimensions = () => ({ width: 390, height: 844, scale: 3, fontScale: fontScale() });
 export const findNodeHandle = () => null;
 export const StyleSheet = { create: s => s, flatten: s => (Array.isArray(s) ? Object.assign({}, ...s.flat(Infinity).filter(Boolean)) : s ?? {}), hairlineWidth: 1, absoluteFill: {}, absoluteFillObject: {} };

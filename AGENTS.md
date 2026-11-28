@@ -104,7 +104,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | Self-update (check, install, watchdog, rollback), 2.0's move from 1.x | `server/plugin-move.ts`, `server/data-move.ts`, `shared/plugin-move.ts`, `shared/legacy.ts`, `server/updater.ts`, `server/update-registry.ts`, `server/update-provenance.ts`, `server/update-watchdog.mjs`, `server/updates.ts`, `shared/updates.ts`, `shared/update-policy.ts`, `client/updates.tsx` | [updates](docs/updates.md) |
 | Resource governor, never waking agents, worker memory, usage meters | `server/governor.ts`, `server/memory.ts`, `server/agent-load.ts`, `server/usage.ts`, `shared/agent-load.ts`, `shared/resources.ts`, `shared/usage.ts` | [resources](docs/resources.md) |
 | The workspace view (Home's pane, side panel, tab), its agent card and section hints | `client/panel.tsx`, `client/agent-card.tsx`, `client/hint.tsx`, `shared/workspace-layout.ts`, `client/large.tsx` | [client](docs/client.md#the-workspace-view) |
-| UI | `index.client.tsx`, `client/`, `client/row-badges.tsx`, `shared/row-badges.ts`, `client/host-slot.tsx`, `client/field.tsx`, `client/keyboard.tsx`, `client/scroll-allowlist.ts`, `client/split.tsx`, `shared/split.ts`, `client/pane-allowlist.ts`, `client/search-key.ts`, `shared/search-key.ts`, `client/search-focus.ts`, `shared/search-focus.ts`, `shared/home-keys.ts` | [client](docs/client.md) |
+| UI | `index.client.tsx`, `client/`, `client/row-badges.tsx`, `shared/row-badges.ts`, `client/host-slot.tsx`, `client/field.tsx`, `shared/placeholder-fit.ts`, `client/keyboard.tsx`, `client/scroll-allowlist.ts`, `client/split.tsx`, `shared/split.ts`, `client/pane-allowlist.ts`, `client/search-key.ts`, `shared/search-key.ts`, `client/search-focus.ts`, `shared/search-focus.ts`, `shared/home-keys.ts` | [client](docs/client.md) |
 | Chat card for agents and workspaces an agent creates | `shared/created.ts`, `server/created-items.ts`, `client/created.tsx` | [client](docs/client.md#created-agent-and-workspace-cards) |
 | Pasted images in every field whose words reach an agent (caps, the store, who takes them, the one component) | `shared/images.ts`, `server/image-store.ts`, `server/image-support.ts`, `client/image-attach.tsx`, `client/unsent-images.ts` | [client](docs/client.md#pasted-images), [rpcs-and-tools](docs/rpcs-and-tools.md#pasted-images) |
 | Shared copy and errors, scale bounds, paged lists | `shared/presentation.ts`, `shared/errors.ts`, `shared/tool-result.ts`, `shared/scale.ts`, `shared/paged.ts`, `shared/history.ts`, `shared/finished.ts`, `client/paged-list.tsx` | [client](docs/client.md) |
@@ -1954,6 +1954,24 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    6x CPU. Guarded by `tests/panel-open-reads.test.ts` (the real `useWorkspace` and `WorkspaceView`: one read past the
    old timer, the reviewer lists and a newer stamp both reach the view without one; the feed sends a refresh's stamps
    inside its window).
+
+153. **A placeholder never wraps** (`a-placeholder-never-wraps`). A one-line field's placeholder fits its one line at
+   any width and font scale: every field is `Field` (`client/field.tsx`), which measures its own text room on layout
+   (its width less its padding, Android's own 12 dp a side where the style sets none) and draws the longest of its
+   wordings that fits in the drawn font (`fitPlaceholder`, `shared/placeholder-fit.ts`; the style's size times the
+   system font scale on a phone, from a conservative Roboto estimate 13-18 % over Roboto's own widths, and the
+   browser's own measure on the web), else the shortest cut after its last whole word that fits with "…", else none,
+   never cut inside a word. A field passes its wordings longest first (Home's search: "Search or ask the Overseer",
+   "Search or ask", "Search"; `searchPlaceholder`), is named by its full wording whatever the width shows, and on a
+   phone shows its shortest wording until its width is known. A multi-line field's hint wraps with its text and is
+   left alone. 2026-11-28, the developer on an
+   Android phone with a large font size (2.6.0-beta.5): Home's search sits at about half the width beside four icon
+   buttons, and "Search or ask the Overseer" broke after "the" with the second line clipped under it. React Native on
+   Android draws a one-line TextInput's placeholder as a wrapping hint (its issue 14839), and Follow-up handed every
+   field its full wording whatever room it had; the web clipped the same hint mid-word ("Search or ask t"). Guarded by
+   `tests/placeholder-fit.test.ts` (the real `Field` and `QueryField` under the native stand-in, widths 40-360 at font
+   scales 0.85-2) and `scripts/screenshots.mjs --only search-wrap` (Home at 360 and 390, normal and large font, light
+   and dark; every visible placeholder measured against its room; writes `search-wrap.json`).
 
 ## Bugs
 

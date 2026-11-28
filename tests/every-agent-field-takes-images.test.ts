@@ -16,7 +16,7 @@ const AGENT_BOUND: Record<string, string> = {
   "catch-up.tsx|\"Tell the agent something\"": "Catch up's note to the card's agent",
   "home.tsx|{`Reply to ${agentName}`}": "Home's reply box: an agent's, and the Overseer's pane",
   "your-questions.tsx|{label}": "Your questions' ask field and Reply (AgentField): a question to an agent",
-  "home-chrome.tsx|{placeholder}": "QueryField: Home's search asks the Overseer (SearchField wraps it); the sidebar filter reuses it",
+  "home-chrome.tsx|{fullPlaceholder(placeholder)}": "QueryField: Home's search asks the Overseer (SearchField wraps it); the sidebar filter reuses it",
 };
 const NOT_AGENT_BOUND: Record<string, string> = {
   "new.tsx|{label}": "EditLine: a branch or title value in New's preview, not words to the agent",

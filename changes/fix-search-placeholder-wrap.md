@@ -1,0 +1,1 @@
+- On a phone with a large font size, Home's search hint no longer breaks onto a cut-off second line. A field too narrow for its hint shows a shorter one, like "Search or ask".
