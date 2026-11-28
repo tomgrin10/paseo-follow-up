@@ -33,6 +33,7 @@ import { DEFAULT_SORT, MENU_SORTS } from "../shared/sort";
 import { DEFAULT_HOME_VIEW, GROUPINGS, parseHomeView, SHOW_ITEMS } from "../shared/home-arrange";
 import { SCALE } from "../shared/scale";
 import { boundDone, newestFirst, pageInput } from "../shared/paged";
+import { boundReply } from "./bounded-reply";
 import { dispatchInputSchema } from "../shared/dispatch";
 import type { DispatchInput, DispatchPlan } from "./dispatch";
 
@@ -241,8 +242,15 @@ export class AgentActions {
   private now: () => number;
   constructor(private d: AgentActionDeps) { this.reviewersFor = d.reviewersFor ?? configuredReviewers; this.now = d.now ?? Date.now; }
 
-  /** Runs one tool for a verified root agent. The caller's identity is checked by the RPC before this. */
+  /**
+   * Runs one tool for a verified root agent. The caller's identity is checked by the RPC before this. Every reply goes
+   * through `boundReply`: a stored workspace inside it comes as workspace_status's summary (invariant 63, TOOL_BUDGET).
+   */
   async run(caller: string, tool: AgentTool, raw: unknown): Promise<unknown> {
+    return boundReply(await this.dispatch(caller, tool, raw));
+  }
+
+  private async dispatch(caller: string, tool: AgentTool, raw: unknown): Promise<unknown> {
     const parsed = TOOL_INPUT[tool].safeParse(raw ?? {});
     if (!parsed.success) throw new Error(`${tool}: ${parsed.error.issues.map(i => `${i.path.join(".") || "arguments"} ${i.message}`).join("; ")}`);
     const args = parsed.data as Record<string, any>;

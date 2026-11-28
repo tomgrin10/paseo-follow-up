@@ -211,9 +211,21 @@ summary was ~207k characters in a busy workspace (357 PRs, almost all merged), o
 | `context_requests` | asks still asking | answered, chat and failed asks (`settled`) |
 | `release_notes` | notes since `previous` | older notes (`older`) |
 
+| `report_issue` with `workspace_id` | live PRs, tasks, questions and batches of that workspace (`agentView`, fitted to `REPORT_LOCAL_ROOM`); live agents, the main first, at most `PAGE.toolPage` | each finished kind (`subject.local.history`); closed and archived agents (`agentsFinished`, counts) |
+
 `queue_list` (waiting items whole, at most `QUEUE_RECENT` sent ones with their text dropped), `dispatch_records`
 (`RECORDS_MAX`), `workstreams` (paged) and `linear_queue` (`limit`) were bounded already. Guarded by
 `tests/bounded-tools.test.ts`.
+
+**No reply carries a stored workspace whole.** `AgentActions.run` passes every action's reply through `boundReply`
+(`server/bounded-reply.ts`): a workspace record inside it (a planned action's confirm returns the workspace it
+changed: `answer_question`, `dismiss_question`, `run_recovery`, `set_workspace_spec`, `set_task_trigger`) comes as
+`workspace_status`'s summary, fitted to the room the rest of the reply leaves (`agentView`'s `budget`). 2026-11-28:
+`report_issue` with `workspace_id` returned 168,664 characters live, and on the live-sized seed `answer_question`'s
+confirm was ~1 MB. `tests/tool-replies-budget.test.ts` scans every tool: a bridge tool or action whose RPC contract's
+output reaches a workspace list is measured on the live-sized seed as the transport sends it (`compact`, dry run and
+confirm), and every other tool is measured or says why it carries no workspace, so a new tool fails until it is
+classified.
 
 ## Overseer tools
 

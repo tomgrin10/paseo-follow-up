@@ -16,3 +16,5 @@ export function finishedQuestion(q: Pick<Question, "id" | "answer" | "closed">, 
 export const finishedBatch = (b: { settledAt: string | null; state: string; movedOn?: unknown }): boolean =>
   !!b.movedOn || b.state === "completed" || b.state === "cancelled" || b.state === "blocked" && !!b.settledAt;
 export const finishedPrAction = (a: { state: string }): boolean => a.state !== "sending";
+/** An agent that is archived or closed is history: a count, never a row (a report's local view, invariant 154). */
+export const finishedAgent = (a: { status: string; archived?: boolean | null }): boolean => !!a.archived || a.status === "closed";

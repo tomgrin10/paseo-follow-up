@@ -5,6 +5,9 @@ import { summary, type State, type Workspace } from "../shared/model";
 import { checksState } from "../shared/pr-status";
 import type { Resources } from "../shared/resources";
 import type { UpdatesView } from "../shared/updates";
+import { agentView } from "../shared/history";
+import { finishedAgent } from "../shared/finished";
+import { PAGE, TOOL_BUDGET } from "../shared/paged";
 
 /**
  * Follow-up's adapter for the shared Report-an-issue module (server/report-issue/): its repository, its tool name,
@@ -28,9 +31,18 @@ export type FollowUpReportDeps = {
   toolTransport: () => string;
   startedAt: number;
   /** A workspace's agents from the directory (metadata only; never loads one), for a report about that workspace. */
-  agents?: (workspaceId: string) => Promise<{ id: string; title: string | null; provider: string; status: string }[]>;
+  agents?: (workspaceId: string) => Promise<ReportAgent[]>;
   now?: () => number;
 };
+
+/** One agent of the workspace, from the directory: `archived` and `closed` ones are history (`finishedAgent`). */
+export type ReportAgent = { id: string; title: string | null; provider: string; status: string; archived?: boolean; lastActivityAt?: string | null };
+
+/**
+ * The room a report's local view may take: TOOL_BUDGET less what the first reply carries beside it (the procedure,
+ * the issueGets rows, the note; ~6k). tests/report-subject-budget.test.ts measures the whole reply.
+ */
+export const REPORT_LOCAL_ROOM = TOOL_BUDGET - 10_000;
 
 const ago = (ms: number) => { const m = Math.round(ms / 60_000); return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`; };
 const onOff = (v: unknown) => v === true ? "on" : v === false ? "off" : "unknown";
@@ -111,22 +123,49 @@ export async function workspaceSubject(d: FollowUpReportDeps, workspaceId: strin
   const now = (d.now ?? Date.now)();
   const agents = await d.agents?.(workspaceId).catch(() => []) ?? [];
   const logs = d.logs.recent(40).filter(l => l.includes(workspaceId));
-  return { local: workspaceLocal(w, agents, logs, now), section: workspaceSection(w, agents, logs, now), privateTitles: workspaceTexts(w) };
+  return { local: workspaceLocal(w, agents, logs, now), section: workspaceSection(w, agents.filter(a => !a.archived), logs, now), privateTitles: workspaceTexts(w) };
 }
 
-function workspaceLocal(w: Workspace, agents: { id: string; title: string | null; provider: string; status: string }[], logs: string[], now: number) {
+/**
+ * Follow-up's view of the workspace, bounded like workspace_status (invariant 63's TOOL_BUDGET): `agentView` decides
+ * what comes (live work whole while it fits, finished items the newest `PAGE.recentDone` plus a count in `history`,
+ * glances when needed) and this only reshapes it into short rows. Live agents are rows (the main agent first, then
+ * running ones, newest first, at most `PAGE.toolPage`); closed and archived ones are counts. 2026-11-28, 2.6.0-beta.6:
+ * built from the raw lists, one busy workspace's view was 168,664 characters (every PR, agent and task it ever had).
+ */
+function workspaceLocal(w: Workspace, agents: ReportAgent[], logs: string[], now: number) {
   const st = summary(w, now);
-  return {
+  const at = (a: ReportAgent) => { const t = Date.parse(a.lastActivityAt ?? ""); return Number.isFinite(t) ? t : 0; };
+  const live = agents.filter(a => !finishedAgent(a))
+    .sort((a, b) => Number(b.id === w.mainAgentId) - Number(a.id === w.mainAgentId) || Number(b.status === "running") - Number(a.status === "running") || at(b) - at(a));
+  const head = {
     workspaceId: w.id, title: w.title, goal: w.goal, status: `${st.status}: ${st.label}${st.reason ? ` (${st.reason})` : ""}`,
     following: w.enable_tracking, autoSend: w.enable_auto_sends, hold: w.hold, archived: w.archived, sendWait: w.sendWait ?? null, mainBusy: w.mainBusy ?? null,
-    prs: w.prs.map(p => ({ pr: `${p.repo}#${p.number}`, title: p.snapshot?.title ?? null, state: p.snapshot?.state ?? "unknown", draft: p.snapshot?.draft ?? null,
-      checks: p.snapshot ? checksState(p.snapshot) : "unknown", conflict: p.snapshot?.conflict ?? null, review: p.snapshot?.reviewDecision ?? null, error: p.error, observed: age(p.snapshot?.observedAt, now) })),
-    tasks: w.obligations.map(o => ({ id: o.id, title: o.title, status: o.status })),
-    questions: w.questions.filter(q => !q.closed && !q.answer).map(q => ({ id: q.id, title: q.title, question: q.question })),
-    batches: w.batches.slice(-10).map(b => ({ id: b.id, state: b.state, tasks: b.tasks.length })),
-    agents: agents.map(a => ({ ...a, main: a.id === w.mainAgentId })),
+  };
+  const rest = {
+    agents: live.slice(0, PAGE.toolPage).map(a => ({ id: a.id, title: a.title, provider: a.provider, status: a.status, main: a.id === w.mainAgentId })),
+    ...(live.length > PAGE.toolPage ? { agentsMore: live.length - PAGE.toolPage } : {}),
+    agentsFinished: { closed: agents.filter(a => !a.archived && finishedAgent(a)).length, archived: agents.filter(a => a.archived).length },
     recentWarnings: logs,
   };
+  type V = ReturnType<typeof agentView<Workspace>>;
+  const rows = (v: V) => ({
+    ...head,
+    prs: v.prs.map(p => {
+      const g = p as typeof p & { glance?: true; snapshot: (typeof p.snapshot & { failedChecksCount?: number }) | null };
+      return { pr: `${p.repo}#${p.number}`, title: p.snapshot?.title ?? null, state: p.snapshot?.state ?? "unknown", draft: p.snapshot?.draft ?? null,
+        checks: !p.snapshot ? "unknown" : g.glance ? (g.snapshot?.failedChecksCount ? "failed" : "not read here") : checksState(p.snapshot),
+        conflict: p.snapshot?.conflict ?? null, review: p.snapshot?.reviewDecision ?? null, error: p.error, observed: age(p.snapshot?.observedAt, now) };
+    }),
+    tasks: v.obligations.map(o => ({ id: o.id, title: o.title, status: o.status })),
+    questions: v.questions.map(q => ({ id: q.id, title: q.title, ...(typeof (q as { question?: unknown }).question === "string" ? { question: (q as { question: string }).question } : {}),
+      state: q.closed ? "closed" : q.answer ? "answered" : "open" })),
+    batches: v.batches.map(b => ({ id: b.id, state: b.state, tasks: b.tasks.length })),
+    history: v.history,
+    ...(v.live && Object.values(v.live).some(x => x.more) ? { live: v.live } : {}),
+    ...rest,
+  });
+  return rows(agentView(w, { budget: REPORT_LOCAL_ROOM }, undefined, rows));
 }
 
 function workspaceSection(w: Workspace, agents: { id: string; provider: string; status: string }[], logs: string[], now: number) {

@@ -55,8 +55,10 @@ type AgentW = Hist & { prs: readonly ListPr[]; obligations: readonly { status: s
  * workspace_status: live items whole while they fit, otherwise schema-backed glances and live evidence pages.
  * Every finished kind keeps its newest `PAGE.recentDone`; evidence pages never empty other sections. A busy workspace
  * (350 merged PRs, 400 settled batches) made the summary ~207k characters, over a tool result's limit.
+ * `budget` is the room `sent(view)` may take: TOOL_BUDGET for workspace_status, less where the view is one part of a
+ * larger reply (a report's local view, an action's receipt; server/bounded-reply.ts).
  */
-export function agentView<W extends AgentW, X extends object = {}>(w: W, { kind, live, offset, limit }: { kind?: HistoryKind; live?: HistoryKind; offset?: number; limit?: number } = {}, extra?: X, sent: (view: W & X & { history: AgentHistory; live?: AgentHistory }) => unknown = view => view): W & X & { history: AgentHistory; live?: AgentHistory } {
+export function agentView<W extends AgentW, X extends object = {}>(w: W, { kind, live, offset, limit, budget = TOOL_BUDGET }: { kind?: HistoryKind; live?: HistoryKind; offset?: number; limit?: number; budget?: number } = {}, extra?: X, sent: (view: W & X & { history: AgentHistory; live?: AgentHistory }) => unknown = view => view): W & X & { history: AgentHistory; live?: AgentHistory } {
   // RPC validation rejects ambiguous selectors; direct readers still receive useful state.
   if (kind) live = undefined;
   const requested = Math.min(limit ?? PAGE.toolPage, PAGE.maxLimit);
@@ -65,7 +67,7 @@ export function agentView<W extends AgentW, X extends object = {}>(w: W, { kind,
     const view = { ...agentViewOf(w, { kind, live, offset, limit: size, compactLive, glanceChars, liveGlances }), ...(extra ?? {}) } as W & X & { history: AgentHistory; live?: AgentHistory };
     // Measure what the transport sends. Compact all live sections before shrinking an evidence page;
     // each other section keeps its glance, including all five recent records of every finished kind.
-    if (JSON.stringify(sent(view)).length <= TOOL_BUDGET) return view;
+    if (JSON.stringify(sent(view)).length <= budget) return view;
     if (!compactLive) { compactLive = true; continue; }
     if ((kind || live) && size > 1) { size = Math.max(1, Math.floor(size / 2)); continue; }
     if (glanceChars > 60) { glanceChars = Math.floor(glanceChars / 2); continue; }
