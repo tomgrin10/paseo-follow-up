@@ -17,7 +17,7 @@ import { LogRing } from "../server/report-issue/diagnostics";
 import { followUpReportConfig, reportPrompt, type FollowUpReportDeps } from "../server/report-issue-adapter";
 import { sendReport, type ReportSendDeps } from "../server/report-send";
 import { ROW_ACTIONS, rowMenu } from "../shared/row-menu";
-import { reportAbout } from "../shared/report-send";
+import { NEW_AGENT, defaultChoice, reportAbout } from "../shared/report-send";
 import { AGENT_TOOLS } from "../server/agent-actions";
 import { PARITY } from "../server/agent-parity";
 import { actionTools } from "../server/mcp.mjs";
@@ -171,16 +171,28 @@ test("the sheet says what it's about, Send carries the workspace, and × sends i
     const texts = () => r.root.findAll(n => typeof n.props.children === "string" || Array.isArray(n.props.children)).map(n => [n.props.children].flat().join(""));
     assert.ok(texts().some(t => t === `About ${SECRET_TEXT.title}`), "the About line names the workspace");
     if (remove) {
-      await act(async () => { r.root.findAll(n => n.props.accessibilityLabel === "Don't attach this workspace" && typeof n.props.onPress === "function")[0].props.onPress(); });
+      await act(async () => { r.root.findAll(n => n.props.accessibilityLabel === `Don't include ${SECRET_TEXT.title}` && typeof n.props.onPress === "function")[0].props.onPress(); });
       assert.ok(!texts().some(t => t.startsWith("About ")), "× removes the About line");
+      assert.ok(texts().some(t => t === `Include ${SECRET_TEXT.title}`), "and leaves a way to include it again");
     }
     await act(async () => { r.root.findAll(n => n.props.accessibilityLabel === "Describe it" && typeof n.props.onChangeText === "function")[0].props.onChangeText("Send did nothing"); });
-    await act(async () => { r.root.findAll(n => n.props.title === "Send to agent" && typeof n.props.onPress === "function")[0].props.onPress(); });
+    await act(async () => { r.root.findAll(n => (n.props.title === "Send to agent" || n.props.title === "Start agent and send") && typeof n.props.onPress === "function")[0].props.onPress(); });
     r.unmount();
     return client.rpcCalls.find(c => c.name === "follow.report-issue-send")!.input;
   };
-  assert.equal((await sendAndRead(false)).workspaceId, WS);
-  assert.equal((await sendAndRead(true)).workspaceId, undefined);
+  const about = await sendAndRead(false);
+  assert.equal(about.workspaceId, WS);
+  assert.equal(about.newAgentWorkspaceId, WS, "a new agent in that workspace, not its main agent");
+  const plain = await sendAndRead(true);
+  assert.equal(plain.workspaceId, undefined);
+  assert.equal(plain.agentId, "agent-main", "without the workspace, today's default");
+});
+
+test("a report about a workspace starts a new agent there by default, never pulling in its busy main agent", () => {
+  const t = { agents: [{ id: "agent-main" }], defaultId: "agent-main", newAgentWorkspace: { id: WS, title: "x" }, newWorkspace: null } as never;
+  assert.equal(defaultChoice(t, WS), NEW_AGENT);
+  assert.equal(defaultChoice(t, null), "agent-main", "without one, today's default");
+  assert.equal(defaultChoice({ ...(t as object), newAgentWorkspace: { id: "other", title: "y" } } as never, WS), "agent-main");
 });
 
 test("the About line applies to a bug only, until removed", () => {

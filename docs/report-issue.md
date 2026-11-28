@@ -134,7 +134,8 @@ The picker (`pickerRows`, `shared/report-send.ts`) pins the new rows first, then
 2. **A new agent in <workspace>** ("Starts there, with the default model").
 3. The agents: the default first (the agent the sheet opened for, then that workspace's, then main agents).
 
-The default pick is unchanged: the best agent, else a new agent; a new workspace is never picked for the developer.
+The default pick is the best agent, else a new agent; a report about a workspace picks a new agent in it
+([About a workspace](#about-a-workspace)); a new workspace is never picked for the developer.
 On desktop the agents scroll inside the picker (about three and a half rows) under the pinned rows. On phones they
 don't scroll by themselves: Paseo's bottom sheet coordinates one scrollable, its body, so the sheet scrolls and the
 new rows come first (`pickerScrolls`, invariant `sheet-content-scrolls-with-the-sheet`).
@@ -143,8 +144,10 @@ new rows come first (`pickerScrolls`, invariant `sheet-content-scrolls-with-the-
 
 Invariant 154 (`a-workspace-report-files-only-structure`). Opened from the row menu, the sheet shows "About
 <workspace>" above the text box: the agent reads that workspace's Follow-up state to diagnose, and the issue gets only
-counts and states. It applies to a bug only (switching to Idea or Feedback drops it) and × removes it. Send carries
-`workspaceId`, and the prompt asks the agent to pass `workspace_id` on every `report_issue` call.
+counts and states. It applies to a bug only (switching to Idea or Feedback drops it); × removes it and leaves "Include
+<workspace>" to bring it back. Send to defaults to a new agent in that workspace (`defaultChoice` with `about`), so the
+main agent the workspace depends on isn't pulled into diagnosing Follow-up; the developer can still pick any agent. Send
+carries `workspaceId`, and the prompt asks the agent to pass `workspace_id` on every `report_issue` call.
 
 The shared module has one optional hook for this, `subject: { param, read }` (`ReportPluginConfig`): the tool takes
 `param` (Follow-up: `workspace_id`) and `read(id)` returns three parts. Follow-up's is `workspaceSubject`
