@@ -1,0 +1,1 @@
+- Picking or closing a question in Needs you no longer redraws the whole workspace view on the desktop: only the card you touched changes.

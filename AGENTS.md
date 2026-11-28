@@ -1888,6 +1888,16 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    `tests/search-rows.test.ts` (the real `HomeList`: same query again draws nothing, a key that moves no highlight
    draws no row, a key that moves one draws that row and no rail).
 
+149. **A card resize redraws no other card** (`a-card-resize-redraws-no-other-card`). In the wide workspace view the
+   cards sit in columns placed from their measured heights (`placeCards`, `shared/workspace-layout.ts`); those heights
+   and the last placement live in `Columns` (`client/panel.tsx`), never in `WorkspaceView`'s own state. A card that
+   grows or shrinks (a question opened, picked or closed in Needs you) redraws the columns alone, and
+   every card in them is the element `WorkspaceView` last built, so React skips it. 2026-11-27, the developer: "Needs
+   you question open felt laggy"; the broad perf check found each pick or close in Needs you redrew the whole panel on
+   the desktop web, 3,400-3,600 components (every PR row, task and Activity row) for one tap, because every slot's
+   height went to the view's root. Guarded by `tests/card-resize.test.ts` (the real `WorkspaceView`, three columns: one
+   card's new height draws no text).
+
 ## Bugs
 
 Every bug is fixed for its whole class:
