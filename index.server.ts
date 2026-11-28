@@ -205,7 +205,7 @@ export default function contribute(server: PluginServerContext) {
   };
   // What each subscription feed is made of may have changed (wired to the feeds below, server/feeds.ts). Cheap: a feed
   // with no subscriber does nothing, and an unchanged value pushes nothing.
-  const feeds = { workspaces: () => {}, inbox: () => {}, home: () => {} };
+  const feeds = { workspaces: () => {}, inbox: () => {}, home: () => {}, readsNow: () => {} };
   const noteMainWork = async (agentId: string) => {
     // A cheap check on the snapshot first: almost every call has no open handover, so nothing is written.
     if (!(await store.snapshot()).workspaces.some(w => mainWorkDue(w, agentId, Date.now()))) return;
@@ -1051,7 +1051,8 @@ export default function contribute(server: PluginServerContext) {
     await requireReady();
     // While GitHub is off, Refresh checks it again first (one gh check, on the click), so turning it on shows at once.
     const recheck = githubSetup().off() ? githubSetup().check().then(() => undefined, () => undefined) : Promise.resolve();
-    void recheck.then(() => engine.tick({ workspaceId }));
+    // Its read stamps go out when the tick lands, not a feed window later: the open view reads no workspace again for them.
+    void recheck.then(() => engine.tick({ workspaceId })).then(() => feeds.readsNow(), () => undefined);
     return { ok: true };
   });
   handle(rpc.refineTasksRpc, async ({ workspaceId, tasks }) => {
@@ -2060,6 +2061,7 @@ export default function contribute(server: PluginServerContext) {
   });
   const displayFeed = new ValueFeed({ read: () => displaySettings.read() });
   feeds.workspaces = () => void workspacesFeed.changed();
+  feeds.readsNow = () => void workspacesFeed.changed({ readsNow: true });
   feeds.inbox = () => void inboxFeed.changed();
   feeds.home = () => void homeFeed.changed();
   // The daytime read runs only while an app client is open (the-brief-has-one-timer): a subscriber on the home feed,

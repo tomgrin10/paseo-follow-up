@@ -459,7 +459,9 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const invalidated = () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); };
   const auto = useMutation({ mutationFn: (next: boolean) => control({ workspaceId: w.id, enable_auto_sends: next }), onSuccess: (_, next) => { toast.show(next ? "Auto-send on for this workspace" : "Auto-send off · repairs wait for your Send"); invalidated(); }, onError: e => toast.error(errorText(e)) });
   // Opening a workspace reads its PRs now: background polling backs off for settled repositories (server/github.ts).
-  useEffect(() => { const t = setTimeout(invalidated, 1500); void refresh({ workspaceId: w.id }).catch(() => undefined); return () => clearTimeout(t); }, [w.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Nothing reads the workspace again after it (invariant 150): a change it finds moves the list copy's updatedAt, which
+  // re-reads once (useWorkspace), and its read stamps reach the "Checked" line through the feed.
+  useEffect(() => { void refresh({ workspaceId: w.id }).catch(() => undefined); }, [w.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const update = useMutation({ mutationFn: () => refresh({ workspaceId: w.id }), onSuccess: () => setTimeout(invalidated, 1200), onError: e => toast.error(errorText(e)) });
   const openAgent = navigation ? (agentId: string) => navigation.openAgent({ agentId }) : undefined;
   const done = summary(w, now).status === "done";

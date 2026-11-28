@@ -1,0 +1,1 @@
+- Opening a workspace's Follow-up panel downloads its details once instead of two or three times, so a phone does much less work in the seconds after it opens.

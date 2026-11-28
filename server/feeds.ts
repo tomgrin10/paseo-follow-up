@@ -64,12 +64,16 @@ export type WorkspacesEvent = { revision: number; full: boolean; workspaces: Lis
  * Read stamps never count (invariant 140): a change that moved only read stamps (ListCache's `stampsOnly`) goes to a
  * subscriber at most once per READS_PUSH_MS. A held one isn't lost: the subscriber keeps its revision, so its next push
  * (the next change after the window, with or without new entries) carries every stamp that moved since. No timer: the
- * worker's own ticks call `changed()`.
+ * worker's own ticks call `changed()`. A read the developer asked for (follow.refresh, also what opening a workspace
+ * sends) passes `readsNow`, so its stamps arrive when it lands: the open view's "Checked" line moves without a re-read
+ * of the workspace (invariant 150).
  */
 export class WorkspacesFeed {
   private subs = new Set<{ push: Push<WorkspacesEvent>; revision: number | undefined; error: string | null; readsAt: number }>();
   private reading: Promise<void> | null = null;
   private again = false;
+  /** The next pass sends held read stamps at once: a read the developer asked for (follow.refresh) shows when it lands. */
+  private readsNow = false;
   constructor(private cache: ListCache, private state: () => Promise<State>, private error: () => string | null, private now: () => number = Date.now) {}
   get size() { return this.subs.size; }
 
@@ -86,12 +90,14 @@ export class WorkspacesFeed {
     }).catch(() => undefined);
   }
 
-  changed(): Promise<void> {
-    if (!this.subs.size) return Promise.resolve();
+  changed(opts: { readsNow?: boolean } = {}): Promise<void> {
+    if (opts.readsNow) this.readsNow = true;
+    if (!this.subs.size) { this.readsNow = false; return Promise.resolve(); }
     if (this.reading) { this.again = true; return this.reading; }
     this.reading = (async () => {
       do {
         this.again = false;
+        const readsNow = this.readsNow; this.readsNow = false;
         const state = await this.state();
         const error = this.error();
         const answers = new Map<number | undefined, ReturnType<ListCache["answer"]>>();
@@ -101,7 +107,7 @@ export class WorkspacesFeed {
           const empty = !answer.full && !answer.workspaces.length && !answer.removed.length && !Object.keys(answer.reads).length;
           if (empty && sub.error === error) { sub.revision = answer.revision; return undefined; }
           // Only read stamps moved: hold them (keeping the revision) until the window is up.
-          if (answer.stampsOnly && sub.error === error && this.now() - sub.readsAt < READS_PUSH_MS) return undefined;
+          if (answer.stampsOnly && !readsNow && sub.error === error && this.now() - sub.readsAt < READS_PUSH_MS) return undefined;
           sub.revision = answer.revision; sub.error = error;
           if (Object.keys(answer.reads).length) sub.readsAt = this.now();
           const { stampsOnly: _s, ...event } = answer;

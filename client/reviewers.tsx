@@ -30,8 +30,9 @@ export function useReviewerSettings() {
     const noReview = query.data.noReview ?? [];
     if (JSON.stringify(query.data.config) === JSON.stringify(reviewerConfig()) && JSON.stringify([...noReview].sort()) === JSON.stringify(noReviewRepoList())) return;
     setReviewerConfig(query.data.config); setNoReviewRepos(noReview);
-    // Needs-you rows and counts were computed with the previous lists.
-    void cache.invalidateQueries({ queryKey: ["follow-up", "workspace"] }); void cache.invalidateQueries({ queryKey: ["follow-up", "overview"] });
+    // Needs-you rows and counts were computed with the previous lists: every open workspace redraws from the copy it
+    // already read (useWorkspace follows both lists), never a read of it again (invariant 150).
+    void cache.invalidateQueries({ queryKey: ["follow-up", "overview"] });
   }, [query.data]);
   return query;
 }

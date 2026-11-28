@@ -106,7 +106,10 @@ Answers that the client polls are kept small:
   every GitHub probe moves. They travel in the answer's `reads` (workspace id → PR key → `[observed, deployment?]`):
   a full answer carries all of them, a diff those that moved since and those of every workspace it sends, and the
   workspaces feed holds a stamps-only push until `READS_PUSH_MS` (60 s) after the subscriber's last stamps, keeping
-  its revision so the next push carries them. The client's live store fills them back in (`withReadStamps`).
+  its revision so the next push carries them. A read the developer asked for (`follow.refresh`, which opening a
+  workspace sends) passes `readsNow` when its tick lands, so its stamps go out at once. The client's live store fills
+  them back in (`withReadStamps`), and an open workspace view takes the newer ones over its full copy
+  (`newerReadStamps`, invariant 150).
   `tests/list-reply-budget.test.ts` keeps a full reply on the live-sized seed under `LIST_REPLY_BUDGET_KB` (1904 KB
   of whole workspaces, 1168 KB of list forms, 2026-11-13).
 - `follow.inbox-list` takes an `etag` and returns `{ unchanged: true }` when nothing changed (`server/etag.ts`).
