@@ -1983,18 +1983,6 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    `tests/placeholder-fit.test.ts` (the real `Field` and `QueryField` under the native stand-in, widths 40-360 at font
    scales 0.85-2) and `scripts/screenshots.mjs --only search-wrap` (Home at 360 and 390, normal and large font, light
    and dark; every visible placeholder measured against its room; writes `search-wrap.json`).
-155. **Nothing hides past the edge** (`nothing-hides-past-the-edge`). A row of chips that doesn't fit its width wraps
-   onto its own lines on every device; no client view scrolls sideways, where what lies past the edge is cut with
-   nothing saying more is there (`tests/strip-wraps.test.ts` sweeps the client for a sideways `ScrollView` or
-   `FlatList`; one is allowed only with a visible sign of more, named with why). Home's phone status strip
-   (`StatusStrip`, `client/home-chrome.tsx`) and the pill's Later choices (`client/pill.tsx`) wrap. This widens invariant
-   8's no-overflow rule, which only checked the page: a strip that scrolls inside the page never overflows it.
-   2026-11-28, the search-wrap renders of 2.6.0-beta.5: Home's phone strip ran off the right edge ("4 W" at 360 wide
-   with a large font, "1 Qui" at 390), a sideways scroller with its indicator hidden. Guarded by
-   `tests/strip-wraps.test.ts` (the real `StatusStrip` under the native stand-in) and `scripts/screenshots.mjs --only
-   strip-wrap` (Home on a phone at 360 and 390, normal and large font, light and dark: every strip chip inside the
-   viewport; writes `strip-wrap.json`).
-
 154. **A workspace report files only structure** (`a-workspace-report-files-only-structure`). Report a bug… (the last
    item of the shared row menu, so the panel's ⋯, Home and the sidebar all have it) opens the one Report sheet with an
    "About <workspace>" line (bugs only, removable) and a new agent in that workspace as the default Send to; Send
@@ -2010,6 +1998,18 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    with work-looking text: none of it, nor its id, reaches the body). The local view is bounded like
    `workspace_status` (invariant 63, `every-tool-reply-is-bounded`); bounding changes only what the agent reads, never
    the public section or the redaction list, which still takes every title of the workspace.
+
+155. **Nothing hides past the edge** (`nothing-hides-past-the-edge`). A row of chips that doesn't fit its width wraps
+   onto its own lines on every device; no client view scrolls sideways, where what lies past the edge is cut with
+   nothing saying more is there (`tests/strip-wraps.test.ts` sweeps the client for a sideways `ScrollView` or
+   `FlatList`; one is allowed only with a visible sign of more, named with why). Home's phone status strip
+   (`StatusStrip`, `client/home-chrome.tsx`) and the pill's Later choices (`client/pill.tsx`) wrap. This widens invariant
+   8's no-overflow rule, which only checked the page: a strip that scrolls inside the page never overflows it.
+   2026-11-28, the search-wrap renders of 2.6.0-beta.5: Home's phone strip ran off the right edge ("4 W" at 360 wide
+   with a large font, "1 Qui" at 390), a sideways scroller with its indicator hidden. Guarded by
+   `tests/strip-wraps.test.ts` (the real `StatusStrip` under the native stand-in) and `scripts/screenshots.mjs --only
+   strip-wrap` (Home on a phone at 360 and 390, normal and large font, light and dark: every strip chip inside the
+   viewport; writes `strip-wrap.json`).
 
 ## Bugs
 
