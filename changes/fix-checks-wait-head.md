@@ -1,1 +1,1 @@
-- Waiting for checks no longer reports a pass, failure or conflict right after a push from the previous commit's results. It waits for the checks on the new commit.
+- Waiting for checks no longer reports a result right after a push from the previous commit, or before the new commit's checks start. When a repository runs no checks, it says so.

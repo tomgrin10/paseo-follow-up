@@ -61,7 +61,10 @@ and the developer decides when those go out.
   the probe ask for the rollup's commit (`commits(last:1){commit{oid}}`) beside `headRefOid`; when they differ (after
   a push GitHub's commit list can still end at the old head) `parsePr` reads the checks as not reported yet
   (`checksRunning`, `checksPending`, `checksHead` naming the other commit), so the message, Needs you and the PR row
-  all keep waiting, and the commit catching up is a change the probe sees. `observedAt` is when the query was sent,
+  all keep waiting, and the commit catching up is a change the probe sees. A head with no check that counts
+  (`checksSeen` 0; a skipped or neutral review bot doesn't count) never passes on the 60 s settle: the watch waits for
+  checks on that head, or 10 min of quiet (`WATCH_NO_CHECKS_MS`), then says "no checks ran on <head>". Actions can
+  create a run 88 s or more after a push (#375's shape). `observedAt` is when the query was sent,
   not answered, so a read in flight across the agent's push predates the watch. Guarded by `tests/checks-head.test.ts`.
 - **The tool call owns its own verdict.** While the call answers, its watches are `answering` and passes skip them, so a
   verdict in the reply isn't also messaged. A worker that stops mid-call clears the flag on load.

@@ -42,6 +42,11 @@ export const snapshotSchema = z.object({
    * (checks-belong-to-the-current-head): parsePr reads another commit's results as nothing reported yet.
    */
   checksHead: z.string().nullable().optional(),
+  /**
+   * Checks that count on the head (`checksHead`): every check run and status except a skipped or neutral one (a review
+   * bot that skips). 0 right after a push, before CI has created its runs. Absent on older snapshots.
+   */
+  checksSeen: z.number().int().nonnegative().optional(),
   complete: z.boolean(), observedAt: z.string(),
   mergeCommit: z.string().nullable().optional(), deployment: deploymentSchema.nullable().optional(),
   mergedAt: z.string().nullable().optional(),

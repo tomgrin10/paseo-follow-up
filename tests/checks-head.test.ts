@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Github, fingerprint, parsePr } from "../server/github";
 import type { GithubApi } from "../server/github-api";
-import { watchVerdict, type CheckWatch, type WatchedPr } from "../shared/check-watch";
+import { WATCH_NO_CHECKS_MS, WATCH_SETTLE_MS, watchVerdict, type CheckWatch, type WatchedPr } from "../shared/check-watch";
 import { pr } from "./fixtures";
 
 // Invariant checks-belong-to-the-current-head (152): a pass, a failure or a conflict is reported only for results read
@@ -10,7 +10,7 @@ import { pr } from "./fixtures";
 // `commits(last:1)` still returned h1's rollup (all passed), and the watch said "all checks passed on h2" while h2's
 // workflow run was in progress.
 
-type Row = { head: string; checksOn: string; status: "IN_PROGRESS" | "COMPLETED"; conclusion: string | null };
+type Row = { head: string; checksOn: string; status: "IN_PROGRESS" | "COMPLETED"; conclusion: string | null; nodes?: { name: string; status: string; conclusion: string | null }[]; required?: string[] };
 function fakeGithub(row: Row, hooks: { beforeAnswer?: () => void } = {}) {
   const api: GithubApi = {
     async graphql(repo, query) {
@@ -21,11 +21,11 @@ function fakeGithub(row: Row, hooks: { beforeAnswer?: () => void } = {}) {
           headRefOid: row.head, headRefName: "export", baseRefName: "main", isDraft: false, mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", reviewDecision: "APPROVED",
           isInMergeQueue: false, autoMergeRequest: null, mergeCommit: null, mergedAt: null, author: { login: "alice" },
           reviewRequests: { pageInfo: { hasNextPage: false }, nodes: [] }, latestReviews: { pageInfo: { hasNextPage: false }, nodes: [] },
-          baseRef: { branchProtectionRule: { requiredStatusCheckContexts: ["verify"] }, rules: { pageInfo: { hasNextPage: false }, nodes: [] }, associatedPullRequests: { nodes: [] } },
+          baseRef: { branchProtectionRule: { requiredStatusCheckContexts: row.required ?? ["verify"] }, rules: { pageInfo: { hasNextPage: false }, nodes: [] }, associatedPullRequests: { nodes: [] } },
           reviewThreads: { pageInfo: { hasNextPage: false }, nodes: [] },
           commits: { nodes: [{ commit: { oid: row.checksOn, statusCheckRollup: { contexts: {
-            checkRunCountsByState: [{ state: row.status === "COMPLETED" ? row.conclusion : row.status, count: 1 }], statusContextCountsByState: [],
-            pageInfo: { hasNextPage: false }, nodes: [{ name: "verify", status: row.status, conclusion: row.conclusion }],
+            checkRunCountsByState: (row.nodes ?? [{ status: row.status, conclusion: row.conclusion }]).map(n => ({ state: n.status === "COMPLETED" ? n.conclusion : n.status, count: 1 })), statusContextCountsByState: [],
+            pageInfo: { hasNextPage: false }, nodes: row.nodes ?? [{ name: "verify", status: row.status, conclusion: row.conclusion }],
           } } } }] },
         };
       }
@@ -111,4 +111,45 @@ test("checks-belong-to-the-current-head: the probe sees the rollup's commit move
   const snap = parsePr({ ...base, title: "t", url: "u", isDraft: false, mergeable: "MERGEABLE", reviewThreads: { pageInfo: { hasNextPage: false }, nodes: [] },
     commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false }, nodes: [{ name: "verify", status: "COMPLETED", conclusion: "FAILURE" }] } } } }] } }, "main", iso(T0), ["verify"]);
   assert.deepEqual(snap.failedChecks, ["verify"]);
+});
+
+test("checks-belong-to-the-current-head: a head with no checks yet never passes on the settle window (#375 empty-head shape)", async () => {
+  // 2026-11-28, example/app#375 as GitHub recorded it: push at 01:12:01Z, only a review bot's skipped check from
+  // 01:12:20Z, the Actions run created 01:13:48Z (88 s later), verify running from 01:13:50Z. No required checks.
+  const push = Date.parse("2026-11-28T01:12:01Z");
+  const t = { now: push - 600_000 };
+  const bot = { name: "CodeRabbit", status: "COMPLETED", conclusion: "SKIPPED" };
+  const row: Row = { head: "h1aaaaaaaa", checksOn: "h1aaaaaaaa", status: "COMPLETED", conclusion: "SUCCESS", required: [], nodes: [{ name: "verify", status: "COMPLETED", conclusion: "SUCCESS" }] };
+  const github = new Github(undefined, undefined, undefined, fakeGithub(row), () => t.now);
+  await github.observe([target]);
+  t.now = push + 15_000;
+  const w = watch(t.now);
+  Object.assign(row, { head: "h2bbbbbbbb", checksOn: "h2bbbbbbbb", nodes: [bot] });
+  let r: { fire: unknown; next: CheckWatch } = { fire: null, next: w };
+  for (t.now = push + 20_000; t.now < Date.parse("2026-11-28T01:13:48Z"); t.now += 15_000) {
+    const s = (await github.observe([target])).get(target.key)!.snapshot!;
+    assert.equal(s.checksSeen, 0, "a skipped review bot is not a check on the head");
+    r = watchVerdict(r.next, watched(s), t.now, github.quietSince(target.key));
+    assert.equal(r.fire, null, `no verdict on an empty head at ${iso(t.now)}: ${(r.fire as { text?: string } | null)?.text}`);
+  }
+  t.now = Date.parse("2026-11-28T01:13:54Z");
+  Object.assign(row, { nodes: [bot, { name: "verify", status: "IN_PROGRESS", conclusion: null }, { name: "scale-live", status: "IN_PROGRESS", conclusion: null }] });
+  const running = (await github.observe([target])).get(target.key)!.snapshot!;
+  r = watchVerdict(r.next, watched(running), t.now, github.quietSince(target.key));
+  assert.equal(r.fire, null); assert.equal(r.next.runningHead, "h2bbbbbbbb");
+  t.now += 300_000;
+  Object.assign(row, { nodes: [bot, { name: "verify", status: "COMPLETED", conclusion: "SUCCESS" }, { name: "scale-live", status: "COMPLETED", conclusion: "SUCCESS" }] });
+  const done = (await github.observe([target])).get(target.key)!.snapshot!;
+  assert.equal((watchVerdict(r.next, watched(done), t.now, github.quietSince(target.key)).fire as { text: string }).text, "Follow-up checks example/app#375: all checks passed on h2bbbbb.");
+});
+
+test("checks-belong-to-the-current-head: a repository with no CI hears 'no checks ran' after the long quiet, never 'passed'", () => {
+  const w = watch(T0);
+  const empty = watched({ url: "https://github.com/example/app/pull/375", state: "OPEN", head: "h2bbbbbbbb", conflict: false, complete: true, observedAt: iso(T0 + 1_000), failedChecks: [], otherFailedChecks: [], checksPending: false, checksRunning: false, checksHead: "h2bbbbbbbb", checksSeen: 0 });
+  assert.equal(watchVerdict(w, empty, T0 + WATCH_NO_CHECKS_MS - 1_000, T0).fire, null);
+  const v = watchVerdict(w, empty, T0 + WATCH_NO_CHECKS_MS, T0).fire!;
+  assert.equal(v.text, "Follow-up checks example/app#375: no checks ran on h2bbbbb in 10 minutes, so there is nothing to wait for.");
+  // An older snapshot without the count keeps the settle rule it had.
+  const { checksSeen: _, ...old } = empty.snapshot!;
+  assert.equal(watchVerdict(w, watched(old), T0 + WATCH_SETTLE_MS, T0).fire?.kind, "passed");
 });

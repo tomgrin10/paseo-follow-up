@@ -42,9 +42,11 @@ export function parsePr(pr: Node, trunk: string, observedAt: string, required: s
   const otherFailedChecks: string[] = [];
   let checksPending = false;
   let checksRunning = false;
+  let checksSeen = 0;
   for (const c of checks) {
     const name = c.name ?? c.context;
     const conclusion = c.conclusion ?? c.state;
+    if (!["SKIPPED", "NEUTRAL"].includes(conclusion)) checksSeen++;
     if ((c.status && c.status !== "COMPLETED") || (!c.status && ["PENDING", "EXPECTED"].includes(conclusion))) checksRunning = true;
     if (!requiredSet.has(name)) {
       if ((!c.status || c.status === "COMPLETED") && failed.has(conclusion)) otherFailedChecks.push(name);
@@ -69,7 +71,7 @@ export function parsePr(pr: Node, trunk: string, observedAt: string, required: s
     },
     mergeWhenReady: "unknown",
     threads: threads.nodes.filter((t: Node) => !t.isResolved).map((t: Node) => ({ id: t.id, updatedAt: t.comments.nodes[0]?.updatedAt ?? observedAt })),
-    failedChecks, otherFailedChecks, checksPending, checksRunning, ...(checksHead ? { checksHead } : {}),
+    failedChecks, otherFailedChecks, checksPending, checksRunning, ...(checksHead ? { checksHead } : {}), checksSeen,
     complete: !threads.pageInfo.hasNextPage && !contexts?.pageInfo.hasNextPage && (pr.state !== "OPEN" || pr.mergeable !== "UNKNOWN"), observedAt,
     ...(typeof pr.mergeStateStatus === "string" ? { mergeStateStatus: pr.mergeStateStatus } : {}),
     ...(typeof pr.isInMergeQueue === "boolean" ? { inMergeQueue: pr.isInMergeQueue } : {}),
