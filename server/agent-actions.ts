@@ -210,7 +210,8 @@ export const TOOL_INPUT = {
   display_settings: z.strictObject({}),
   make_main_agent: z.strictObject({ agentId: id.optional(), reason: z.string().trim().min(1).max(200).optional(), requested: z.enum(["developer", "self"]).optional(), ...confirm }),
   set_display: z.strictObject({ values: z.record(z.string(), z.union([z.boolean(), z.string(), z.number(), z.record(z.string(), z.unknown())])).optional(), ...confirm }),
-  report_issue: reportInputSchema,
+  // workspace_id is the shared module's subject (followUpReportConfig): it reads and strips it before its own schema.
+  report_issue: reportInputSchema.extend({ workspace_id: id.optional() }),
   ...Object.fromEntries(RPC_TOOLS.map(t => [t.name, t.input])),
 } as unknown as Record<AgentTool, z.ZodType>;
 

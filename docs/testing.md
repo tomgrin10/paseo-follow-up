@@ -241,6 +241,11 @@ PLAYWRIGHT_CORE=<playwright-core dir> CHROMIUM=<chromium binary> ~/paseo-harness
   and the browser's clock is frozen with `page.clock`. The server id is fixed and project ids come from a counter, so
   the sidebar's project avatar keeps its colour. Two runs give the same images. It waits on UI states, not
   sleeps.
+- **Report a bug… (`--only home --report-panel-review`).** Review evidence, not README images:
+  the panel's ⋯ with the entry, the row menu on a phone, the sheet already about the workspace, and the dry run the
+  agent shows before any yes (`scripts/report-preview.ts`: the real Reporter and Follow-up's adapter on a fictional
+  workspace, offline, the environment rows fictional; nothing is filed). Desktop and phone, light and dark; every shot
+  fails on horizontal overflow.
 - **Synthetic only.** `example/app`, made-up people (Dana, Ravi), Linear-style keys (`APP-142`, `WEB-17`). Never real
   repos, names, channels or anything from a real Paseo home. This is a public repo.
 - **Shots** (`follow-up-<shot>.png`, into `--out`, default `docs/screenshots/`): `setup`, `home`, `panel`,

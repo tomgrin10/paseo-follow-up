@@ -69,3 +69,14 @@ export function reportWorkspaceTitle(kind: ReportKind, text: string, error?: str
   const words = (space > room / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:.!?-]+$/, "");
   return `${prefix}${words}…`;
 }
+
+/**
+ * The workspace a report is about (the row menu's Report a bug…), while it applies: only for a bug
+ * ("if needed": an idea or feedback isn't about one workspace's state) and until the developer removes it. Its id goes
+ * with Send, and the agent reads that workspace's Follow-up state locally; the public issue gets only structural rows.
+ */
+export function reportAbout(request: { about?: string | null }, kind: "bug" | "feature" | "feedback", removed: boolean): string | null {
+  return request.about && kind === "bug" && !removed ? request.about : null;
+}
+/** The About line's words: what goes where, in one breath. */
+export const ABOUT_LINE = "The agent reads its Follow-up state to diagnose. The issue gets only counts and states, no names or text.";

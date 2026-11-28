@@ -39,6 +39,13 @@ export type ReportPluginConfig = {
   diagnostics: () => Promise<Diagnostics>;
   /** What to redact: repository names and titles the plugin knows. Hostname and home are added here. */
   redaction?: () => Promise<RedactionContext>;
+  /**
+   * Optional: what the report is about (a workspace, a document), passed by the agent as `param` (e.g. "workspace_id").
+   * `read(id)`: `local` goes only to the reporting agent, to diagnose with; `section` (structural rows: states, counts,
+   * timings, codes) is the only part that reaches the issue, redacted again; `privateTitles` join this report's
+   * redaction list. Null: no such subject.
+   */
+  subject?: { param: string; read: (id: string) => Promise<{ local: Record<string, unknown>; section: DiagnosticsSection; privateTitles?: readonly string[] } | null> };
   /** Reads a screenshot (tests inject one). */
   readFile?: (path: string) => Promise<Buffer>;
   now?: () => number;
@@ -75,6 +82,7 @@ export const reportInputSchema = z.strictObject({
   confirm: z.boolean().optional(),
   screenshot_consent: z.boolean().optional(),
 });
+const subjectId = z.string().trim().min(1).max(200);
 export type ReportInput = z.infer<typeof reportInputSchema>;
 
 /** The tool's JSON schema, for MCP registration (kept beside the zod one; a test checks they agree). */
@@ -86,11 +94,15 @@ export const reportToolProperties = {
   confirm: { type: "boolean" },
   screenshot_consent: { type: "boolean" },
 } as const;
+/** The tool's properties with the subject's parameter, for a plugin that has one. */
+export const reportToolPropertiesFor = (subjectParam?: string) => subjectParam ? { ...reportToolProperties, [subjectParam]: { type: "string" } } : reportToolProperties;
 
 const IMAGE = new Map([[".png", "png"], [".jpg", "jpg"], [".jpeg", "jpg"], [".gif", "gif"], [".webp", "webp"]]);
 const MAX_IMAGE = 10 * 1024 * 1024;
 const PLAN_TTL = 20 * 60_000;
 const FIELDS: (keyof ReportFields)[] = ["title", "what_happened", "steps", "expected", "actual", "problem", "proposal", "alternatives", "feedback", "context", "findings"];
+
+type Subject = { id: string; local: Record<string, unknown>; section: DiagnosticsSection; privateTitles?: readonly string[] };
 
 type Plan = {
   id: string; caller: string; expiresAt: number;
@@ -109,17 +121,28 @@ export class Reporter {
 
   /** One tool call. `caller` is the agent, from the host (never an argument): a plan runs only for the agent that made it. */
   async run(caller: string, raw: unknown): Promise<Record<string, unknown>> {
-    const parsed = reportInputSchema.safeParse(raw ?? {});
+    const param = this.c.subject?.param;
+    const { [param ?? "\0"]: rawSubject, ...rest } = (raw ?? {}) as Record<string, unknown>;
+    const parsed = reportInputSchema.safeParse(param ? rest : raw ?? {});
     if (!parsed.success) throw new Error(`${this.c.toolName}: ${parsed.error.issues.map(i => `${i.path.join(".") || "arguments"} ${i.message}`).join("; ")}`);
     const a = parsed.data;
+    const sid = param && rawSubject !== undefined ? subjectId.safeParse(rawSubject) : null;
+    if (sid && !sid.success) throw new Error(`${this.c.toolName}: ${param} must be an id.`);
     if (a.confirm) return this.confirm(caller, a);
     if (!a.kind) throw new Error(`${this.c.toolName}: give kind (bug, feature or feedback) and a one-line summary first.`);
-    if (!a.fields || !Object.keys(a.fields).length) return this.procedure(a.kind, a.summary);
-    return this.dryRun(caller, a.kind, a.fields);
+    const about = sid?.success ? await this.subject(sid.data) : null;
+    if (!a.fields || !Object.keys(a.fields).length) return this.procedure(a.kind, a.summary, about);
+    return this.dryRun(caller, a.kind, a.fields, about);
+  }
+
+  private async subject(id: string) {
+    const got = await this.c.subject!.read(id);
+    if (!got) throw new Error(`${this.c.toolName}: ${this.c.name} knows nothing as ${this.c.subject!.param}=${id}. Check the id, or leave ${this.c.subject!.param} out to report without it.`);
+    return { id, ...got };
   }
 
   /** Call 1: the whole procedure, only now that someone is reporting. */
-  procedure(k: ReportKind, summary?: string) {
+  procedure(k: ReportKind, summary?: string, about: Subject | null = null) {
     const t = this.c.toolName;
     const fields = (list: readonly (keyof ReportFields)[]) => Object.fromEntries(list.map(f => [f, FIELD_HELP[f]]));
     return {
@@ -139,17 +162,24 @@ export class Reporter {
         `7. Only after an explicit yes to filing: call ${t} with confirm=true, the planId, and screenshot_consent=true or false. Never file without that yes; ${this.c.repo} is public.`,
         `8. Give them the link. If the images weren't uploaded, ask them to drag them into the issue at that link.`,
       ],
-      next: `Interview the developer, then call ${t} with kind="${k}" and fields.`,
+      ...(about ? { subject: {
+        id: about.id,
+        local: about.local,
+        issueGets: about.section.rows,
+        note: `local is for you to diagnose with and stays on this machine. ${this.c.repo} is public: never copy names, titles or text from local into the fields. The issue gets only the issueGets rows (for a bug), added and redacted by ${t}. Pass ${this.c.subject!.param}="${about.id}" on every call.`,
+      } } : {}),
+      next: `Interview the developer, then call ${t} with kind="${k}"${about ? `, ${this.c.subject!.param}="${about.id}"` : ""} and fields.`,
     };
   }
 
-  private async redactor(allow: string[]): Promise<Redactor> {
+  private async redactor(allow: string[], extraTitles: readonly string[] = []): Promise<Redactor> {
     const base = await this.c.redaction?.().catch(() => ({} as RedactionContext)) ?? {};
     const candidates = [...new Set([...(base.privateRepos ?? []), ...(base.publicRepos ?? [])])].filter(r => r.toLowerCase() !== this.c.repo.toLowerCase());
     const pub = await publicRepos(this.c.github, candidates, this.visibility, this.now()).catch(() => new Set<string>());
     const host = hostname();
     return new Redactor({
       ...base,
+      privateTitles: [...(base.privateTitles ?? []), ...extraTitles],
       hostnames: [...(base.hostnames ?? []), host],
       home: base.home ?? homedir(),
       privateRepos: candidates.filter(r => !pub.has(r.toLowerCase())),
@@ -158,8 +188,9 @@ export class Reporter {
     });
   }
 
-  private async diagnostics(k: ReportKind, r: Redactor): Promise<string> {
-    const d = await this.c.diagnostics().catch((error: unknown): Diagnostics => ({ sections: [{ title: "Diagnostics", level: "versions", rows: [["Error", `couldn't collect: ${error instanceof Error ? error.message : String(error)}`]] }] }));
+  private async diagnostics(k: ReportKind, r: Redactor, extra: DiagnosticsSection | null = null): Promise<string> {
+    const got = await this.c.diagnostics().catch((error: unknown): Diagnostics => ({ sections: [{ title: "Diagnostics", level: "versions", rows: [["Error", `couldn't collect: ${error instanceof Error ? error.message : String(error)}`]] }] }));
+    const d: Diagnostics = extra ? { ...got, sections: [...got.sections, extra] } : got;
     const clean: Diagnostics = { sections: d.sections.map(s => ({ ...s, title: r.text(s.title), rows: s.rows.map(([a, b]) => [r.text(a), r.text(b)] as [string, string]) })), logs: d.logs?.map(l => r.text(l)) };
     return renderDiagnostics(k, clean, { plugin: this.c.name });
   }
@@ -179,19 +210,19 @@ export class Reporter {
   }
 
   /** Call 2: refuse with what's missing, or plan the issue. Reads only (invariant `report-issue-files-only-after-confirm`). */
-  private async dryRun(caller: string, k: ReportKind, a: z.infer<typeof reportFieldsSchema>) {
+  private async dryRun(caller: string, k: ReportKind, a: z.infer<typeof reportFieldsSchema>, about: Subject | null = null) {
     const fields: ReportFields = Object.fromEntries(FIELDS.filter(f => a[f] !== undefined).map(f => [f, a[f]]));
     const missing = missingFields(k, fields);
     if (missing.required.length) {
       return { stage: "missing", kind: k, missing: missing.required, help: Object.fromEntries(missing.required.map(f => [f, FIELD_HELP[f]])), next: `Ask the developer for ${missing.required.join(", ")}, then call ${this.c.toolName} again with kind and every field in fields. Nothing was filed.` };
     }
-    const r = await this.redactor(a.allow_names ?? []);
+    const r = await this.redactor(a.allow_names ?? [], about?.privateTitles ?? []);
     const clean = r.deep(fields);
     const title = r.text(fields.title).slice(0, 120);
     const shots = await this.screenshots(a.screenshots ?? []);
     if (shots.problems.length) throw new Error(`${this.c.toolName}: ${shots.problems.join("; ")}. Fix the paths or leave those screenshots out.`);
     const descriptions = shots.out.map(s => ({ ...s, description: r.text(s.description) }));
-    const block = await this.diagnostics(k, r);
+    const block = await this.diagnostics(k, r, about?.section ?? null);
     const comment = a.comment_on ? await existingIssue(this.c.github, this.c.repo, a.comment_on).catch((e: unknown) => { throw new Error(`${this.c.toolName}: ${e instanceof Error ? e.message : String(e)}`); }) : null;
     const duplicates: Duplicate[] = comment ? [] : await findDuplicates(this.c.github, this.c.repo, title).catch(() => []);
     const date = new Date(this.now()).toISOString().slice(0, 10);

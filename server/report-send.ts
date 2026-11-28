@@ -13,7 +13,7 @@ import { reportWorkspaceTitle, type ReportKind } from "../shared/report-send";
  * call is refused, so the developer is never offered a start the host would turn down. Follow-up then tracks the new
  * workspace through the project's normal follow settings; nothing here enrolls it.
  */
-export type ReportSendInput = { kind: ReportKind; text: string; error?: string | null; agentId?: string; newAgentWorkspaceId?: string; newWorkspaceProjectId?: string };
+export type ReportSendInput = { kind: ReportKind; text: string; error?: string | null; agentId?: string; newAgentWorkspaceId?: string; newWorkspaceProjectId?: string; /** The workspace the report is about (the panel's ⋯ entry): the prompt names it. */ workspaceId?: string | null };
 /** `queued`: handed to an existing agent through the message queue (sent in the background, retried until it lands). */
 export type ReportSendResult = { agentId: string; title: string; started: boolean; workspaceId?: string; queued?: boolean };
 type AgentHandle = { id: string };
@@ -46,8 +46,8 @@ export function newWorkspaceTarget(rows: DirectoryRows | null, workspaceId: stri
 export const agentTitleFor = (kind: ReportKind) => kind === "bug" ? "Report a Follow-up bug" : kind === "feature" ? "Follow-up feature request" : "Follow-up feedback";
 
 export async function sendReport(d: ReportSendDeps, input: ReportSendInput): Promise<ReportSendResult> {
-  const { kind, text, error, agentId, newAgentWorkspaceId, newWorkspaceProjectId } = input;
-  const prompt = reportPrompt(kind, text, error);
+  const { kind, text, error, agentId, newAgentWorkspaceId, newWorkspaceProjectId, workspaceId } = input;
+  const prompt = reportPrompt(kind, text, error, workspaceId);
   if (agentId) {
     await d.sendTo(agentId, prompt, randomUUID());
     return { agentId, title: (await d.agentTitle(agentId).catch(() => null)) ?? "the agent", started: false, queued: true };

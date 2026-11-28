@@ -159,8 +159,8 @@ the developer's; it never clears a Needs-you flag and never passes the Overseer'
 | `updates_status`, `check_updates` | `follow.updates` | read / write (no plan) |
 | `set_updates`, `install_update` | `follow.set-updates`, `follow.install-update` | planned ([updates.md](updates.md)) |
 | `retry_move` | `follow.retry-move` | planned ([updates.md](updates.md#moving-from-1x)) |
-| `report_issue` | `follow.report-issue-targets`, `follow.report-issue-send`, `follow.report-issue-link` | its own dry run and confirm (`SELF_PLANNED_TOOLS`); files a bug, feature request or feedback in Follow-up's repository after the developer's yes. Served to contributors too. [report-issue.md](report-issue.md) |
-| `report_send` | `follow.report-issue-send` | planned; hands the developer's report to an agent, a new agent in a workspace or a new workspace, like Report an issue's Send. [report-issue.md](report-issue.md#send-to) |
+| `report_issue` | `follow.report-issue-targets`, `follow.report-issue-send`, `follow.report-issue-link` | its own dry run and confirm (`SELF_PLANNED_TOOLS`); files a bug, feature request or feedback in Follow-up's repository after the developer's yes. `workspace_id`: a report about that workspace (its view comes back locally; the issue gets only structural rows, invariant 154). Served to contributors too. [report-issue.md](report-issue.md) |
+| `report_send` | `follow.report-issue-send` | planned; hands the developer's report to an agent, a new agent in a workspace or a new workspace, like Report an issue's Send; `workspaceId` names the workspace it's about. [report-issue.md](report-issue.md#send-to) |
 | `workspace_status` | `follow.created-items` | read. The chat's created-agent / created-workspace cards: live states from the engine's cached directory rows and Follow-up's line for the workspace ([client.md](client.md#created-agent-and-workspace-cards)). |
 | `trust_bypass_status` | `follow.trust-bypass` | read |
 | `catch_up_deck` | `follow.catch-up-deck` | read. Catch up's deck as Home would deal it (one card per ask, Home's Needs-you order and `home_sort`), each card with its More context ask. Built when read from the worker's own state; the client deals the same deck from Home's model ([needs-you.md](needs-you.md#catch-up)). |
@@ -276,7 +276,7 @@ nothing. On 0.15 there is no `client.subscribe`, and the client polls the RPCs a
 | Getting started | `follow.onboarding`, `follow.set-onboarding`, `follow.onboarding-checks` |
 | Chat: created agent and workspace cards | `follow.created-items` |
 | Agent peek (panel lines, Home rows) | `follow.agent-turn` (an unloaded agent's current turn from its saved transcript, never the daemon; a loaded agent is read through Paseo's own timeline) |
-| Report a bug (Settings → General → Help, ⌘K, `/report-issue`, error toasts) | `follow.report-issue-targets`, `follow.report-issue-send`, `follow.report-issue-link` |
+| Report a bug (Settings → General → Help, ⌘K, `/report-issue`, error toasts, the row menu's Report a bug…) | `follow.report-issue-targets`, `follow.report-issue-send`, `follow.report-issue-link` |
 | Release notes and updates | `follow.release-notes`, `follow.whats-new-seen`, `follow.updates`, `follow.set-updates`, `follow.install-update`, `follow.retry-move`, `follow.dismiss-update-notice` |
 
 ## Pasted images

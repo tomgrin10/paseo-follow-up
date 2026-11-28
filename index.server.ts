@@ -1959,6 +1959,9 @@ export default function contribute(server: PluginServerContext) {
     github: githubApi(), updates: () => updatesView(), call: (method, input) => rpcBridge.call(method, input ?? {}), snapshot: () => store.snapshot(),
     resources: () => governor.current(), serverInfo: () => withDaemon(async client => (client as ServerInfoClient).getLastServerInfoMessage?.() as never), logs: logRing,
     toolTransport: () => toolTransport, startedAt,
+    // A report about one workspace: its agents from the directory (metadata only, wakes nothing).
+    agents: async workspaceId => ((await gateway.directory.read().catch(() => null))?.agents ?? []).map(r => r.agent).filter(a => a.workspaceId === workspaceId && !a.archivedAt && !a.background)
+      .map(a => ({ id: a.id, title: a.title ?? null, provider: a.provider, status: a.status })),
   });
   const agentActions = new AgentActions({ timeZone: () => clientTimeZone, autoSendsHeld: () => !governor.allowsBackground(), store, prActions: actions, engine, inbox, priorities: priorityStore, about, agentSettings, wait: { status: currentWait }, prWorkflows: () => prWorkflowView(), rpc: rpcBridge, display: displayBridge, report: { run: (caller, args) => reportKit.reporter.run(caller, args) }, agentTitle: async id => (await api?.agents.ref(id).refresh().catch(() => null))?.agent?.title ?? null,
     pins: {
