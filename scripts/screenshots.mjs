@@ -48,7 +48,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as the CHANGELOG's newest stable, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["menu-bounds", "tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "keyboard-room", "search-wrap", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "peek", "pr-now", "panel-folds", "optimistic-answers", "workspace-view", "question-links", "gallery", "frames", "onboarding", "setup-popup", "advanced"];
+const REVIEW_SHOTS = ["menu-bounds", "tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "keyboard-room", "search-wrap", "strip-wrap", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "peek", "pr-now", "panel-folds", "optimistic-answers", "workspace-view", "question-links", "gallery", "frames", "onboarding", "setup-popup", "advanced"];
 /** Pasted images and their Add image button share one harness setup (an Overseer and the fixture provider taking images). */
 const PASTE_LIKE = only => only.includes("paste-images") || only.includes("attach-images");
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
@@ -2450,6 +2450,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   if (only.includes("optimistic-answers")) await optimisticAnswerShots({ shoot });
   if (only.includes("keyboard-room")) await keyboardRoomShots({ shoot, call, home });
   if (only.includes("search-wrap")) await searchWrapShots({ shoot, out });
+  if (only.includes("strip-wrap")) await stripWrapShots({ shoot, out });
   if (only.includes("more-context")) await moreContextShots({ shoot, call });
   if (only.includes("your-questions")) await yourQuestionsShots({ shoot, call, seeded, home, cli });
   if (only.includes("paste-images")) await pasteImagesShots({ shoot, call });
@@ -6161,6 +6162,39 @@ async function searchWrapShots({ shoot, out }) {
     }, { init, mobile: true });
   }
   await fs.writeFile(join(out, `${before ? "before-" : ""}search-wrap.json`), JSON.stringify(checks, null, 2));
+}
+
+/**
+ * strip-wrap (nothing-hides-past-the-edge, invariant 155): Home's status strip on a phone, 360 and 390 wide, at the
+ * normal font and a large one (search-wrap's text-size-adjust), light and dark. Checks every chip of the strip lies
+ * inside the viewport and the strip has nothing scrolled out of sight; writes `strip-wrap.json`, a chip past the edge
+ * fails the run. `--strip-wrap-before` names the shots `before-` and records without failing.
+ */
+async function stripWrapShots({ shoot, out }) {
+  const before = argv.includes("--strip-wrap-before");
+  const checks = [];
+  for (const width of [360, 390]) for (const scale of [1, 1.3]) for (const theme of ["light", "dark"]) {
+    const name = `${before ? "before-" : ""}strip-wrap-${width}-${scale === 1 ? "font100" : "font130"}-${theme}`;
+    const init = `document.addEventListener("DOMContentLoaded", () => { const s = document.createElement("style"); s.textContent = "* { -webkit-text-size-adjust: ${scale * 100}% !important; text-size-adjust: ${scale * 100}% !important; }"; document.head.appendChild(s); });`;
+    await shoot(name, { width, height: 844 }, theme, async page => {
+      await openHome(page); await page.setViewportSize({ width, height: 844 });
+      const strip = page.locator('[aria-label="Status"]').filter({ visible: true }).first();
+      await strip.waitFor();
+      await page.waitForTimeout(600);
+      const result = await strip.evaluate(el => {
+        const vw = window.innerWidth;
+        const scroller = [el, ...el.querySelectorAll("*")].find(n => n.scrollWidth > n.clientWidth + 1 && getComputedStyle(n).overflowX !== "visible");
+        const chips = [...el.querySelectorAll('[role="button"]')].map(b => { const r = b.getBoundingClientRect(); return { label: b.getAttribute("aria-label"), left: Math.round(r.left), right: Math.round(r.right), top: Math.round(r.top) }; });
+        return { vw, hidden: scroller ? scroller.scrollWidth - scroller.clientWidth : 0, chips, past: chips.filter(c => c.right > vw || c.left < 0).map(c => c.label), lines: new Set(chips.map(c => c.top)).size };
+      });
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+      checks.push({ name, width, scale, theme, ...result, overflow });
+      if (!before && (overflow || result.past.length || result.hidden > 0)) throw new Error(`${name}: ${JSON.stringify({ past: result.past, hidden: result.hidden, overflow })}`);
+      const box = await strip.boundingBox();
+      return { x: 0, y: 0, width, height: Math.min(844, Math.ceil((box?.y ?? 0) + (box?.height ?? 0) + 140)) };
+    }, { init, mobile: true });
+  }
+  await fs.writeFile(join(out, `${before ? "before-" : ""}strip-wrap.json`), JSON.stringify(checks, null, 2));
 }
 
 /**

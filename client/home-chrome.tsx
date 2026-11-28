@@ -406,11 +406,15 @@ export function StatusStrip({ theme, model, filter, onFilter, touch, dense }: { 
   const chips = <>
     {STRIP.filter(s => !touch || counts[s.id] > 0 || filter === s.id).map(s => chip(s.id, s.label, counts[s.id], filter === s.id, () => onFilter(filter === s.id ? null : s.id), s.id === "needs" && counts.needs ? c.statusWarning : undefined))}
     {counts.later > 0 && chip("later", "Later", counts.later, filter === "later", () => onFilter(filter === "later" ? null : "later"))}
-    {counts.archivable > 0 && <Text style={{ color: c.statusSuccess, fontSize: 12, paddingHorizontal: 6 }}>{counts.archivable} to archive</Text>}
+    {/* On a phone it sits in the chips' 44 row (a box, not a lineHeight, which a large font would scale), so a wrapped line keeps the strip's rhythm. */}
+    {counts.archivable > 0 && (touch
+      ? <View testID="strip-archivable" style={{ minHeight: 44, justifyContent: "center" }}><Text style={{ color: c.statusSuccess, fontSize: 12, paddingHorizontal: 6 }}>{counts.archivable} to archive</Text></View>
+      : <Text style={{ color: c.statusSuccess, fontSize: 12, paddingHorizontal: 6 }}>{counts.archivable} to archive</Text>)}
   </>;
-  // Phones: only groups that have something, on one line that scrolls sideways instead of wrapping.
-  if (touch) return <ScrollView horizontal showsHorizontalScrollIndicator={false} accessibilityRole="toolbar" accessibilityLabel="Status"
-    contentContainerStyle={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 12, paddingVertical: 2 }}>{chips}</ScrollView>;
+  // Phones: only groups that have something, wrapping onto a second line when a narrow screen or a large font needs it
+  // (nothing-hides-past-the-edge: a sideways scroller cut its last chip at the edge with nothing saying more was there).
+  if (touch) return <View accessibilityRole="toolbar" accessibilityLabel="Status"
+    style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 8, paddingHorizontal: 12, paddingVertical: 2 }}>{chips}</View>;
   return <View accessibilityRole="toolbar" accessibilityLabel="Status" style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: dense ? 0 : 2, rowGap: 2, paddingHorizontal: dense ? 4 : 10 }}>
     {chips}
   </View>;
