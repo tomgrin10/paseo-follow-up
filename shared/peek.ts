@@ -13,7 +13,10 @@
  *   - moving into the peek never switches agents: lines crossed on the way only arm a takeover, which needs the same
  *     OPEN_MS rest on that line and is dropped when the pointer reaches the peek or leaves the line;
  *   - once the pointer entered the peek while it shows a permission request, it stays until closed (Esc, a click
- *     outside, Open chat, an answer) or another line takes over after its OPEN_MS rest.
+ *     outside, Open chat, an answer) or another line takes over after its OPEN_MS rest;
+ *   - where the pointer is, read from the document (`pointer`, `pointerWhere`), decides as the enter and leave events
+ *     do, so an open peek closes once the pointer is outside the line and the peek even when a leave event never
+ *     arrives (invariant 151, an-open-peek-closes-when-the-pointer-is-away).
  */
 
 export const OPEN_MS = 350;
@@ -46,7 +49,17 @@ export type PeekEvent =
   | { type: "peekLeave"; t: number }
   | { type: "asking"; on: boolean; t: number }
   | { type: "tick"; t: number }
+  /** Where the document says the pointer is: over the open line, the line arming a takeover, the peek, or none. */
+  | { type: "pointer"; where: PointerWhere; t: number }
   | { type: "close" };
+
+export type PointerWhere = "line" | "pending" | "peek" | "away";
+export type Box = { left: number; top: number; right: number; bottom: number };
+/** The peek first (it may overlap the line), then the open line, then the line arming a takeover. */
+export function pointerWhere(p: { x: number; y: number }, b: { line: Box | null; pending: Box | null; peek: Box | null }): PointerWhere {
+  const inside = (r: Box | null) => !!r && p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom;
+  return inside(b.peek) ? "peek" : inside(b.line) ? "line" : inside(b.pending) ? "pending" : "away";
+}
 
 const openOn = (id: string): PeekState => ({ ...PEEK_CLOSED, open: id });
 const grace = (s: PeekState, t: number): PeekState => s.open && !s.inPeek && !s.sticky ? { ...s, closeAt: t + CLOSE_MS } : s;
@@ -74,8 +87,29 @@ export function peekStep(s: PeekState, e: PeekEvent): PeekState {
       if (s.closeAt !== null && e.t >= s.closeAt) return PEEK_CLOSED;
       return s;
     }
+    case "pointer":
+      return pointerStep(s, e.where, e.t);
     case "close":
       return PEEK_CLOSED;
+  }
+}
+
+/** The document's pointer, applied idempotently: the same state back when nothing changes (no redraw per move). */
+function pointerStep(s: PeekState, where: PointerWhere, t: number): PeekState {
+  if (!s.open && !s.pending) return s;
+  switch (where) {
+    case "peek":
+      return s.open && (!s.inPeek || s.closeAt !== null || s.pending) ? peekStep(s, { type: "peekEnter", t }) : s;
+    case "line":
+      // On the open line: no grace, and a takeover armed elsewhere (its leave lost) is dropped.
+      return s.closeAt !== null || s.pending || s.inPeek ? { ...s, pending: null, closeAt: null, inPeek: false } : s;
+    case "pending":
+      return s;
+    case "away":
+      if (s.sticky) return s.pending ? { ...s, pending: null } : s;
+      if (!s.pending && !s.inPeek && (s.closeAt !== null || !s.open)) return s;
+      // One grace from the first move away; later moves never push it back.
+      return { ...s, pending: null, inPeek: false, closeAt: s.open ? s.closeAt ?? t + CLOSE_MS : null };
   }
 }
 
@@ -83,4 +117,15 @@ export function peekStep(s: PeekState, e: PeekEvent): PeekState {
 export function peekDeadline(s: PeekState): number | null {
   const at = [s.pending?.at, s.closeAt ?? undefined].filter((n): n is number => typeof n === "number");
   return at.length ? Math.min(...at) : null;
+}
+
+/**
+ * How long the host waits before its next tick, or null for none. Browsers fire setTimeout up to ~1 ms before its
+ * delay on performance.now(), and a tick before the deadline changes nothing (the same state back), so a host that
+ * re-arms only on a state change would never tick again. The host asks this when the timer fires and ticks only at 0,
+ * else waits again for what is left; the 1 ms margin makes a second wait rare.
+ */
+export function peekWait(s: PeekState, now: number): number | null {
+  const at = peekDeadline(s);
+  return at === null ? null : now >= at ? 0 : Math.ceil(at - now) + 1;
 }

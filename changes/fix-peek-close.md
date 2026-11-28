@@ -1,0 +1,1 @@
+- The agent peek on Home and in the panel now closes once your pointer is off the line and the peek. Before, it could stay open until you pressed Esc or clicked somewhere else.

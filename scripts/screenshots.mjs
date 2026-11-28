@@ -4897,6 +4897,23 @@ async function peekShots({ shoot }) {
       if (await page.getByRole("button", { name: "Open chat" }).filter({ visible: true }).count() !== 1) throw new Error("the phone sheet shows Open chat more than once");
     });
   }
+  // Invariant 151 (an-open-peek-closes-when-the-pointer-is-away): open, then the pointer up to the Home title: closed within
+  // a second. This harness freezes the page's clock (page.clock), which hides the early-timer race the invariant
+  // guards; tests/agent-peek.test.ts holds the race, and the live-sized replay is described there.
+  const away = async page => { const b = await (await homeRow(page, PEEK_STATES[0].title)).boundingBox(); const t = await page.getByText("Home", { exact: true }).first().boundingBox(); await page.mouse.move(b.x + 80, b.y - 4, { steps: 2 }); await page.mouse.move(t.x + 8, t.y + t.height / 2, { steps: 12 }); };
+  const closedAfter = async (page, what) => {
+    await page.waitForTimeout(1000);
+    const open = await page.locator("[data-follow-peek]").count();
+    log(`peek-close check ${open ? "FAILED" : "ok"}: ${what}`);
+    if (open) failures.push(`peek-close: ${what}: the peek stayed open 1 s after the pointer left the row and the peek`);
+  };
+  for (const theme of ["light", "dark"]) {
+    await shoot(`peek-close-open-${theme}`, DESKTOP, theme, async page => { await openHome(page); await hoverOpen(page, await homeRow(page, PEEK_STATES[0].title)); });
+    await shoot(`peek-close-left-${theme}`, DESKTOP, theme, async page => {
+      await openHome(page); await hoverOpen(page, await homeRow(page, PEEK_STATES[0].title));
+      await away(page); page.keepPointer = true; await closedAfter(page, `left (${theme})`);
+    });
+  }
   // Q180 A: the selected row's pane already draws its turn, so hovering it opens nothing.
   await shoot("peek-home-selected-light", DESKTOP, "light", async page => {
     await openHome(page);

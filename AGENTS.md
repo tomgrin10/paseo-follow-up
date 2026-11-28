@@ -1891,6 +1891,20 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    components for six keys, every one of ~60 results with its chips and time on every key. Guarded by
    `tests/search-rows.test.ts` (the real `HomeList`: same query again draws nothing, a key that moves no highlight
    draws no row, a key that moves one draws that row and no rail).
+151. **An open peek closes when the pointer is away** (`an-open-peek-closes-when-the-pointer-is-away`). An agent peek
+   (Home rows, the panel's agent lines, `PeekHost` in `client/turn-view.tsx`) closes `CLOSE_MS` after the pointer is
+   outside both its line and the peek, whatever else is happening on screen. It never depends on one event or one timer
+   firing on time: the host's timer ticks only once the deadline has passed on the clock and otherwise waits again for
+   what is left (`peekWait`, `shared/peek.ts`), and while a peek is open or arming the host reads where the pointer is
+   from the document (`pointerWhere`, the `pointer` event; every move, and every 400 ms at rest), so a lost leave event
+   closes it too. Focus on the line or in the peek holds it; the 350 ms open rest, the 150 ms grace into the peek, the
+   permission's sticky peek, keyboard entry and Esc, the phone sheet and no peek where the turn is on screen stay as
+   invariant 137 says. 2026-11-27, a live check of 2.6.0-beta.4: peeks stayed open with the pointer on Home's title
+   until Esc or a click; only the first after load closed. Browsers fire `setTimeout` up to ~1 ms before its delay on
+   `performance.now()` (headless Chromium: about 80 % of 150 ms timers), an early tick changed nothing, and the timer,
+   re-armed only when the state changed, never ticked again; the same race lost open intents. Replayed on the
+   live-sized fictional seed with streaming turns: 9 of 40 stayed open and 21 rests never opened, every leave event
+   delivered. The screenshot harness freezes the page clock, which hid it. Guarded by `tests/agent-peek.test.ts`.
 
 149. **A card resize redraws no other card** (`a-card-resize-redraws-no-other-card`). In the wide workspace view the
    cards sit in columns placed from their measured heights (`placeCards`, `shared/workspace-layout.ts`); those heights
