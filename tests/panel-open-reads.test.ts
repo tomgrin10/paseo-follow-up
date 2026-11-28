@@ -91,6 +91,10 @@ test("opening-reads-the-workspace-once: the open view reads follow.get once, and
   await act(async () => { await wait(1_800); });
   assert.equal(host.calls.filter(c => c === "follow.get").length, 1, `opening read the workspace ${host.calls.filter(c => c === "follow.get").length} times: the check's findings come on the feed, never a second follow.get`);
   assert.ok(first && seen.at(-1) !== first, "the reviewer lists' change redrew the view from the workspace it held");
+  // A list push with no newer stamp (a new list object, the same stamps) keeps the workspace object: nothing redraws.
+  const held = seen.at(-1);
+  await act(async () => { live.set(listEntry(workspace({ ...full }))); await wait(50); });
+  assert.equal(seen.at(-1), held, "a list push with no newer stamp keeps the same workspace object");
   // The check lands: the feed pushes its read stamp (the list copy's), and the view shows it without a read.
   await act(async () => { live.set(listEntry(workspace({ ...full, prs: [pr({ snapshot: snapshot({ observedAt: at(90_000) }) })] }))); await wait(50); });
   assert.equal(seen.at(-1)?.prs[0]?.snapshot?.observedAt, at(90_000), "the newer read stamp reaches the open view");

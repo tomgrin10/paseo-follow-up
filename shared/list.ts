@@ -120,7 +120,6 @@ export function splitReadStamps(entry: ListEntry): { bare: ListEntry; stamps: Re
   return { bare: stamps ? { ...entry, prs } : entry, stamps };
 }
 
-/** The entry with its read stamps back (the client store, before any reader sees it). Unknown keys are ignored. */
 /**
  * A full workspace (follow.get) with the list copy's read stamps where they are newer: the open view's "Checked" line
  * follows the feed's stamps without reading the whole workspace again (invariant 150). Same object when none is newer.
@@ -140,6 +139,7 @@ export function newerReadStamps<W extends { prs: { key: string; snapshot?: { obs
   return moved ? { ...full, prs } : full;
 }
 
+/** The entry with its read stamps back (the client store, before any reader sees it). Unknown keys are ignored. */
 export function withReadStamps<E extends ListEntry>(entry: E, stamps: ReadStamps | null | undefined): E {
   if (!stamps || isArchivedEntry(entry)) return entry;
   return { ...entry, prs: (entry as ListWorkspace).prs.map(p => {

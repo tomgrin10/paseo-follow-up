@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRpc } from "@getpaseo/plugin/client";
 import { getRpc } from "../shared/contracts";
@@ -54,11 +54,19 @@ export function useWorkspace(live: LiveStore | undefined, workspaceId: string, o
   // Read stamps (when each PR was last checked) come from the list copy, pushed by the feed after a read lands, so a
   // newer check never needs this workspace read again (invariant 150, opening-reads-the-workspace-once).
   const stamps = useMemo(() => listed ? splitReadStamps(listed).stamps : null, [listed]);
+  const base = useMemo(() => read$ && newerReadStamps(withPendingAnswers(read$, pending, pendingKey), stamps), [read$, pending, stamps]);
   // Needs you is computed with the reviewer lists (shared/reviewers.ts, shared/pr-workflow.ts): when they change, the
   // copy already read is drawn again as a new object, so what was memoised on it is computed again, with no read.
+  // Anything else keeps the object (a list push with no newer stamp redraws nothing).
   const reviewers = useSyncExternalStore(onReviewerConfig, reviewerConfig, reviewerConfig);
   const noReview = useSyncExternalStore(onNoReviewRepos, noReviewReposVersion, noReviewReposVersion);
-  const workspace = useMemo(() => read$ && { ...newerReadStamps(withPendingAnswers(read$, pending, pendingKey), stamps) }, [read$, pending, stamps, reviewers, noReview]); // eslint-disable-line react-hooks/exhaustive-deps
+  const drawn = useRef<{ base: Workspace | null; reviewers: unknown; noReview: unknown; out: Workspace | null } | null>(null);
+  const workspace = useMemo(() => {
+    const last = drawn.current;
+    const out = !base || !last || last.base !== base ? base : last.reviewers !== reviewers || last.noReview !== noReview ? { ...base } : last.out;
+    drawn.current = { base, reviewers, noReview, out };
+    return out;
+  }, [base, reviewers, noReview]);
   return {
     workspace,
     /** Why there is no workspace to show: the read failed or found none (null while reading, or when disabled). */
