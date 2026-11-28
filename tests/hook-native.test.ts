@@ -22,7 +22,7 @@ test("the tool-name list is every underscore tool a session can list (agent-tool
 test("text names the set the agent has; both sets count as Follow-up's own calls", () => {
   assert.equal(named(NEEDS_YOU_NUDGE, false), NEEDS_YOU_NUDGE, "pre-upgrade sessions keep mcp__follow-up__ names");
   assert.match(named(NEEDS_YOU_NUDGE, true), /call follow_needs_you once/);
-  assert.equal(named("Merge/deploy triggers; set_spec and follow_set_spec", true), "Merge/deploy triggers; follow_set_spec and follow_set_spec", "prose and already-prefixed names untouched");
+  assert.equal(named("Merge/deploy triggers; show_card and follow_show_card", true), "Merge/deploy triggers; follow_show_card and follow_show_card", "prose and already-prefixed names untouched");
   for (const name of ["mcp__follow-up__needs_you", "follow-up.register_pr", "mcp__paseo__follow_needs_you", "paseo.follow_register_pr"]) assert.equal(hook.isFollowTool(name), true, name);
   for (const name of ["mcp__paseo__list_agents", "Bash", "mcp__other__follow_x"]) assert.equal(hook.isFollowTool(name), false, name);
 });

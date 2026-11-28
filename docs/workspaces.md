@@ -501,8 +501,8 @@ can't dismiss a question it asked or owns: that is `withdraw_question`.
 
 ## Spec link
 
-`server/spec.ts` and `shared/spec.ts`. Precedence: the developer's link (`follow.workspace-spec`), then the main
-agent's `set_spec`, then detection. Detection reads completed Claude Artifact publish receipts in root sessions,
+`server/spec.ts` and `shared/spec.ts`. Precedence: the developer's link (`follow.workspace-spec`), then an agent link
+saved before 2.6 (`set_spec` retired; agents keep a spec as the `spec` card, [cards.md](cards.md)), then detection. Detection reads completed Claude Artifact publish receipts in root sessions,
 never page content or chat links.
 
 ## Done

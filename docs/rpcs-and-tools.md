@@ -30,8 +30,8 @@ is missing from AGENTS.md or docs/, so add a line here when you add one.
 | Session | Lists | May also run (through `run_action`) |
 | --- | --- | --- |
 | Tracked main agent | Core tools (below), `needs_you` while the inbox is on, `make_main_agent`, `find_action`, `run_action`. About 5.8k tokens of schema. | Every action. |
-| Contributor (another root agent of a tracked workspace) | `workspace_status`, `workspace_now`, `register_pr`, `sync_workspace`, `link_item`, `unlink_item`, `context_reply`, `wait_for_checks`, `make_main_agent` (its claim rules apply), `find_action`, `run_action`. | `report_issue`. |
-| Recovery agent | Core tools except `declare_done`, `sync_workspace`, the question tools, `set_spec`, `link_item`, `unlink_item`, `context_reply` and `wait_for_checks`. | Nothing. |
+| Contributor (another root agent of a tracked workspace) | `workspace_status`, `workspace_now`, `register_pr`, `sync_workspace`, `show_card`, `link_item`, `unlink_item`, `context_reply`, `wait_for_checks`, `make_main_agent` (its claim rules apply), `find_action`, `run_action`. | `report_issue`. |
+| Recovery agent | Core tools except `declare_done`, `sync_workspace`, the question tools, `show_card`, `link_item`, `unlink_item`, `context_reply` and `wait_for_checks`. | Nothing. |
 | Untracked root agent | `wait_for_checks` (it names where else to wait), `make_main_agent`, `find_action`, `run_action`, and `needs_you` while the inbox is on. | Every action. |
 | Overseer | The untracked root agent's list and the Overseer tools. | Every action. |
 | Subagents | None (Wait still applies: [wait.md](wait.md)). |
@@ -60,7 +60,7 @@ error), the inbox off (`needs_you` errors), a dismissed ask restated (`needs_you
 | `update_obligation` | `follow.obligation` | Creates or updates a task (an obligation), with an optional trigger and communication receipt. `status: working` records the caller as the task's agent, or `workingAgentId` (another agent Paseo knows). `ask`, with `blocked`, is the question the developer must answer; only then does the task ask them. `question: "Q<n>"`, with `blocked`, points at a question already asked with `ask_question` instead: no second card (`one-decision-one-card`), and the reply's `note` says when the task is already asked or answered as a question; the card a task makes itself is never named (the turn's `needs_you` folds into it on the server). `need` (`decision` or `action`), with `blocked` and `ask`, says whether the developer decides or does something and reports back; an action's card has Done (`one-ask-one-item`). Without `id`, a title close to an open task's is refused with that task's id (`a-new-task-is-checked-once`); `new: true` adds it anyway, and the caller's own exact title updates its task. |
 | `acknowledge_batch` | `follow.acknowledge` | Records a repair batch's result: completed or blocked; blocked with `humanOnly` when only a person can move it (a PR item for the developer, not an agent failure); `in_progress` when the agent or its subagent is already on it; `waitingOn` names the part only a person can move, with any outcome (a person item; later messages tell the agent to leave it). |
 | `ask_question`, `record_answer`, `withdraw_question` | `follow.ask-question`, `follow.record-answer`, `follow.withdraw-question` | Questions for the developer (`server/questions.ts`). |
-| `set_spec` | `follow.set-spec` | The agent's spec link. The developer's own link wins over it. |
+| `show_card` | `follow.show` | Shows the developer something in the workspace view: a card of typed blocks, replaced by id, removed with `remove: true` ([cards.md](cards.md)). Main agents and contributors. Replaced `set_spec` (2.6): a spec is the card with id `spec`. The view reads `follow.cards`, `follow.card-media` and `follow.card-act`. |
 | `link_item`, `unlink_item` | `follow.link-item`, `follow.unlink-item` | Links what the work is about (a Linear key is confirmed with Linear first; a PR is refused), or removes one for good ([linked-items.md](linked-items.md)). Main and contributors. |
 | `needs_you` | `follow.needs-you` | The end-of-turn brief: what the developer must do next. From a workspace Follow-up read as archived it reopens the workspace when Paseo shows it live, else the ask still reaches Needs you and the reply's `note` says the workspace is archived (invariant 111). |
 | `declare_done` | `follow.done` | Declares the goal fulfilled and returns any blockers. |
@@ -102,6 +102,7 @@ the developer's; it never clears a Needs-you flag and never passes the Overseer'
 | Tool | Mirrors | Kind |
 | --- | --- | --- |
 | `list_prs` | `follow.list`, `follow.get` | read |
+| `workspace_cards`, `card_action` | `follow.cards`, `follow.card-act` | read / planned: what agents show in a workspace's view, and its ⋯ menu ([cards.md](cards.md)) |
 | `add_reviewers` | `follow.request-reviewers` | planned |
 | `merge`, `enable_merge_when_ready`, `disable_merge_when_ready` | `follow.prepare-pr-action`, `follow.confirm-pr-action` | planned |
 | `send_repairs` | `follow.send` | write |

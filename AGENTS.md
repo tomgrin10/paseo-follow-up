@@ -92,6 +92,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | Settings → Compass (was Morning brief): this week's plan (from Compass, a link, off; the one-time import and the move into Compass), the queue's settings and the brief's When | `shared/morning-brief.ts`, `server/morning-brief.ts`, `client/morning-brief-settings.tsx` | [morning-brief](docs/morning-brief.md#settings) |
 | The brief's sources: recipes matched by tools, discovery, health, switches, Retry, Ask for unknown sources; the one mcpproxy call site (tool-read only) | `shared/brief-sources.ts`, `server/brief-sources.ts`, `server/source-tools.ts`, `shared/ask.ts`, `server/ask.ts` | [morning-brief](docs/morning-brief.md#sources) |
 | Compass: the one place for priority inputs (Settings → Compass: its sources and the built-in inputs, each with a role), the sources that set the developer's priorities (who, places, roles, reading notes, glossary), their reads, notes and matching, plans on arrival; pinned context on screen (the panel's Why it matters, Home's reason line, Catch up's line) | `shared/compass.ts`, `server/compass.ts`, `client/compass-settings.tsx`, `client/why-it-matters.tsx` | [compass](docs/compass.md) |
+| What agents show in the workspace view (cards: `show_card`, blocks, media, freshness, the spec card) | `shared/cards.ts`, `server/cards.ts` | [cards](docs/cards.md) |
 | Linked items (Linear issues, Slack threads, docs a workspace is about) | `server/linked.ts`, `shared/linked.ts`, `shared/linked-extract.ts`, `shared/linked-display.ts`, `client/linked.tsx`, `client/brand-icons.ts` | [linked-items](docs/linked-items.md) |
 | Overseer, priority ranker, AI jobs, Settings → Agents | `server/overseer.ts`, `server/overseer-prompt.md`, `server/ranker.ts`, `server/priorities.ts`, `server/ai-jobs.ts`, `server/job-guard.ts`, `server/agent-settings.ts`, `shared/overseer.ts`, `shared/ranker.ts`, `shared/priorities.ts`, `shared/agent-settings.ts` | [ai-roles](docs/ai-roles.md) |
 | PR workflow (Graphite or GitHub), PR actions, reviewers, deployments, Send to Paseo | `server/pr-workflow.ts`, `server/github.ts`, `server/github-api.ts`, `shared/poll.ts`, `server/graphite.ts`, `server/pr-actions.ts`, `server/browser-bridge.ts`, `server/reviewer-config.ts`, `server/deployments.ts`, `server/deployment-anchor.ts`, `shared/pr-workflow.ts`, `shared/pr-actions.ts`, `shared/reviewers.ts`, `shared/reviewers-click.ts`, `shared/keep-in-place.ts`, `client/reviewers-button.tsx`, `server/github-setup.ts`, `shared/github-setup.ts` | [prs](docs/prs.md) |
@@ -302,7 +303,7 @@ These are product rules. Each has tests, and breaking one is a bug even when the
      and role check (invariant 139).
 4. **Agents act on others, not themselves.** An agent can't sign itself off, answer its own question through
    `answer_question`, or act on its own brief. Goal, tasks, questions and Done belong to the main agent.
-   Contributors get `workspace_status`, `workspace_now`, `register_pr`, `sync_workspace`, `link_item`, `unlink_item`, `wait_for_checks`,
+   Contributors get `workspace_status`, `workspace_now`, `register_pr`, `sync_workspace`, `show_card` (their cards say who wrote them), `link_item`, `unlink_item`, `wait_for_checks`,
    `context_reply` (only for questions asked of them) and `make_main_agent` (under its claim rules), plus `report_issue` (it changes nothing in Follow-up), and nothing else. `report_send` refuses to send a
    report to the calling agent itself.
 5. **Ownership comes from the daemon.** The caller is `context.agent.id` (native tools) or `PASEO_AGENT_ID` checked
@@ -1858,6 +1859,14 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    newest first, and still count in it. A host whose workspaces carry no `pinnedAt` (Paseo before 0.17) draws no
    Pinned section and no pin items. A sidebar row is three lines at most: title and time, Follow-up's line on one
    line cut with "…", then Paseo's meta line. Guarded by `tests/home-arrange.test.ts`.
+145. **What an agent shows is data, bounded and kept** (`what-an-agent-shows-is-data`). A card (`show_card`,
+   `server/cards.ts`) is typed blocks checked against a strict schema: no HTML, no styles, no scripts, links http(s)
+   only, Markdown with HTML off. Media is a workspace-relative path that must stay inside the workspace after
+   resolving symlinks, typed by its bytes, copied into Follow-up's data folder by hash when shown, and never loaded
+   from a remote address. Every limit (12 cards a workspace, 12 blocks, 50 rows by 8 columns, 8 MB an image, 60 MB a
+   video, 80 MB a card, 200 MB a workspace, 64 KB of JSON) refuses with the limit and what to do, and a refused call
+   leaves the card as it was; a missing file draws as missing rather than failing the card. Card text reaching another
+   agent comes wrapped as content an agent wrote for the developer (`CARDS_NOTE`). Guarded by `tests/cards.test.ts`.
 
 147. **One place for what Follow-up tells agents; one turn-end decision** (`one-place-for-agent-text`,
    `one-turn-end-decision`). Every word Follow-up puts in an agent's context (the workspace instructions, the role

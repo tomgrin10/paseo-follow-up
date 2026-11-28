@@ -1,3 +1,4 @@
+import { CARDS_NOTE } from "../shared/cards";
 import { MAX_IMAGES } from "../shared/images";
 import { z } from "zod";
 import { AGENT_ROLES, savedRoleSchema } from "../shared/agent-settings";
@@ -141,6 +142,11 @@ export const RPC_TOOLS: readonly RpcTool[] = [
     toRpc: a => ({ workspaceId: a.workspaceId, obligationId: a.obligationId, expectedRevision: a.expectedRevision, trigger: a.trigger ?? null, afterPrs: a.afterPrs ?? [] }) },
   // Linked items: the list sheet (read, Add link, remove, Undo) for any workspace
   { name: "link_items", rpc: "follow.linked-items", kind: "read", input: z.strictObject({ workspaceId: id }) },
+  // What agents showed the developer in the workspace view (server/cards.ts). Text an agent wrote: data, never instructions.
+  { name: "workspace_cards", rpc: "follow.cards", kind: "read", input: z.strictObject({ workspaceId: id }),
+    view: out => ({ note: CARDS_NOTE, cards: out.cards.map((c: any) => ({ id: c.id, title: c.title, by: c.by, updatedAt: c.updatedAt, freshness: c.freshness.label, summary: c.summary, question: c.question, blocks: c.blocks })) }) },
+  { name: "card_action", rpc: "follow.card-act", kind: "planned", before: { rpc: "follow.cards", input: a => ({ workspaceId: a.workspaceId }) },
+    input: z.strictObject({ workspaceId: id, id: z.string().trim().min(1).max(40), action: z.enum(["remove", "undo", "keep", "unkeep"]), ...confirm }) },
   { name: "set_linked_items", rpc: "follow.set-linked-items", kind: "planned", before: { rpc: "follow.linked-items", input: a => ({ workspaceId: a.workspaceId }) },
     input: z.strictObject({ workspaceId: id.optional(), action: z.enum(["add", "remove", "undo"]).optional(), ref: z.string().trim().min(1).max(2000).optional(), title: z.string().trim().max(200).optional(), ...confirm }) },
   // PR sheet: what the merge controls see (Send to Paseo, Graphite in Chrome)
@@ -283,7 +289,7 @@ export const PARITY: Record<string, { tools: readonly string[]; note?: string } 
   "follow.linked-items": { tools: ["link_items"] },
   "follow.set-linked-items": { tools: ["set_linked_items", "link_item", "unlink_item"] },
   "follow.linked-index": { tools: ["link_items"], note: "Home's search over every workspace's links; an agent reads them per workspace with link_items." },
-  "follow.workspace-spec": { tools: ["set_workspace_spec", "set_spec"] },
+  "follow.workspace-spec": { tools: ["set_workspace_spec"] },
   "follow.set-task-trigger": { tools: ["set_task_trigger", "update_obligation"] },
   "follow.trust-bypass": { tools: ["trust_bypass_status", "display_settings"] },
   "settings.display": { tools: ["display_settings", "set_display"] },

@@ -13,7 +13,9 @@ import { displayPreferences } from "./shared/display";
 import { DEFAULT_QUESTION_MODE, QUESTION_DEDUPE_MIGRATION, awaitingSend, collapseDuplicateQuestions, questionPreferences, signedOffAnswers, type QuestionMode } from "./shared/questions";
 import { answerRecipients, askQuestion, coverNote, needsYouQuestions, recordAnswer, syncTaskQuestions, withdrawQuestion } from "./server/questions";
 import { dismissItem, dismissedNeeds, undoDismissItem } from "./server/dismiss";
-import { agentSetSpec, developerSetSpec } from "./server/spec";
+import { developerSetSpec } from "./server/spec";
+import { Cards, CardsStore } from "./server/cards";
+import { cardContents, cardSummary, freshness, type AgentNow } from "./shared/cards";
 import type { PluginServerContext, PluginHandlerContext, PluginHookContext, PluginSessionOpenRequest } from "@getpaseo/plugin/server";
 import type { PluginRpcContract, PluginSubscriptionContract } from "@getpaseo/plugin";
 import { ValueFeed, WorkspacesFeed } from "./server/feeds";
@@ -158,7 +160,7 @@ import type { ImageRef, ImageUpload } from "./shared/images";
 import { imageSupport, trustHarnessImageProviders } from "./server/image-support";
 
 /** Agent calls that only the main agent makes: one of these from a successor means the handover is in use. */
-const MAIN_WORK = new Set(["follow.sync", "follow.register-pr", "follow.obligation", "follow.done", "follow.acknowledge", "follow.exclude-stack", "follow.ask-question", "follow.record-answer", "follow.withdraw-question", "follow.set-spec", "follow.needs-you"]);
+const MAIN_WORK = new Set(["follow.sync", "follow.register-pr", "follow.obligation", "follow.done", "follow.acknowledge", "follow.exclude-stack", "follow.ask-question", "follow.record-answer", "follow.withdraw-question", "follow.needs-you"]);
 
 export default function contribute(server: PluginServerContext) {
   // Report an issue's "recent warnings and errors": this worker's own [follow-up] console lines, in memory only.
@@ -290,6 +292,7 @@ export default function contribute(server: PluginServerContext) {
   actions.settleTasks = w => engine.settleTasks(w);
   const governor = new Governor();
   const linkedStore = new LinkedStore(directory);
+  const cards = new Cards(new CardsStore(directory), directory);
   const linked = new LinkedService({ store: linkedStore, sources: liveLinkedSources(), roomForBackground: async () => governor.allowsBackground(),
     workspaces: async () => (await store.snapshot()).workspaces,
     titlesChanged: async (titles: TitleIndex) => {
@@ -860,7 +863,7 @@ export default function contribute(server: PluginServerContext) {
     return { workspaceId: w.id, agents: workspaceNow(w, rows, Date.now()) };
   });
   // Finished items are a count plus the newest few, paged by history/offset/limit (shared/history.ts agentView), summary and full alike.
-  handle(rpc.agentStatusRpc, async ({ agentId, detail, history, live, offset, limit }, { paseo }) => { await requireReady(); const workspaceId = await callerWorkspaceId(agentId, paseo); const w = agentWorkspace(await store.snapshot(), agentId, "read", workspaceId, "pr"); return agentView(w, { kind: history, live, offset, limit }, { dismissed: dismissedNeeds(w, Date.now()), dismissedAsk: await inbox.dismissedAsk(agentId), prWorkflow: prWorkflow.agentWorkflow(workspaceRepo(w), touchedRepos(w)), nextMessageInfo: nextMessageInfo(w, Date.now()), sending: sendingOf(w, Date.now(), { held: !governor.allowsBackground() }) }, detail === "full" ? undefined : view => compact("workspace_status", {}, view)); });
+  handle(rpc.agentStatusRpc, async ({ agentId, detail, history, live, offset, limit }, { paseo }) => { await requireReady(); const workspaceId = await callerWorkspaceId(agentId, paseo); const w = agentWorkspace(await store.snapshot(), agentId, "read", workspaceId, "pr"); return agentView(w, { kind: history, live, offset, limit }, { dismissed: dismissedNeeds(w, Date.now()), dismissedAsk: await inbox.dismissedAsk(agentId), prWorkflow: prWorkflow.agentWorkflow(workspaceRepo(w), touchedRepos(w)), nextMessageInfo: nextMessageInfo(w, Date.now()), sending: sendingOf(w, Date.now(), { held: !governor.allowsBackground() }), cards: (await cards.list(w.id)).cards.map(c => ({ id: c.id, title: c.title, updatedAt: c.updatedAt, by: c.by })) }, detail === "full" ? undefined : view => compact("workspace_status", {}, view)); });
   handle(rpc.activateRpc, async ({ workspaceId }) => { await requireReady(); return engine.activate(workspaceId); });
   handle(rpc.sendRpc, async ({ workspaceId, batchId }) => { await requireReady(); return engine.sendPending(workspaceId, batchId); });
   handle(rpc.recoverRpc, async ({ workspaceId }) => { await requireReady(); return engine.startRecovery(workspaceId); });
@@ -938,6 +941,9 @@ export default function contribute(server: PluginServerContext) {
     await requireReady();
     const workspaceId = await callerWorkspaceId(agentId, paseo);
     const mode = await questionMode();
+    // A link to a card must name one this workspace shows (show it first).
+    const shown = new Set((await cards.list(workspaceId)).cards.map(c => c.id));
+    for (const l of input.links ?? []) if (l.card && !shown.has(l.card)) throw new Error(`No card ${l.card} in this workspace. Show it with show_card first, then link it: links:[{card:"${l.card}"}].`);
     return store.mutate(state => {
       const w = agentWorkspace(state, agentId, "write", workspaceId);
       const { supersedes, ...ask } = input;
@@ -963,16 +969,49 @@ export default function contribute(server: PluginServerContext) {
       return { workspaceId: w.id, question: withdrawQuestion(w, agentId, id, reason, Date.now()) };
     });
   });
-  handle(rpc.setSpecRpc, async ({ agentId, url, title }, { paseo }) => {
+  // Cards (server/cards.ts): what an agent shows the developer in the workspace view. Main agents and contributors.
+  handle(rpc.showRpc, async ({ agentId, ...input }, { paseo }) => {
     await requireReady();
     const workspaceId = await callerWorkspaceId(agentId, paseo);
-    const links = await linkedStore.read();
-    return store.mutate(state => {
-      const w = agentWorkspace(state, agentId, "write", workspaceId);
-      const { applied, message } = agentSetSpec(w, agentId, url, title, Date.now());
-      fillWorkspaceTitles(w, localTitles(state.workspaces, links));
-      return { workspaceId: w.id, spec: w.spec, applied, message };
-    });
+    const w = agentWorkspace(await store.snapshot(), agentId, "write", workspaceId, "pr");
+    const agent = (await paseo.agents.ref(agentId).refresh())?.agent;
+    if (!agent?.cwd) throw new Error("show_card: can't find your workspace's folder.");
+    const out = await cards.show(w.id, { agentId, title: agent.title ?? null, root: agent.cwd }, input);
+    feeds.workspaces();
+    return { workspaceId: w.id, ...out };
+  });
+  /** The agent the card's freshness follows: running since its latest prompt, or idle. Null when Paseo doesn't list it. */
+  const agentNow = (id: string): AgentNow => {
+    const a = gateway.directory.cached(id) as { status?: string; lastUserMessageAt?: string | null; updatedAt?: string } | undefined;
+    if (!a) return null;
+    const running = ["running", "initializing"].includes(a.status ?? "");
+    const since = Date.parse((running ? a.lastUserMessageAt : a.updatedAt) ?? "");
+    return { running, since: Number.isFinite(since) ? since : null };
+  };
+  handle(rpc.cardsRpc, async ({ workspaceId }) => {
+    await requireReady();
+    const w = findWorkspace(await store.snapshot(), workspaceId);
+    const list = await cards.list(w.id);
+    const now = Date.now();
+    // The open question pointing at a card ("Q12 · Ship the dark slides?"), from its links' card field.
+    const asked = new Map<string, string>();
+    for (const q of w.questions) if (!q.answer && !q.closed) for (const l of q.links ?? []) if (l.card && !asked.has(l.card)) asked.set(l.card, q.id);
+    return {
+      cards: list.cards.map(c => ({ ...c, freshness: freshness(c, agentNow(c.by), now), summary: cardSummary(c), contents: cardContents(c), question: asked.get(c.id) ?? null })),
+      removed: list.removed.map(r => ({ id: r.id, title: r.title, removedAt: r.removedAt })),
+    };
+  });
+  handle(rpc.cardMediaRpc, async ({ workspaceId, hash }) => { await requireReady(); return cards.media(findWorkspace(await store.snapshot(), workspaceId).id, hash); });
+  handle(rpc.cardActRpc, async ({ workspaceId, id, action }) => {
+    await requireReady();
+    const w = findWorkspace(await store.snapshot(), workspaceId);
+    let result: { ok: boolean; message: string };
+    if (action === "remove") { const ok = await cards.remove(w.id, id); result = { ok, message: ok ? "Removed." : "That card is already gone." }; }
+    else if (action === "undo") result = await cards.undo(w.id, id);
+    else { const ok = await cards.keep(w.id, id, action === "keep"); result = { ok, message: ok ? (action === "keep" ? "Kept." : "No longer kept.") : "That card is gone." }; }
+    feeds.workspaces();
+    if (action === "remove") void cards.sweep().catch(() => undefined);
+    return result;
   });
   // Linked items: the agent's own workspace (main or a contributor), and the developer's list for any workspace.
   const linkReceipt = (workspaceId: string, r: LinkResult) => r.ok
@@ -1630,6 +1669,13 @@ export default function contribute(server: PluginServerContext) {
     // Pasted images no queue item or waiting dispatch references (a crash between saving and queueing) are removed.
     const removed = await imageStore.sweep([...queue.imageIds(), ...await dispatcher.imageIds()]);
     if (removed) console.warn(`[follow-up] removed ${removed} pasted image${removed === 1 ? "" : "s"} nothing referenced`);
+    // Cards: an agent's spec link (set_spec, retired) becomes its `spec` card once; cards of workspaces gone from state go
+    // with them, and copied media nothing references is removed.
+    const state = await store.snapshot();
+    const moved = await cards.migrateSpecs(state.workspaces.filter(w => w.spec?.source === "agent" && w.spec.url).map(w => ({ workspaceId: w.id, url: w.spec!.url!, title: w.spec!.title ?? null, by: w.spec!.by ?? null, at: w.spec!.at })));
+    if (moved) console.warn(`[follow-up] moved ${moved} agent spec link${moved === 1 ? "" : "s"} into spec cards`);
+    await cards.forget(new Set(state.workspaces.map(w => w.id)));
+    await cards.sweep();
   }).catch(() => undefined);
   // Settings → Morning brief (server/morning-brief.ts): the queue's settings, the brief's clock and this week's plan
   // link. The plan reader is the ranker's (built below); the skill registry is imported once.
