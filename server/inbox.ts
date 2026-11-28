@@ -463,7 +463,8 @@ export class Inbox {
     // A developer's /compact asks for a compaction, not an answer: the ask stays open (a-compaction-is-not-a-finish).
     const answers = sender === "tom" && !isCompactCommand(prompt.message?.text);
     const brief: BriefEvent = answers ? { type: "message", text: prompt.message?.text ?? null } : { type: "turn_start" };
-    await this.apply([{ agentId: root.rootId, event: { type: "message", from: answers ? "tom" : "automation" }, brief: () => brief }]);
+    // A turn runs only once Paseo has unarchived the agent, so its start reopens an archived row (shared/reopen.ts).
+    await this.apply([...await this.reopening(root.rootId, true), { agentId: root.rootId, event: { type: "message", from: answers ? "tom" : "automation" }, brief: () => brief }]);
   }
 
   async turnEnded(agent: { id: string; workspaceId: string | null; parentAgentId?: string | null }, outcome: { kind: "completed" } | { kind: "failed"; error: { message: string } } | { kind: "canceled"; reason: string }, turnId: string | null): Promise<void> {
@@ -471,6 +472,9 @@ export class Inbox {
     if (!await this.on()) return;
     if (await this.background(agent.id)) return;
     const root = await this.root(agent);
+    // A turn whose start this worker missed (a reload) still reopens the row, once Paseo shows the agent unarchived:
+    // a turn the archive itself ended leaves it archived.
+    if (!root.subagent) await this.apply(await this.reopening(root.rootId, false));
     if (root.subagent) {
       // Subagent finishes are covered by the parent's own turn end; failures surface on the parent's brief.
       if (outcome.kind === "failed") {
@@ -588,6 +592,26 @@ export class Inbox {
     const root = await this.root(agent);
     const detail = root.subagent ? "Subagent closed during a turn" : "Closed during a turn";
     await this.apply([{ agentId: root.rootId, event: { type: "crash", detail }, brief: await this.creator(root.rootId, null, ":closed", "error", { error: { message: detail } }) }]);
+  }
+
+  /**
+   * The reopen event for an archived (gone) row whose agent is live again; nothing for a row that isn't gone. `live`:
+   * the caller knows the agent runs (a turn start, its own tool call), else Paseo's snapshot decides. Invariant 111.
+   */
+  private async reopening(agentId: string, live: boolean): Promise<{ agentId: string; event: InboxEvent }[]> {
+    if (!(await this.store.snapshot()).entries[agentId]?.goneAt) return [];
+    if (!live) {
+      const agent = await this.o.directory.agent(agentId).catch(() => null);
+      if (!agent || agent.archivedAt) return [];
+    }
+    return [{ agentId, event: { type: "reopen" } }];
+  }
+
+  /** The agent asked something (needs_you): it is running, so its archived row reopens and the ask shows. */
+  async reopen(agentId: string): Promise<boolean> {
+    const events = await this.reopening(agentId, true);
+    await this.apply(events);
+    return events.length > 0;
   }
 
   async archived(agentIds: string[]): Promise<void> {

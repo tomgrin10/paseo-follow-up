@@ -1,0 +1,2 @@
+- An agent you unarchive and talk to again shows up in Follow-up again: its workspace is followed again, a Done workspace goes back to working when you give it new work, and its questions and decisions reach Needs you.
+- When a workspace is still archived, an agent's tools tell it so and what to do instead of quietly doing nothing.

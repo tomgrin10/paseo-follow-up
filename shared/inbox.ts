@@ -149,6 +149,12 @@ export type InboxEvent =
   | { type: "open" }
   | { type: "archive" }
   | { type: "unarchive" }
+  /**
+   * The agent is live again (a turn of its own, a needs_you call): Paseo unarchives an agent when it is prompted and
+   * sends no event for it, so its activity reopens the row whatever the archive's age. A flag from before a keep that
+   * ran out is stale and goes. Invariant 111, an-ask-from-a-live-agent-reaches-the-developer (shared/reopen.ts).
+   */
+  | { type: "reopen" }
   | { type: "set_finish_flags"; value: boolean }
   | { type: "reconcile"; detail: string };
 
@@ -430,6 +436,11 @@ export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
     case "open": break; // #17: opening, reading, switching away and Paseo's read state change nothing.
     case "archive": if (!e.goneAt) e.goneAt = now; break; // #18
     case "unarchive": if (e.goneAt && Date.parse(now) - Date.parse(e.goneAt) <= GONE_MS) e.goneAt = null; break;
+    case "reopen":
+      if (!e.goneAt) break;
+      if (Date.parse(now) - Date.parse(e.goneAt) > GONE_MS) { e.needs = null; e.snooze = null; }
+      e.goneAt = null;
+      break;
     case "set_finish_flags": e.enable_finish_flags = event.value; break;
     case "reconcile": // #20
       if (e.enable_finish_flags) flag("finished", event.detail, "finished");

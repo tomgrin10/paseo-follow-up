@@ -257,3 +257,14 @@ test("fixture: finished closed questions never survive as live task context", ()
   const check = INVARIANTS.find(i => i.id === "finished-items-are-history")!;
   assert.equal(check.check(closedHistory(), clock), null);
 });
+
+test("fixture (2026-11-25, archived asks): a Done, archived workspace whose agent the developer unarchived and chatted with", async () => {
+  const { reopenViolations } = await import("../shared/status-invariants");
+  // Before: Follow-up kept w.archived and the row's goneAt after Paseo unarchived the agent, so its asks showed nowhere.
+  const before = { workspaceId: "w1", mainAgentId: "main", paseoLive: true, archived: true, inboxGone: true };
+  assert.deepEqual(reopenViolations([before]).map(v => v.id), ["an-ask-from-a-live-agent-reaches-the-developer"]);
+  assert.deepEqual(reopenViolations([{ ...before, archived: false, inboxGone: false }]), []);
+  // Still archived in Paseo: the workspace's writes refuse with what to call instead of answering ok.
+  const archived = workspace({ id: "w1", mainAgentId: "main", archived: true });
+  assert.equal(violations(archived, clock).some(v => v.id === "an-ask-from-a-live-agent-reaches-the-developer"), false);
+});

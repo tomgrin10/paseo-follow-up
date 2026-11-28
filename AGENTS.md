@@ -81,7 +81,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | Subsystem | Files | Doc |
 | --- | --- | --- |
 | Worker entry, RPC wiring, session attach, teardown | `index.server.ts`, `shared/contracts.ts`, `server/feeds.ts`, `server/rpc-timing.ts`, `server/teardown.ts`, `server/daemon.ts`, `server/shared-file.ts`, `server/directory.ts`, `server/request-trace.ts`, `server/store.ts`, `server/cow.ts`, `server/json-file-store.ts`, `server/write-behind.ts`, `server/list-cache.ts`, `shared/list.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
-| Discovery, ownership, main agent | `server/discovery.ts`, `server/turn-events.ts`, `server/workspace-agent.ts`, `server/background-agents.ts`, `server/submissions.ts`, `server/pr-owner.ts`, `server/exclusions.ts`, `server/history-cache.ts`, `server/recovery-handoff.ts`, `server/recovery-config.ts`, `shared/settings.ts` | [workspaces](docs/workspaces.md) |
+| Discovery, ownership, main agent | `server/discovery.ts`, `server/turn-events.ts`, `server/workspace-agent.ts`, `server/background-agents.ts`, `server/submissions.ts`, `server/pr-owner.ts`, `server/exclusions.ts`, `server/history-cache.ts`, `server/recovery-handoff.ts`, `server/recovery-config.ts`, `shared/settings.ts`, `shared/reopen.ts` | [workspaces](docs/workspaces.md) |
 | Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/send-decision.ts`, `shared/task-rows.ts`, `shared/send-words.ts`, `shared/task-status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/message-queue.ts`, `shared/queue.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/put-in-chat.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `server/scheduled-tasks.ts`, `shared/task-due.ts`, `shared/task-view.ts`, `shared/task-dup.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
 | What each agent is working on now (the agent line on the panel and Home rows; sync_workspace `milestone`, `workspace_now`); what a PR's checks are doing (`checksState`) | `shared/now.ts`, `shared/pr-status.ts`, `client/now-lines.tsx` | [workspaces](docs/workspaces.md#what-each-agent-is-working-on) |
 | Agent peek: an agent's current turn on hover (panel lines, Home rows) or a phone sheet; `TurnView` rows, "timeline already on screen" | `shared/turn.ts`, `shared/peek.ts`, `client/turn-view.tsx`, `client/on-screen.tsx`, `server/transcript.ts` | [client](docs/client.md#agent-peek) |
@@ -1465,6 +1465,19 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    send, and, signed out, `gh auth token` spawned 8 times in 90 s. Guarded by `tests/works-without-github.test.ts`,
    `tests/works-without-github-worker.test.ts` (the real worker, no gh on the host) and `npm run test:no-gh`
    ([docs/prs.md](docs/prs.md#without-github-optional-integration)).
+
+111. **An ask from a live agent reaches the developer** (`an-ask-from-a-live-agent-reaches-the-developer`). Archived
+   is Paseo's state, never a latch Follow-up keeps. A workspace Paseo shows live (`paseoShowsLive`, `shared/reopen.ts`:
+   listed and not mid-archive, or its record archived with its main agent unarchived in it, since a prompt unarchives
+   only the agent and sends no event) is never read as archived, and its main agent's Needs-you row is never gone: the
+   main agent's turn start, any of its tool calls and the engine's pass over archived workspaces reopen both, and the
+   turn start also ends a Done, so new scope makes it working again. While Paseo still has it archived, no tool answers
+   ok for an ask nobody sees: write tools refuse with why and what to call (`archivedAskError`), and `needs_you` still
+   reaches Needs you and says so (`ARCHIVED_NEEDS_YOU_NOTE`). 2026-11-25: a Done workspace was archived; the developer
+   unarchived its agent and gave it new scope in chat, and its two `needs_you` kind=decision calls showed nowhere and
+   answered ok, because `w.archived` and the row's `goneAt` were cleared only by `enroll_workspace` and an unarchive
+   event nothing sent. Guarded by `tests/archived-asks.test.ts`, `reopenViolations` and `INVARIANTS`.
+
 113. **Row badges replace sidebar labels** (`row-badges-replace-sidebar-labels`). On a Paseo that draws plugin badges
    on sidebar workspace rows (0.17.1 or later, read once from server_info's version: `hostAtLeast` in
    `server/host-features.ts`), Follow-up writes no workspace label: Done is the client's row badge (`client/row-badges.tsx`,
