@@ -1515,6 +1515,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       // The dry run the agent shows before any yes (scripts/report-preview.ts: the real Reporter, fictional data, offline).
       const { stdout: preview } = await exec("npx", ["tsx", "scripts/report-preview.ts", sc], { cwd: fileURLToPath(new URL("..", import.meta.url)), maxBuffer: 8 << 20 });
       for (const [tag, vp] of [["", DESKTOP], ["-phone", PHONE]]) for (const part of ["top", "workspace"]) await shoot(`report-panel-dryrun${tag}-${part}-${sc}`, vp, sc, async page => {
+        if (vp !== DESKTOP) await page.setViewportSize(vp);
         await page.setContent(preview); await noOverflow(page);
         // "workspace": the This workspace section at the top of the view, the only part the workspace adds.
         if (part === "workspace") await page.evaluate(() => [...document.querySelectorAll("p")].find(p => p.textContent === "This workspace")?.scrollIntoView({ block: "start" }));
