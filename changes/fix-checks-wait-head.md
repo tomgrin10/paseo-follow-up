@@ -1,0 +1,1 @@
+- Waiting for checks no longer reports a result right after a push from the previous commit, or before the new commit's checks start. When a repository runs no checks, it says so.

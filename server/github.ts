@@ -28,7 +28,12 @@ export function repoMerge(repository: Node): NonNullable<Snapshot["repoMerge"]> 
 
 export function parsePr(pr: Node, trunk: string, observedAt: string, required: string[]): Snapshot {
   const threads = pr.reviewThreads;
-  const contexts = pr.commits.nodes[0]?.commit.statusCheckRollup?.contexts;
+  // The head comes from headRefOid, the checks from the PR's last listed commit: two fields GitHub updates apart. After
+  // a push the commit list can still end at the old head, whose results then read as the new head's
+  // (checks-belong-to-the-current-head). Results for any other commit count as nothing reported on the head yet.
+  const checksHead: string | null = pr.commits.nodes[0]?.commit.oid ?? null;
+  const foreign = !!checksHead && checksHead !== pr.headRefOid;
+  const contexts = foreign ? undefined : pr.commits.nodes[0]?.commit.statusCheckRollup?.contexts;
   const failed = new Set(["FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"]);
   const requiredSet = new Set(required);
   const checks = contexts?.nodes ?? [];
@@ -37,9 +42,11 @@ export function parsePr(pr: Node, trunk: string, observedAt: string, required: s
   const otherFailedChecks: string[] = [];
   let checksPending = false;
   let checksRunning = false;
+  let checksSeen = 0;
   for (const c of checks) {
     const name = c.name ?? c.context;
     const conclusion = c.conclusion ?? c.state;
+    if (!["SKIPPED", "NEUTRAL"].includes(conclusion)) checksSeen++;
     if ((c.status && c.status !== "COMPLETED") || (!c.status && ["PENDING", "EXPECTED"].includes(conclusion))) checksRunning = true;
     if (!requiredSet.has(name)) {
       if ((!c.status || c.status === "COMPLETED") && failed.has(conclusion)) otherFailedChecks.push(name);
@@ -50,6 +57,7 @@ export function parsePr(pr: Node, trunk: string, observedAt: string, required: s
     else if (failed.has(conclusion)) failedChecks.push(name);
   }
   if ([...requiredSet].some(name => !seen.has(name))) checksPending = true;
+  if (foreign) { checksPending = true; checksRunning = true; }
   return {
     title: pr.title, url: pr.url, state: pr.state, head: pr.headRefOid, mergeCommit: pr.mergeCommit?.oid ?? null, mergedAt: pr.mergedAt ?? null, headBranch: pr.headRefName ?? "", base: pr.baseRefName, graphiteMergeStatus: null,
     trunk, draft: pr.isDraft, conflict: pr.mergeable === "CONFLICTING" || pr.mergeStateStatus === "DIRTY",
@@ -63,7 +71,7 @@ export function parsePr(pr: Node, trunk: string, observedAt: string, required: s
     },
     mergeWhenReady: "unknown",
     threads: threads.nodes.filter((t: Node) => !t.isResolved).map((t: Node) => ({ id: t.id, updatedAt: t.comments.nodes[0]?.updatedAt ?? observedAt })),
-    failedChecks, otherFailedChecks, checksPending, checksRunning,
+    failedChecks, otherFailedChecks, checksPending, checksRunning, ...(checksHead ? { checksHead } : {}), checksSeen,
     complete: !threads.pageInfo.hasNextPage && !contexts?.pageInfo.hasNextPage && (pr.state !== "OPEN" || pr.mergeable !== "UNKNOWN"), observedAt,
     ...(typeof pr.mergeStateStatus === "string" ? { mergeStateStatus: pr.mergeStateStatus } : {}),
     ...(typeof pr.isInMergeQueue === "boolean" ? { inMergeQueue: pr.isInMergeQueue } : {}),
@@ -78,7 +86,7 @@ const COUNTS = "checkRunCountsByState{state count} statusContextCountsByState{st
  */
 const PROBE = `updatedAt state headRefOid baseRefName isDraft mergeable mergeStateStatus reviewDecision isInMergeQueue autoMergeRequest{enabledAt}
 reviewThreads(first:100){pageInfo{hasNextPage} nodes{id isResolved}}
-commits(last:1){nodes{commit{statusCheckRollup{contexts(first:1){${COUNTS}}}}}}`;
+commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:1){${COUNTS}}}}}}`;
 /** PRs per probe query (one account, any number of its repositories): ~300 requests, about 3 points. */
 const PROBE_CHUNK = 100;
 const RUNNING_STATES = new Set(["QUEUED", "IN_PROGRESS", "PENDING", "WAITING", "REQUESTED", "EXPECTED"]);
@@ -98,8 +106,11 @@ export function fingerprint(pr: Node): Fingerprint | null {
   ].filter(([, n]) => n > 0).sort(([a], [b]) => a.localeCompare(b));
   const sum = (states: Set<string>) => counts.reduce((total, [key, n]) => total + (states.has(key.slice(key.indexOf(":") + 1)) ? n : 0), 0);
   const unresolved = threads.nodes.filter((t: Node) => !t.isResolved).map((t: Node) => String(t.id)).sort();
+  // The rollup's commit (checks-belong-to-the-current-head): a lagged commit list catching up to the head is a change
+  // even when its counts read the same.
+  const checksHead = pr.commits?.nodes?.[0]?.commit?.oid ?? null;
   return {
-    core: JSON.stringify([pr.updatedAt, pr.state, pr.headRefOid, pr.baseRefName, !!pr.isDraft, pr.mergeable ?? null, pr.mergeStateStatus ?? null, pr.reviewDecision ?? null, pr.isInMergeQueue ?? null, !!pr.autoMergeRequest, unresolved]),
+    core: JSON.stringify([pr.updatedAt, pr.state, pr.headRefOid, ...(checksHead ? [checksHead] : []), pr.baseRefName, !!pr.isDraft, pr.mergeable ?? null, pr.mergeStateStatus ?? null, pr.reviewDecision ?? null, pr.isInMergeQueue ?? null, !!pr.autoMergeRequest, unresolved]),
     checks: JSON.stringify(counts), running: sum(RUNNING_STATES), failed: sum(FAILED_STATES),
   };
 }
@@ -112,7 +123,7 @@ reviewRequests(first:100){pageInfo{hasNextPage} nodes{requestedReviewer{__typena
 latestReviews(first:100){pageInfo{hasNextPage} nodes{state author{__typename login}}}
 baseRef{branchProtectionRule{requiredStatusCheckContexts} ${RULES} associatedPullRequests(first:100,states:[OPEN]){nodes{number headRefName state headRepository{nameWithOwner}}}}
 reviewThreads(first:100){pageInfo{hasNextPage} nodes{id isResolved comments(last:1){nodes{updatedAt}}}}
-commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){${COUNTS} pageInfo{hasNextPage} nodes{
+commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100){${COUNTS} pageInfo{hasNextPage} nodes{
 ...on CheckRun{name status conclusion} ...on StatusContext{context state}
 }}}}}}`;
 
@@ -339,6 +350,9 @@ export class Github {
         const reread = (p: Pr) => full.set(p.repo, [...(full.get(p.repo) ?? []), p]);
         try {
           this.stats.graphql++; this.stats.probes++;
+          // A read counts from when it was asked, never answered: an answer that lands after an agent's push and wait
+          // may describe the PR before the push (checks-belong-to-the-current-head).
+          const askedAt = new Date(this.now()).toISOString();
           const payload = await this.api.graphql(byRepo[0], query, {});
           if (((payload.errors ?? []) as Node[]).some(e => e.type === "RATE_LIMITED" || e.type === "RATE_LIMIT")) throw Object.assign(new Error("rate limited"), { rateLimited: true });
           this.noteBudget(owner, payload.data?.rateLimit);
@@ -349,7 +363,7 @@ export class Github {
             if (!seen || probeVerdict(before, seen, this.now() - (this.fullAt.get(p.key) ?? 0)) === "read") { reread(p); continue; }
             // Nothing the full read decides on moved: the last observation is current as of now.
             this.stats.unchanged++; this.readAt.set(p.key, this.now());
-            result.set(p.key, { snapshot: { ...this.last.get(p.key)!.snapshot!, observedAt: new Date(this.now()).toISOString() }, error: null });
+            result.set(p.key, { snapshot: { ...this.last.get(p.key)!.snapshot!, observedAt: askedAt }, error: null });
           }
         } catch (error) {
           if (rateLimited(error)) { this.outOfBudget(owner, error); for (const p of chunk) result.set(p.key, this.standIn(p, owner)); continue; }
@@ -368,6 +382,7 @@ export class Github {
         const query = `query($owner:String!,$name:String!){rateLimit{cost remaining resetAt limit} repository(owner:$owner,name:$name){defaultBranchRef{name branchProtectionRule{requiredStatusCheckContexts} ${RULES}} squashMergeAllowed mergeCommitAllowed rebaseMergeAllowed autoMergeAllowed viewerDefaultMergeMethod mergeQueue{id} ${group.map((p, i) => `p${i}:pullRequest(number:${p.number}){${fields}}`).join(" ")}}}`;
         try {
           this.stats.graphql++;
+          const askedAt = new Date(this.now()).toISOString(); // asked, not answered (checks-belong-to-the-current-head)
           const payload = await this.api.graphql(repo, query, { owner, name });
           this.noteBudget(owner, payload.data?.rateLimit);
           for (const p of group) this.readAt.set(p.key, this.now());
@@ -404,7 +419,7 @@ export class Github {
             // branch must not erase the required checks that apply to the stack.
             const trunkChecks = open && stacked(data) ? [...(repository.defaultBranchRef.branchProtectionRule?.requiredStatusCheckContexts ?? []), ...await rulesFor(trunk, trunkRules)] : [];
             const required = [...new Set([...(data.baseRef?.branchProtectionRule?.requiredStatusCheckContexts ?? []), ...base, ...trunkChecks])];
-            const snapshot = parsePr(data, trunk, new Date(this.now()).toISOString(), required);
+            const snapshot = parsePr(data, trunk, askedAt, required);
             const print = fingerprint(data);
             if (print) this.fingerprints.set(p.key, print); else this.fingerprints.delete(p.key);
             this.fullAt.set(p.key, this.now());

@@ -1901,6 +1901,20 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    the desktop web, 3,400-3,600 components (every PR row, task and Activity row) for one tap, because every slot's
    height went to the view's root. Guarded by `tests/card-resize.test.ts` (the real `WorkspaceView`, three columns: one
    card's new height draws no text).
+152. **Checks belong to the current head** (`checks-belong-to-the-current-head`). A pass, a failure or a conflict
+   (the `wait_for_checks` answer and message, Needs you's checks items, the PR row's chip) is reported only for check
+   results read for the PR's current head, at a read asked after the wait began. The head comes from `headRefOid`
+   and the checks from `commits(last:1)`, two fields GitHub updates apart, so both reads ask for the rollup's commit
+   and `parsePr` (`server/github.ts`) reads another commit's results as nothing reported on the head yet
+   (`checksRunning`, `checksPending`; `checksHead` names that commit, and `watchVerdict` keeps waiting on it). A head
+   with runs in progress keeps waiting, and so does a head with no check that counts yet (`checksSeen` 0: a skipped or
+   neutral review bot doesn't count): "passed" needs checks seen on this head, and an empty head ends only after
+   `WATCH_NO_CHECKS_MS` (10 min) quiet, as "no checks ran on <head>", never "passed" (a repository without CI). The rollup's commit is in the probe's fingerprint, so its
+   catching up triggers a full read even when the counts match. `observedAt` is when a read was asked, never when it
+   was answered, so a read in flight across a push can't decide a wait made after it. 2026-11-27/28: three messages
+   named a result the PR's head didn't have: "all checks passed on" the new head while its run was in progress (GitHub:
+   only a skipped review bot on the head for 88 s after the push, the Actions run created after the 60 s settle), "all checks passed on" and "conflict on" an old head after a push. Guarded by
+   `tests/checks-head.test.ts` ([docs/wait-for-checks.md](docs/wait-for-checks.md)).
 
 150. **Opening reads the workspace once** (`opening-reads-the-workspace-once`). Opening the workspace view (the side
    panel, the tab, Home's pane) reads the whole workspace (`follow.get`) once. Nothing reads it again on a timer or in

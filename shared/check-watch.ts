@@ -16,6 +16,14 @@ export const WATCH_MAX_MS = 12 * 60 * 60_000;
  * can list a head with no check suites yet, which reads as "nothing running" for a few seconds.
  */
 export const WATCH_SETTLE_MS = 60_000;
+/**
+ * A head with no check that counts (`checksSeen` 0; a skipped review bot doesn't count) is "nothing ran" only after it
+ * has been quiet this long (checks-belong-to-the-current-head). 2026-11-28, example/app#375: the Actions run was
+ * created 88 s after the push, past WATCH_SETTLE_MS, so the empty head read "all checks passed". Actions can queue a run
+ * for minutes under load or a concurrency group; 10 min is far past that, and the only cost is a repository with no CI
+ * hearing "no checks ran" 10 min after its push, from reads the watch already makes (a probe ~ 1/33 point).
+ */
+export const WATCH_NO_CHECKS_MS = 10 * 60_000;
 /** At most this many open watches per agent: a watch per PR of the biggest stack fits (pr-scale-lists-batch-not-throw); this only stops a runaway loop. */
 export const WATCHES_PER_AGENT = SCALE.perWorkspace;
 
@@ -41,7 +49,7 @@ export type WatchedPr = {
   key: string; repo: string; number: number; error: string | null;
   snapshot: {
     url: string; state: "OPEN" | "MERGED" | "CLOSED"; head: string; conflict: boolean; complete: boolean; observedAt: string;
-    failedChecks: string[]; otherFailedChecks?: string[]; checksPending: boolean; checksRunning?: boolean;
+    failedChecks: string[]; otherFailedChecks?: string[]; checksPending: boolean; checksRunning?: boolean; checksHead?: string | null; checksSeen?: number;
   } | null;
 };
 export type VerdictKind = "passed" | "failed" | "merged" | "closed" | "conflict" | "expired" | "gone";
@@ -52,12 +60,13 @@ const checksUrl = (pr: WatchedPr) => pr.snapshot?.url ? `${pr.snapshot.url.repla
 export const WATCH_HEADER = "Follow-up checks";
 
 /** The message (or the tool's immediate answer) for a verdict: one header line, then what happened and what to do. */
-export function verdictText(kind: VerdictKind, pr: WatchedPr, extra: { failed?: string[]; pending?: boolean; running?: boolean } = {}): string {
+export function verdictText(kind: VerdictKind, pr: WatchedPr, extra: { failed?: string[]; pending?: boolean; running?: boolean; none?: boolean } = {}): string {
   const name = `${pr.repo}#${pr.number}`;
   const head = short(pr.snapshot?.head);
   const link = checksUrl(pr);
   switch (kind) {
-    case "passed": return `${WATCH_HEADER} ${name}: all checks passed on ${head}.${extra.pending ? " A required check hasn't reported yet, so GitHub may still block the merge." : ""}`;
+    case "passed": if (extra.none) return `${WATCH_HEADER} ${name}: no checks ran on ${head} in ${WATCH_NO_CHECKS_MS / 60_000} minutes, so there is nothing to wait for.`;
+      return `${WATCH_HEADER} ${name}: all checks passed on ${head}.${extra.pending ? " A required check hasn't reported yet, so GitHub may still block the merge." : ""}`;
     case "failed": {
       const failed = extra.failed ?? [];
       return `${WATCH_HEADER} ${name}: ${failed.length} check${failed.length === 1 ? "" : "s"} failed on ${head}: ${failed.join(", ")}.${extra.running ? " Others are still running." : ""}${link ? ` Details: ${link}` : ""}`;
@@ -76,7 +85,9 @@ export function verdictText(kind: VerdictKind, pr: WatchedPr, extra: { failed?: 
  * an older read may predate the agent's push. Never throws.
  *
  * - merged, closed, a merge conflict: at once.
+ * - check results read for a commit other than the head (`checksHead`): nothing yet, keep waiting.
  * - a required check failed: at once (the agent has to fix it whatever else runs); other failures once nothing runs.
+ * - no check that counts on the head: "no checks ran", only after WATCH_NO_CHECKS_MS quiet.
  * - all finished and none failed: "passed", once checks were seen running on this head or the head has been quiet
  *   WATCH_SETTLE_MS (`quietSince`: when the PR's content last changed, or null when unknown).
  */
@@ -92,11 +103,15 @@ export function watchVerdict(watch: CheckWatch, pr: WatchedPr | undefined, now: 
   if (s.state === "MERGED") return end("merged", pr);
   if (s.state === "CLOSED") return end("closed", pr);
   if (s.conflict) return end("conflict", pr);
+  // checks-belong-to-the-current-head: results read for another commit say nothing about this head; keep waiting.
+  if (s.checksHead && s.checksHead !== s.head) return keep();
   const running = s.checksRunning ?? s.checksPending;
   if (s.failedChecks.length) return end("failed", pr, { failed: [...s.failedChecks, ...(s.otherFailedChecks ?? [])], running });
   if (running) return watch.runningHead === s.head ? keep() : keep({ ...watch, runningHead: s.head });
   const others = s.otherFailedChecks ?? [];
   if (others.length) return end("failed", pr, { failed: others });
+  // No check on this head yet (just pushed, CI not started): never "passed" on an empty head until the long quiet.
+  if (s.checksSeen === 0) return quietSince !== null && now - quietSince >= WATCH_NO_CHECKS_MS ? end("passed", pr, { none: true }) : keep();
   const settled = watch.runningHead === s.head || quietSince !== null && now - quietSince >= WATCH_SETTLE_MS;
   return settled ? end("passed", pr, { pending: s.checksPending }) : keep();
 }
