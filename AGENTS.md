@@ -1902,6 +1902,18 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    height went to the view's root. Guarded by `tests/card-resize.test.ts` (the real `WorkspaceView`, three columns: one
    card's new height draws no text).
 
+150. **Opening reads the workspace once** (`opening-reads-the-workspace-once`). Opening the workspace view (the side
+   panel, the tab, Home's pane) reads the whole workspace (`follow.get`) once. Nothing reads it again on a timer or in
+   case: the check opening asks for (`follow.refresh`) reaches the view as a change to the list copy, which re-reads
+   once (`useWorkspace`), or as read stamps, which the workspaces feed sends as soon as that check lands
+   (`WorkspacesFeed.changed({ readsNow })`) and the view takes over the copy it holds (`newerReadStamps`); new reviewer
+   lists redraw that copy (`useWorkspace` follows them), never a read. 2026-11-27, the broad perf check on the
+   live-sized seed: opening the panel read the workspace (~375 KB) at open, again 1.5 s later on a blind timer after
+   the check, and a third time on a session's first open when the reviewer lists arrived; 4.3 s to paint on a phone at
+   6x CPU. Guarded by `tests/panel-open-reads.test.ts` (the real `useWorkspace` and `WorkspaceView`: one read past the
+   old timer, the reviewer lists and a newer stamp both reach the view without one; the feed sends a refresh's stamps
+   inside its window).
+
 ## Bugs
 
 Every bug is fixed for its whole class:

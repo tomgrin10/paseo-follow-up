@@ -28,7 +28,7 @@ export async function launch({ profile = "desktop", cpu, colorScheme = "light", 
   const browser = await pw.chromium.launch({ executablePath: process.env.CHROMIUM, headless: true });
   const p = PROFILES[profile];
   const context = await browser.newContext({ viewport: p.viewport, deviceScaleFactor: p.deviceScaleFactor, isMobile: p.isMobile, hasTouch: p.hasTouch, colorScheme, reducedMotion: "no-preference" });
-  await context.addInitScript({ content: readFileSync(join(here, "perf-ui-probe.cjs"), "utf8").replace("walk: false", `walk: ${walk}`) });
+  await context.addInitScript({ content: readFileSync(join(here, "perf-ui-probe.cjs"), "utf8").replace("walk: false", `walk: ${walk}`).replace("const sendMatch = null;", `const sendMatch = ${JSON.stringify(process.env.PERF_SEND_STACKS ?? null)};`) });
   const page = await context.newPage();
   const cdp = await context.newCDPSession(page);
   await cdp.send("Performance.enable");
@@ -60,7 +60,7 @@ export async function launch({ profile = "desktop", cpu, colorScheme = "light", 
     });
   });
   const metrics = async () => Object.fromEntries((await cdp.send("Performance.getMetrics")).metrics.map(m => [m.name, m.value]));
-  const reset = async () => { rpc.rows.clear(); await page.evaluate(() => { const p = window.__perf; p.commits = 0; p.rendered = {}; p.mounts = {}; p.events = []; p.longTasks = []; p.commitMs = 0; }).catch(() => {}); };
+  const reset = async () => { rpc.rows.clear(); await page.evaluate(() => { const p = window.__perf; p.commits = 0; p.rendered = {}; p.mounts = {}; p.events = []; p.longTasks = []; p.commitMs = 0; p.sends = []; }).catch(() => {}); };
   const setWalk = on => page.evaluate(v => { window.__perf.walk = v; }, on);
   const paint = () => page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(performance.now())))));
 
@@ -88,6 +88,7 @@ export async function launch({ profile = "desktop", cpu, colorScheme = "light", 
       commits: perf.commits, rendered: top(perf.rendered), mounts: top(perf.mounts), renderedTotal: Object.values(perf.rendered).reduce((a, b) => a + b, 0), mountedTotal: Object.values(perf.mounts).reduce((a, b) => a + b, 0),
       events: perf.events.filter(e => e.start >= t0 - 5).map(e => ({ name: e.name, duration: Math.round(e.duration), processing: Math.round(e.processing) })),
       longTasks: perf.longTasks.filter(e => e.start >= t0 - 5).map(e => Math.round(e.duration)),
+      sends: perf.sends.filter(s => s.t >= t0 - 5).map(s => ({ ms: Math.round(s.t - t0), stack: s.stack })),
       rpc: [...rpc.rows.values()].sort((a, b) => b.downBytes - a.downBytes), calls: (rpc.log ?? []).filter(x => x.t >= w0).map(x => ({ ms: x.t - w0, key: x.key.replace("plugin.rpc.invoke.request:", ""), input: x.input })),
     };
   }

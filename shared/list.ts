@@ -120,6 +120,25 @@ export function splitReadStamps(entry: ListEntry): { bare: ListEntry; stamps: Re
   return { bare: stamps ? { ...entry, prs } : entry, stamps };
 }
 
+/**
+ * A full workspace (follow.get) with the list copy's read stamps where they are newer: the open view's "Checked" line
+ * follows the feed's stamps without reading the whole workspace again (invariant 150). Same object when none is newer.
+ */
+export function newerReadStamps<W extends { prs: { key: string; snapshot?: { observedAt?: string; deployment?: { observedAt?: string } | null } | null }[] }>(full: W, stamps: ReadStamps | null | undefined): W {
+  if (!stamps) return full;
+  let moved = false;
+  const prs = full.prs.map(p => {
+    const st = stamps[p.key]; const s = p.snapshot;
+    if (!st || !s) return p;
+    const observed = st[0] && (!s.observedAt || st[0] > s.observedAt) ? st[0] : undefined;
+    const deployed = s.deployment && st[1] && (!s.deployment.observedAt || st[1] > s.deployment.observedAt) ? st[1] : undefined;
+    if (!observed && !deployed) return p;
+    moved = true;
+    return { ...p, snapshot: { ...s, ...(observed ? { observedAt: observed } : {}), ...(deployed ? { deployment: { ...s.deployment, observedAt: deployed } } : {}) } };
+  });
+  return moved ? { ...full, prs } : full;
+}
+
 /** The entry with its read stamps back (the client store, before any reader sees it). Unknown keys are ignored. */
 export function withReadStamps<E extends ListEntry>(entry: E, stamps: ReadStamps | null | undefined): E {
   if (!stamps || isArchivedEntry(entry)) return entry;

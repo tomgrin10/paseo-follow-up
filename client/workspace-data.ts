@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRpc } from "@getpaseo/plugin/client";
 import { getRpc } from "../shared/contracts";
@@ -10,6 +10,9 @@ import { workspaceKey } from "./keys";
 import type { Workspace } from "../shared/model";
 import { pendingAnswers, pendingKey, settlePendingAnswers, subscribePendingAnswers } from "./pending-answers";
 import { settledAnswers, withPendingAnswers } from "../shared/optimistic-answers";
+import { newerReadStamps, splitReadStamps } from "../shared/list";
+import { onReviewerConfig, reviewerConfig } from "../shared/reviewers";
+import { noReviewReposVersion, onNoReviewRepos } from "../shared/pr-workflow";
 
 const none = () => () => {};
 
@@ -37,7 +40,8 @@ export function useWorkspace(live: LiveStore | undefined, workspaceId: string, o
   const enabled = (options.enabled ?? true) && !!workspaceId;
   const read = useRpc(getRpc);
   // The list copy only says when to read again: a change listed after this read (updatedAt) re-reads once.
-  const listedAt = useSyncExternalStore(live?.subscribe ?? none, () => enabled ? live?.get(workspaceId)?.updatedAt ?? null : null, () => null);
+  const listed = useSyncExternalStore(live?.subscribe ?? none, () => enabled ? live?.get(workspaceId) ?? null : null, () => null);
+  const listedAt = listed?.updatedAt ?? null;
   const query = useQuery({ queryKey: workspaceKey(workspaceId), queryFn: () => readWorkspace(read, workspaceId), enabled, staleTime: 15_000, refetchOnWindowFocus: false });
   const readAt = query.data?.workspace?.updatedAt ?? null;
   const { refetch, isFetching } = query;
@@ -47,7 +51,22 @@ export function useWorkspace(live: LiveStore | undefined, workspaceId: string, o
   // answering-is-optimistic: the full copy reads the developer's answers in flight as answered, as the list store does.
   const pending = useSyncExternalStore(subscribePendingAnswers, pendingAnswers, pendingAnswers);
   const read$ = enabled ? query.data?.workspace ?? null : null;
-  const workspace = useMemo(() => read$ && withPendingAnswers(read$, pending, pendingKey), [read$, pending]);
+  // Read stamps (when each PR was last checked) come from the list copy, pushed by the feed after a read lands, so a
+  // newer check never needs this workspace read again (invariant 150, opening-reads-the-workspace-once).
+  const stamps = useMemo(() => listed ? splitReadStamps(listed).stamps : null, [listed]);
+  const base = useMemo(() => read$ && newerReadStamps(withPendingAnswers(read$, pending, pendingKey), stamps), [read$, pending, stamps]);
+  // Needs you is computed with the reviewer lists (shared/reviewers.ts, shared/pr-workflow.ts): when they change, the
+  // copy already read is drawn again as a new object, so what was memoised on it is computed again, with no read.
+  // Anything else keeps the object (a list push with no newer stamp redraws nothing).
+  const reviewers = useSyncExternalStore(onReviewerConfig, reviewerConfig, reviewerConfig);
+  const noReview = useSyncExternalStore(onNoReviewRepos, noReviewReposVersion, noReviewReposVersion);
+  const drawn = useRef<{ base: Workspace | null; reviewers: unknown; noReview: unknown; out: Workspace | null } | null>(null);
+  const workspace = useMemo(() => {
+    const last = drawn.current;
+    const out = !base || !last || last.base !== base ? base : last.reviewers !== reviewers || last.noReview !== noReview ? { ...base } : last.out;
+    drawn.current = { base, reviewers, noReview, out };
+    return out;
+  }, [base, reviewers, noReview]);
   return {
     workspace,
     /** Why there is no workspace to show: the read failed or found none (null while reading, or when disabled). */

@@ -104,7 +104,7 @@ Nothing polls while the app is hidden.
 | `client/card-store.ts` | Per-card picks, Something else words and pick notes, shared by every copy of a card and kept across re-renders. |
 | `client/pill.tsx` | The composer pill. |
 | `client/chat.tsx` | Compact rows for Follow-up's tool calls, batch cards and Done cards in chats (recognised by `shared/chat.ts`). |
-| `client/live.tsx`, `client/workspace-data.ts`, `shared/list.ts` | The shared workspace poll (diffed `follow.list`, list forms only) and the per-workspace full read (`follow.get`). |
+| `client/live.tsx`, `client/workspace-data.ts`, `shared/list.ts` | The shared workspace poll (diffed `follow.list`, list forms only) and the per-workspace full read (`follow.get`). Opening a workspace reads it once: the check it asks for (`follow.refresh`) reaches the view as a list change (one re-read) or as read stamps over the copy it holds (`newerReadStamps`), and new reviewer lists redraw that copy, never a read (invariant `opening-reads-the-workspace-once`, `tests/panel-open-reads.test.ts`). |
 | `client/visibility.ts` | Foreground detection; hidden means no polling. |
 | `client/display.tsx`, `client/button-visibility.ts` | Settings → Display, and button visibility (unknown is not off). `button-visibility.test.mjs` covers the lifecycle. |
 | `client/settings.tsx`, `client/settings-shell.tsx`, `client/settings-screens.ts` | The settings screens (one per category on Paseo 0.16, one with Follow-up's own tabs on 0.15) and their collapsible sections. |

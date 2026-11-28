@@ -2,7 +2,10 @@
 // onCommitFiberRoot on every commit; with __perf.walk on, each commit's components are counted by name, split
 // mount (no alternate) and render (props or state changed; bailed-out subtrees skipped). Also Event Timing entries (tap to next paint) and long tasks.
 (() => {
-  const perf = (window.__perf = { walk: false, commits: 0, rendered: {}, mounts: {}, events: [], longTasks: [], commitMs: 0 });
+  const perf = (window.__perf = { walk: false, commits: 0, rendered: {}, mounts: {}, events: [], longTasks: [], commitMs: 0, sends: [] });
+  // PERF_SEND_STACKS=<substring>: the JS stack of every WebSocket frame sent that contains it (who sent that RPC).
+  const sendMatch = null;
+  if (sendMatch) { Error.stackTraceLimit = 80; const send = WebSocket.prototype.send; WebSocket.prototype.send = function (data) { if (typeof data === "string" && data.includes(sendMatch)) perf.sends.push({ t: performance.now(), stack: String(new Error().stack).split("\n").slice(2, 80).map(l => l.trim()).join(" | ") }); return send.call(this, data); }; }
   const nameOf = f => {
     const t = f.type; if (!t || typeof t === "string") return null;
     return t.displayName || t.name || (t.render && (t.render.displayName || t.render.name)) || (t.type && (t.type.displayName || t.type.name)) || "Anonymous";
