@@ -14,7 +14,7 @@ import { isLoaded, type LoadSignals } from "../shared/agent-load";
 import { errorText } from "../shared/errors";
 import { since } from "../shared/now";
 import { fitTurn, foldTurn, runLabel, runSteps, turnSource, type Turn, type TurnItem, type TurnRow, type TurnSource, type TurnStep } from "../shared/turn";
-import { PEEK_CLOSED, peekDeadline, peekStep, timelineOnScreen, type PeekEvent } from "../shared/peek";
+import { PEEK_CLOSED, peekStep, peekWait, pointerWhere, timelineOnScreen, type PeekEvent } from "../shared/peek";
 
 /**
  * The agent's current turn, drawn the way its chat draws it (Chat Polish's look; shared/turn.ts says what is copied).
@@ -230,6 +230,8 @@ function DesktopFooter({ s, startedAt, asking, theme, onOpen }: { s: TurnState; 
   </View>;
 }
 
+/** How often an open peek re-checks a pointer at rest (the layout can move the line or the peek away from it). */
+const POINTER_LOOK_MS = 400;
 /** The peek's timers run on a monotonic clock: wall time can jump (or, in the harness, be frozen). */
 const clock = () => (globalThis as { performance?: { now(): number } }).performance?.now() ?? Date.now();
 
@@ -305,11 +307,21 @@ export function PeekHost({ where, theme, compact, openAgent, names, chatBeside =
     dispatch({ type: "close" });
     if (within && id) (nodes.current.get(id)?.() as { focus?(): void } | null)?.focus?.();
   }, []);
-  // One timer: the next pending open or grace close.
+  // One timer: the next pending open or grace close. It ticks only once the deadline has passed on the clock: a timer
+  // that fires early (browsers do, by up to ~1 ms) waits again for what is left, since an early tick would change
+  // nothing and leave nothing armed (invariant 151).
   useEffect(() => {
-    const at = peekDeadline(state);
-    if (at === null) return;
-    const id = setTimeout(() => dispatch({ type: "tick", t: clock() }), Math.max(0, at - clock()));
+    const first = peekWait(state, clock());
+    if (first === null) return;
+    let id: ReturnType<typeof setTimeout>;
+    const fire = () => {
+      const now = clock();
+      const wait = peekWait(state, now);
+      if (wait === null) return;
+      if (wait > 0) { id = setTimeout(fire, wait); return; }
+      dispatch({ type: "tick", t: now });
+    };
+    id = setTimeout(fire, first);
     return () => clearTimeout(id);
   }, [state]);
   // Place it when it opens (or another line takes over).
@@ -334,6 +346,50 @@ export function PeekHost({ where, theme, compact, openAgent, names, chatBeside =
     doc?.addEventListener("pointerdown", down, true); doc?.addEventListener("scroll", scroll, true);
     return () => { doc?.removeEventListener("pointerdown", down, true); doc?.removeEventListener("scroll", scroll, true); };
   }, [state.open]);
+  // Where the pointer is, read from the document while a peek is open or arming (invariant 151,
+  // an-open-peek-closes-when-the-pointer-is-away): a hover event the line or the peek misses (a node replaced under
+  // the pointer, React Native Web's nested-Pressable hover lock) must not keep it open, so the peek never waits on one
+  // leave event. Each move is hit-tested against the open line, the arming line and the peek (at most once a
+  // frame), and again every POINTER_LOOK_MS for a pointer at rest while the layout moves. Focus on the line or in the
+  // peek holds it (keyboard entry): there the pointer decides nothing.
+  const pendingId = state.pending?.id ?? null;
+  useEffect(() => {
+    if ((!state.open && !pendingId) || Platform.OS !== "web") return;
+    type Listen = { addEventListener(t: string, f: (e: PointerLike) => void, o?: object): void; removeEventListener(t: string, f: (e: PointerLike) => void, o?: object): void };
+    type PointerLike = { clientX: number; clientY: number; pointerType?: string; relatedTarget?: unknown; type: string };
+    const g = globalThis as unknown as { document?: Listen & { activeElement?: unknown }; requestAnimationFrame?(f: () => void): number; cancelAnimationFrame?(id: number): void };
+    const doc = g.document;
+    if (!doc) return;
+    const open = state.open;
+    let at: { x: number; y: number } | null = null;
+    let frame: number | null = null;
+    const held = () => {
+      const active = doc.activeElement;
+      const line = open ? nodes.current.get(open)?.() as { contains?(n: unknown): boolean } | null : null;
+      return !!active && (!!(peekRef.current as { contains?(n: unknown): boolean } | null)?.contains?.(active) || !!line?.contains?.(active));
+    };
+    const box = (node: unknown) => { const r = rectOf(node); return r ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom } : null; };
+    const look = () => {
+      frame = null;
+      if (!at || held()) return;
+      dispatch({ type: "pointer", where: pointerWhere(at, { line: open ? box(nodes.current.get(open)?.()) : null, pending: pendingId ? box(nodes.current.get(pendingId)?.()) : null, peek: open ? box(peekRef.current) : null }), t: clock() });
+    };
+    const move = (e: PointerLike) => {
+      if (e.pointerType === "touch") return;
+      at = { x: e.clientX, y: e.clientY };
+      if (frame === null) frame = g.requestAnimationFrame ? g.requestAnimationFrame(look) : (look(), null);
+    };
+    // The pointer left the window: away, wherever it was last seen.
+    const out = (e: PointerLike) => { if (e.relatedTarget == null && e.pointerType !== "touch" && !held()) { at = null; dispatch({ type: "pointer", where: "away", t: clock() }); } };
+    const opts = { capture: true, passive: true };
+    doc.addEventListener("pointermove", move, opts); doc.addEventListener("pointerout", out, opts);
+    const timer = open ? setInterval(look, POINTER_LOOK_MS) : null;
+    return () => {
+      doc.removeEventListener("pointermove", move, opts); doc.removeEventListener("pointerout", out, opts);
+      if (timer) clearInterval(timer);
+      if (frame !== null) g.cancelAnimationFrame?.(frame);
+    };
+  }, [state.open, pendingId]);
   // An agent whose turn comes on screen (its row was selected, say) loses its peek: one predicate, also for an open one.
   const marked = useMarkedOnScreen();
   const shown = state.open && !timelineOnScreen(state.open, { marked, chatBeside }) ? state.open : null;

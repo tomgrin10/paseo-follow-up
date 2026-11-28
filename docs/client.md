@@ -504,6 +504,12 @@ button. A click still opens the chat.
   pointer entered it. Esc, a click outside or a scroll that moves the line closes it. From a focused line, → (or
   Alt+↓) moves focus into its open peek; Esc there closes it and returns focus to the line. Timers use
   `performance.now()`: wall time can jump, and the screenshot harness freezes `Date`.
+- **Closing never waits on one event or one timer** (invariant 151). The one timer ticks only once its deadline has
+  passed on the clock (`peekWait`), since browsers fire `setTimeout` up to ~1 ms early and an early tick changes nothing.
+  While a peek is open or arming, `PeekHost` reads the
+  pointer from the document (`pointermove`, once a frame, and every 400 ms for a pointer at rest) and hit-tests it
+  against the open line, the arming line and the peek (`pointerWhere`); the `pointer` event drives `peekStep` like
+  enter and leave, and gives back the same state when nothing changes. Focus on the line or in the peek holds it.
 - **Where it draws.** `PeekHost` draws it with `FloatingSurface`'s nonmodal mode inside the host's own box, not the
   modal portal: React Native Web's Modal traps focus (it focuses itself on open and pulls outside focus back), which a
   hover-opened peek must never do. So the panel's peek opens under the line (wholly above it when it doesn't fit
