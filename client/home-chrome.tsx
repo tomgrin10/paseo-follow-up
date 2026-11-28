@@ -8,6 +8,7 @@ import { Icon, ScrollView, useToast } from "@getpaseo/plugin/client/ui";
 import { homeCounts, type HomeGroupId, type HomeModel } from "../shared/home";
 import { layoutHint, filterHome, homeSearchDocs, indexDocs, defaultActive, omniboxResults, overseerProvider, workspaceProvider, type OmniboxItem, type OmniboxProvider } from "../shared/search";
 import { LayoutCapture, type LayoutKey } from "../shared/layout-swap";
+import { fullPlaceholder, type Placeholder } from "../shared/placeholder-fit";
 import { DEFAULT_SORT, isMenuSort, MENU_SORTS, SORT_HINT, SORT_LABEL, type SortMode } from "../shared/sort";
 import { GROUPING_LABEL, GROUPINGS, homeViewFiltered, SHOW_ITEMS, SHOW_LABEL, TITLE_LABEL, TITLE_SOURCES, type HomeView } from "../shared/home-arrange";
 import { PRIORITY_SOURCE_LABEL } from "../shared/priorities";
@@ -146,7 +147,9 @@ export function QueryField({ theme, value, onChange, placeholder, icon, dense, i
   autoFocus?: boolean;
   /** Esc's own action (a section search closes); without it Esc clears, then leaves the field. */
   onEscape?: () => void;
-  theme: Theme; value: string; onChange: (q: string) => void; placeholder: string; icon: string; dense: boolean;
+  theme: Theme; value: string; onChange: (q: string) => void; icon: string; dense: boolean;
+  /** Its wordings, preferred first: the field shows the longest that fits its one line (invariant 153). */
+  placeholder: Placeholder;
   /** The key chip at the field's end (web, desktop width): "/" or the search-from-anywhere key; false for none. */
   /** The chip's hover title (web): what each key does. */
   slashTitle?: string;
@@ -179,7 +182,7 @@ export function QueryField({ theme, value, onChange, placeholder, icon, dense, i
     borderWidth: 1, borderColor: focused ? withAlpha(c.foreground, 0.35) : c.border, backgroundColor: c.surface1 }}>
     <Icon name={icon as never} size={dense ? 16 : 13} color={c.foregroundMuted} />
     <Field ref={inputRef} onLayout={onLayout} value={value} onChangeText={q => { onLayoutQuery?.(capture.current.change(q)); onChange(q); }} placeholder={placeholder} placeholderTextColor={c.foregroundMuted}
-      accessibilityLabel={placeholder} autoFocus={autoFocus} autoCorrect={false} autoCapitalize="none" spellCheck={false} returnKeyType="go"
+      accessibilityLabel={fullPlaceholder(placeholder)} autoFocus={autoFocus} autoCorrect={false} autoCapitalize="none" spellCheck={false} returnKeyType="go"
       {...(listKeys || onLayout ? { dataSet: { ...(listKeys ? { listKeys: "1" } : {}), ...(onLayout ? { followUpSearch: "1" } : {}) } } as object : {})}
       onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
       onSubmitEditing={onSubmit}
@@ -195,7 +198,7 @@ export function QueryField({ theme, value, onChange, placeholder, icon, dense, i
       style={{ flex: 1, minWidth: 0, color: c.foreground, fontSize: dense ? 15 : 13, paddingVertical: 0, ...(Platform.OS === "web" ? { outlineStyle: "none" } as object : {}) }} />
     {trailing}
     {count !== undefined ? !!count && <Text accessibilityLiveRegion="polite" style={{ color: c.foregroundMuted, fontSize: dense ? 13 : 12, fontVariant: ["tabular-nums"] }}>{count}</Text>
-      : !!value && <Pressable accessibilityRole="button" accessibilityLabel={`Clear ${placeholder.toLowerCase()}`} hitSlop={dense ? 14 : 8} onPress={() => { onChange(""); inputRef.current?.focus(); }}>
+      : !!value && <Pressable accessibilityRole="button" accessibilityLabel={`Clear ${fullPlaceholder(placeholder).toLowerCase()}`} hitSlop={dense ? 14 : 8} onPress={() => { onChange(""); inputRef.current?.focus(); }}>
       <Icon name="X" size={dense ? 16 : 13} color={c.foregroundMuted} />
     </Pressable>}
     {slashHint && !value && !focused && !dense && Platform.OS === "web" && <Text accessibilityElementsHidden importantForAccessibility="no"
@@ -204,6 +207,11 @@ export function QueryField({ theme, value, onChange, placeholder, icon, dense, i
   </View>;
 }
 
+/** Home's search wordings, longest first: a phone's half-width field shows the longest that fits (invariant 153). */
+export const searchPlaceholder = (askOn: boolean, dense: boolean): readonly string[] => askOn
+  ? [dense ? "Search or ask the Overseer" : "Search, or ask the Overseer", "Search or ask", "Search"]
+  : ["Search workspaces, branches, PRs", "Search workspaces", "Search"];
+
 /**
  * Home's search. Its chip names the search-from-anywhere key when one is set (it works here too), else "/"; plain "/"
  * focuses it on Home either way (useSlashToFocus).
@@ -211,7 +219,7 @@ export function QueryField({ theme, value, onChange, placeholder, icon, dense, i
 /** `onEnter`: the active result, or null when the query is empty (Home then opens its selection). */
 export function SearchField({ theme, omnibox, dense, onEnter, anywhereKey }: { theme: Theme; omnibox: Omnibox; dense: boolean; onEnter: (item: OmniboxItem | null) => void; anywhereKey?: string | null }) {
   const { query, setQuery, move, inputRef, askOn } = omnibox;
-  const placeholder = askOn ? dense ? "Search or ask the Overseer" : "Search, or ask the Overseer" : "Search workspaces, branches, PRs";
+  const placeholder = searchPlaceholder(askOn, dense);
   // The bar stays one line: a paste or drop lands here, and Home draws the thumbnails on their own line under it.
   if (askOn) return <ImageField model={omnibox.images} theme={theme} compact={dense} row={false} attach="inline" style={{ flex: 1, minWidth: 0 }}><QueryField theme={theme} onLayoutQuery={omnibox.setPhysical} value={query} onChange={setQuery} placeholder={placeholder} icon="Search" dense={dense} inputRef={inputRef} onLayout={omnibox.onSearchLayout} slashHint={anywhereKey || "/"}
     trailing={<AttachImageButton model={omnibox.images} theme={theme} compact={dense} label="Add image for the Overseer" />}
@@ -245,7 +253,7 @@ export function useListFilter(model: HomeModel, sources: HomeSources): ListFilte
 }
 /** "Filter workspaces": a filter icon and no key binding, so it never reads as Paseo's own Search (the Command Center, ⌘K). */
 export function FilterField({ theme, filter, dense }: { theme: Theme; filter: ListFilter; dense: boolean }) {
-  return <QueryField theme={theme} onLayoutQuery={filter.setPhysical} value={filter.query} onChange={filter.setQuery} placeholder="Filter workspaces" icon="ListFilter" dense={dense} inputRef={filter.inputRef} slashHint={false} listKeys />;
+  return <QueryField theme={theme} onLayoutQuery={filter.setPhysical} value={filter.query} onChange={filter.setQuery} placeholder={["Filter workspaces", "Filter"]} icon="ListFilter" dense={dense} inputRef={filter.inputRef} slashHint={false} listKeys />;
 }
 
 /** Kept outside the textbox: never changes the query or adds a decision to the search flow. */

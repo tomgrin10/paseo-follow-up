@@ -47,7 +47,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as the CHANGELOG's newest stable, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["menu-bounds", "tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "keyboard-room", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "peek", "pr-now", "panel-folds", "optimistic-answers", "workspace-view", "question-links", "gallery", "frames", "onboarding", "setup-popup", "advanced"];
+const REVIEW_SHOTS = ["menu-bounds", "tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "keyboard-room", "search-wrap", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "peek", "pr-now", "panel-folds", "optimistic-answers", "workspace-view", "question-links", "gallery", "frames", "onboarding", "setup-popup", "advanced"];
 /** Pasted images and their Add image button share one harness setup (an Overseer and the fixture provider taking images). */
 const PASTE_LIKE = only => only.includes("paste-images") || only.includes("attach-images");
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
@@ -999,10 +999,11 @@ async function noRealHost(page) {
 const failures = [];
 function makeShooter({ browser, port, out, scheme: forced, optimiser, results, crashed }) {
   /** Opens the web app in a fresh context, runs `drive`, and returns the PNG (optionally clipped to what drive returns). */
-  async function capture(name, viewport, theme, drive, { seen = null, scale = null, init = null, ws = null } = {}) {
+  async function capture(name, viewport, theme, drive, { seen = null, scale = null, init = null, ws = null, mobile = false } = {}) {
     const colorScheme = forced ?? theme;
     // Always open at desktop width: on a phone Paseo's sidebar is a drawer, so phone frames open Home first, then narrow.
-    const context = await browser.newContext({ viewport: DESKTOP, colorScheme, deviceScaleFactor: scale ?? (viewport.width < 768 ? 2 : desktopScale), reducedMotion: "reduce", timezoneId: "UTC", locale: "en-US" });
+    // `mobile`: Chromium as a phone browser, where text-size-adjust (search-wrap's large font) takes effect.
+    const context = await browser.newContext({ viewport: DESKTOP, colorScheme, deviceScaleFactor: scale ?? (viewport.width < 768 ? 2 : desktopScale), reducedMotion: "reduce", timezoneId: "UTC", locale: "en-US", ...(mobile ? { isMobile: true, hasTouch: true } : {}) });
     try {
       await context.addInitScript(INIT, { seen });
       if (init) await context.addInitScript(init);
@@ -2400,6 +2401,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   if (only.includes("own-answer")) await ownAnswerShots({ shoot });
   if (only.includes("optimistic-answers")) await optimisticAnswerShots({ shoot });
   if (only.includes("keyboard-room")) await keyboardRoomShots({ shoot, call, home });
+  if (only.includes("search-wrap")) await searchWrapShots({ shoot, out });
   if (only.includes("more-context")) await moreContextShots({ shoot, call });
   if (only.includes("your-questions")) await yourQuestionsShots({ shoot, call, seeded, home, cli });
   if (only.includes("paste-images")) await pasteImagesShots({ shoot, call });
@@ -6075,6 +6077,42 @@ async function dockInViewShots({ shoot }) {
     await shoot(name(`note-${kb}-${theme}`), frame, theme, async page => { await open(lone, "Missing keys")(page); await note(page); await keyboard(page, kb === "kb-up"); });
     await shoot(name(`card-${kb}-${theme}`), frame, theme, async page => { await open(card, "Which encoding should the export use?")(page); await cardOwn(page); await keyboard(page, kb === "kb-up"); });
   }
+}
+
+/**
+ * search-wrap (a-placeholder-never-wraps, invariant 153): Home's search on a phone, 360 and 390 wide, at the normal
+ * font and a large one (Android's font size; `text-size-adjust: 130%` in Chromium as a phone browser grows every
+ * text and no box, as the system font scale does), light and dark. Checks each one-line field's placeholder fits its
+ * text room in the drawn font (the browser's own measure); writes `search-wrap.json`, a misfit fails the run.
+ * `--search-wrap-before` names the shots `before-` and records without failing. The web clips where Android wraps:
+ * only a phone shows the wrap itself.
+ */
+async function searchWrapShots({ shoot, out }) {
+  const before = argv.includes("--search-wrap-before");
+  const checks = [];
+  for (const width of [360, 390]) for (const scale of [1, 1.3]) for (const theme of ["light", "dark"]) {
+    const name = `${before ? "before-" : ""}search-wrap-${width}-${scale === 1 ? "font100" : "font130"}-${theme}`;
+    // A rule on every element: react-native-web's reset pins text-size-adjust to 100% on the page's own elements.
+    const init = `document.addEventListener("DOMContentLoaded", () => { const s = document.createElement("style"); s.textContent = "* { -webkit-text-size-adjust: ${scale * 100}% !important; text-size-adjust: ${scale * 100}% !important; }"; document.head.appendChild(s); });`;
+    await shoot(name, { width, height: 844 }, theme, async page => {
+      await openHome(page); await page.setViewportSize({ width, height: 844 });
+      const search = page.locator('[data-follow-up-search="1"]').filter({ visible: true }).first();
+      await search.waitFor();
+      await page.waitForTimeout(600);
+      const fields = await page.evaluate(() => [...document.querySelectorAll("input")].filter(i => i.getClientRects().length && i.placeholder).map(i => {
+        const css = getComputedStyle(i);
+        const ctx = document.createElement("canvas").getContext("2d"); ctx.font = css.font;
+        const room = i.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight);
+        return { placeholder: i.placeholder, label: i.getAttribute("aria-label"), fontSize: css.fontSize, room: Math.round(room), text: Math.ceil(ctx.measureText(i.placeholder).width), fits: ctx.measureText(i.placeholder).width <= room + 0.5, height: i.getBoundingClientRect().height };
+      }));
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+      checks.push({ name, width, scale, theme, fields, overflow });
+      if (!before && (overflow || fields.some(f => !f.fits))) throw new Error(`${name}: ${overflow ? "horizontal overflow" : `placeholder over its room: ${JSON.stringify(fields.filter(f => !f.fits))}`}`);
+      const box = await page.locator('[data-follow-up-search="1"]').filter({ visible: true }).first().boundingBox();
+      return { x: 0, y: 0, width, height: Math.min(844, Math.ceil((box?.y ?? 0) + (box?.height ?? 0) + 260)) };
+    }, { init, mobile: true });
+  }
+  await fs.writeFile(join(out, `${before ? "before-" : ""}search-wrap.json`), JSON.stringify(checks, null, 2));
 }
 
 /**
